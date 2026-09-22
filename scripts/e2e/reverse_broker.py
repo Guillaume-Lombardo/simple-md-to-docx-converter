@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import secrets
@@ -13,6 +14,7 @@ import ssl
 import subprocess
 import sys
 import time
+from collections.abc import Mapping
 from itertools import islice
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -268,9 +270,38 @@ def _bounded_json(path: Path) -> dict:
     return value
 
 
-def _require_synthetic_binding(
-    state: dict, diagnostics: dict, attempt_id: UUID
-) -> None:
+def _write_bounded_json(path: Path, value: dict) -> None:
+    payload = (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    if len(payload) > _MAX_DIAGNOSTIC_BYTES:
+        raise RuntimeError("T73 diagnostic exceeds its byte limit")
+    temporary = path.with_suffix(f"{path.suffix}.{uuid4().hex}.tmp")
+    with temporary.open("xb") as stream:
+        stream.write(payload)
+    os.chmod(temporary, 0o600)
+    temporary.replace(path)
+
+
+def _runtime_state(inspected: Mapping[str, object]) -> dict[str, object]:
+    state = inspected.get("State")
+    if not isinstance(state, Mapping):
+        raise RuntimeError("T73 exact unit state is invalid")
+    projected = {
+        "status": state.get("Status"),
+        "running": state.get("Running"),
+        "paused": state.get("Paused"),
+        "exit_code": state.get("ExitCode"),
+    }
+    if (
+        not isinstance(projected["status"], str)
+        or type(projected["running"]) is not bool
+        or type(projected["paused"]) is not bool
+        or type(projected["exit_code"]) is not int
+    ):
+        raise RuntimeError("T73 exact unit state is invalid")
+    return projected
+
+
+def _synthetic_attempt_id(state: dict, diagnostics: dict) -> UUID:
     if (
         state.get("schema") != "t73-reverse-lifecycle-v1"
         or diagnostics.get("schema") != "t73-reverse-attempt-diagnostics-v1"
@@ -289,10 +320,16 @@ def _require_synthetic_binding(
     ):
         raise RuntimeError("T73 diagnostic attempt bound is invalid")
     matches = [row for row in rows if row.get("job_id") == target]
-    if len(matches) != 1 or matches[0].get("attempt_id") != str(attempt_id):
-        raise RuntimeError("T73 paused unit is not the synthetic recovery attempt")
+    if len(matches) != 1:
+        raise RuntimeError("T73 synthetic recovery attempt is not unique")
     if matches[0].get("attempt_number") != 1:
-        raise RuntimeError("T73 barrier did not capture the first attempt")
+        raise RuntimeError("T73 synthetic recovery first attempt is unavailable")
+    try:
+        return UUID(str(matches[0]["attempt_id"]))
+    except (KeyError, TypeError, ValueError) as error:
+        raise RuntimeError(
+            "T73 synthetic recovery attempt identity is invalid"
+        ) from error
 
 
 def _no_cgroup_removal(_path: Path) -> None:
@@ -311,16 +348,20 @@ def _resume_owned(
             command(("unpause", identity))
 
 
-def _await_binding(state: dict, path: Path, attempt_id: UUID, deadline: float) -> None:
+def _await_binding(state: dict, path: Path, deadline: float) -> UUID:
     while not path.with_suffix(".ready").exists() and time.monotonic() < deadline:
         time.sleep(0.01)
     if not path.with_suffix(".ready").exists():
         raise RuntimeError("T73 diagnostic binding readiness timed out")
-    _require_synthetic_binding(state, _bounded_json(path), attempt_id)
+    return _synthetic_attempt_id(state, _bounded_json(path))
 
 
-def watch_pause(
-    root: Path, state_path: Path, binding_path: Path, barrier: Path
+def watch_pause(  # noqa: PLR0912, PLR0915 - linear fail-closed test observer
+    root: Path,
+    state_path: Path,
+    binding_path: Path,
+    barrier: Path,
+    diagnostics_path: Path,
 ) -> None:
     """Fault-inject only a new signed, runtime-verified synthetic managed unit.
 
@@ -349,27 +390,60 @@ def watch_pause(
         hooks_directory=config.hooks_directory,
         cgroup_remove=_no_cgroup_removal,
     )
-    previous = {
-        unit.unit_id for unit in inventory.unacknowledged(limit=config.max_units)
-    }
     state = _bounded_json(state_path)
     ready = barrier.with_suffix(".ready")
     release = barrier.with_suffix(".release")
-    ready.write_text("ready\n")
     deadline = time.monotonic() + 30
+    started_ns = time.monotonic_ns()
     paused_id = None
+    snapshot = {
+        "schema": "t73-reverse-pause-state-v1",
+        "phase": "prearmed",
+        "target_attempt_id": None,
+        "inventory_unit_id": None,
+        "inventory_incarnation": None,
+        "runtime_container_id": None,
+        "runtime_attempt_id": None,
+        "runtime_incarnation": None,
+        "runtime_state_before_pause": None,
+        "runtime_state_on_failure": None,
+        "paused": False,
+        "failure": None,
+        "timings_millis": {
+            "prearmed": None,
+            "binding_resolved": None,
+            "inventory_observed": None,
+            "runtime_verified": None,
+            "paused": None,
+            "failed": None,
+        },
+    }
+
+    def elapsed_millis() -> int:
+        return (time.monotonic_ns() - started_ns) // 1_000_000
 
     def interrupted(_signum: int, _frame: object) -> None:
         raise InterruptedError("T73 pause observer interrupted")
 
     previous_handler = signal.signal(signal.SIGTERM, interrupted)
     try:
+        previous = {
+            unit.unit_id for unit in inventory.unacknowledged(limit=config.max_units)
+        }
+        runtime.discover(limit=config.max_units)
+        snapshot["timings_millis"]["prearmed"] = elapsed_millis()
+        ready.write_text("ready\n")
+        target_attempt = _await_binding(state, binding_path, deadline)
+        snapshot["phase"] = "binding-resolved"
+        snapshot["target_attempt_id"] = str(target_attempt)
+        snapshot["timings_millis"]["binding_resolved"] = elapsed_millis()
         while time.monotonic() < deadline:
             units = inventory.unacknowledged(limit=config.max_units)
             candidates = {
                 unit.unit_id: unit
                 for unit in units
                 if unit.unit_id not in previous
+                and unit.attempt_id == target_attempt
                 and unit.principal.principal_id == WORKER_ID
                 and unit.policy_revision == POLICY
                 and unit.policy_specification
@@ -377,6 +451,13 @@ def watch_pause(
                 and unit.runtime_incarnation is not None
             }
             if candidates:
+                if len(candidates) != 1:
+                    raise RuntimeError("T73 synthetic recovery unit is not unique")
+                unit = next(iter(candidates.values()))
+                snapshot["phase"] = "inventory-observed"
+                snapshot["inventory_unit_id"] = str(unit.unit_id)
+                snapshot["inventory_incarnation"] = str(unit.runtime_incarnation)
+                snapshot["timings_millis"]["inventory_observed"] = elapsed_millis()
                 for observed in runtime.discover(limit=config.max_units):
                     unit = candidates.get(observed.unit_id)
                     if unit is None:
@@ -391,12 +472,22 @@ def watch_pause(
                     runtime._verified_unit(
                         inspected, expected=unit, policy=config.policy
                     )
+                    snapshot["phase"] = "runtime-verified"
+                    snapshot["runtime_container_id"] = observed.container_id
+                    snapshot["runtime_attempt_id"] = str(observed.attempt_id)
+                    snapshot["runtime_incarnation"] = str(observed.incarnation)
+                    snapshot["runtime_state_before_pause"] = _runtime_state(inspected)
+                    snapshot["timings_millis"]["runtime_verified"] = elapsed_millis()
+                    _write_bounded_json(diagnostics_path, snapshot)
                     paused_id = observed.container_id
                     command(("pause", paused_id))
                     inspected = runtime._inspect(paused_id)
                     if inspected.get("State", {}).get("Paused") is not True:
                         raise RuntimeError("T73 exact unit did not pause")
-                    _await_binding(state, binding_path, unit.attempt_id, deadline)
+                    snapshot["phase"] = "paused"
+                    snapshot["paused"] = True
+                    snapshot["timings_millis"]["paused"] = elapsed_millis()
+                    _write_bounded_json(diagnostics_path, snapshot)
                     if (
                         runtime._inspect(paused_id).get("State", {}).get("Paused")
                         is not True
@@ -419,10 +510,33 @@ def watch_pause(
                     return
             time.sleep(0.02)
         raise RuntimeError("T73 exact synthetic unit pause timed out")
+    except Exception as error:
+        snapshot["phase"] = "failed"
+        snapshot["failure"] = type(error).__name__
+        snapshot["timings_millis"]["failed"] = elapsed_millis()
+        if paused_id is not None:
+            try:
+                snapshot["runtime_state_on_failure"] = _runtime_state(
+                    runtime._inspect(paused_id)
+                )
+            except Exception:
+                snapshot["runtime_state_on_failure"] = None
+        with contextlib.suppress(Exception):
+            _write_bounded_json(diagnostics_path, snapshot)
+        raise
     finally:
         signal.signal(signal.SIGTERM, previous_handler)
         if paused_id is not None:
-            _resume_owned(command, runtime, paused_id)
+            active_error = sys.exception()
+            try:
+                _resume_owned(command, runtime, paused_id)
+            except Exception as cleanup_error:
+                if isinstance(active_error, Exception):
+                    raise ExceptionGroup(
+                        "T73 pause observer and cleanup both failed",
+                        [active_error, cleanup_error],
+                    ) from None
+                raise
 
 
 def _proc_read(path: Path) -> bytes:
@@ -514,6 +628,7 @@ def main() -> None:
     parser.add_argument("--state", type=Path)
     parser.add_argument("--binding", type=Path)
     parser.add_argument("--barrier", type=Path)
+    parser.add_argument("--diagnostics", type=Path)
     parser.add_argument("--parent-pid", type=int)
     parser.add_argument("--signal", choices=("TERM", "KILL"))
     args = parser.parse_args()
@@ -522,9 +637,18 @@ def main() -> None:
             parser.error("prepare requires image repository, digest and worker host")
         prepare(args.root, args.image_repository, args.image_digest, args.worker_host)
     elif args.operation == "watch-pause":
-        if args.state is None or args.binding is None or args.barrier is None:
-            parser.error("watch-pause requires state, binding and barrier")
-        watch_pause(args.root, args.state, args.binding, args.barrier)
+        if any(
+            value is None
+            for value in (args.state, args.binding, args.barrier, args.diagnostics)
+        ):
+            parser.error("watch-pause requires state, binding, barrier and diagnostics")
+        watch_pause(
+            args.root,
+            args.state,
+            args.binding,
+            args.barrier,
+            args.diagnostics,
+        )
     elif args.operation == "signal":
         if args.parent_pid is None or args.signal is None:
             parser.error("signal requires parent PID and signal")

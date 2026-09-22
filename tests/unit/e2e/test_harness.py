@@ -991,9 +991,13 @@ def test_reverse_fault_injection_waits_for_bound_pause_and_joins_observers() -> 
     assert lifecycle.index('wait_reverse_marker "$barrier"') < lifecycle.index(
         'podman kill --signal KILL "$runtime"'
     )
-    assert lifecycle.index(
-        'chmod 0644 "/browser-session/$stem-binding.json"'
-    ) < lifecycle.index('touch "${binding%.json}.ready"')
+    assert 'chmod 0644 "/browser-session/$stem-binding.json"' not in lifecycle
+    assert 'touch "${binding%.json}.ready"' not in lifecycle
+    assert '--output-ready-marker "/browser-session/$stem-binding.ready"' in lifecycle
+    assert (
+        '--diagnostics "$temporary_directory/browser-artifacts/'
+        '$stem-pause-state.json"' in lifecycle
+    )
     verification = lifecycle[lifecycle.index("reverse_lifecycle_workflow verify") :]
     assert verification.index('chmod 0644 "$state"') < verification.index(
         'podman exec "$application_name"'
@@ -1003,10 +1007,16 @@ def test_reverse_fault_injection_waits_for_bound_pause_and_joins_observers() -> 
         "reverse_lifecycle_workflow prepare"
     )
     assert (
+        lifecycle.index('wait_reverse_marker "$diagnostics_watching"')
+        < lifecycle.index('wait_reverse_marker "${barrier%.json}.ready"')
+        < lifecycle.index('podman unpause "$runtime"')
+    )
+    assert (
         lifecycle.index('wait_reverse_marker "${barrier%.json}.ready"')
         < lifecycle.index('podman unpause "$runtime"')
         < lifecycle.index('wait_reverse_marker "$barrier"')
     )
+    assert '--ready-marker "/browser-session/$stem-binding-watching.json"' in lifecycle
     assert 'podman stop --time 15 "$runtime"' not in lifecycle
     assert "md_converter_reversion_broker_ready 0" in lifecycle
     cleanup = runner[runner.index("cleanup() {") : runner.index("trap cleanup EXIT")]

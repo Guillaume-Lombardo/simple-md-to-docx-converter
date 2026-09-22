@@ -190,3 +190,19 @@ Main CI `35716730560` passed every check at the exact merge commit, including bo
 E2E profiles, both storage suites, frontend, functional and document-engine validation. T87 will qualify and publish the final versioned three-image set
 through the protected release workflow before adopting the actual registry receipts and updating
 the docker-box test deployment. The local candidate identities above remain historical.
+
+## Failed 0.7.2 image qualification and approved continuation
+
+Release preparation PR #260 merged as `b28256486af4cf6d58c3aa06a27815c321df57f9`.
+PR CI `35719688632` and main CI `35723245238` passed every check. Automatic release
+`35723245369` published PyPI and the final tag/Release at that source, and an isolated public
+Python 3.14 installation passed import/version/CLI verification. Its complete standalone
+release-image qualification passed. Distributed broker-restart qualification failed because the
+fault-injection observer paused a new synthetic unit before binding the exact recovery attempt.
+The strict guard rejected the mismatch before crash injection; the exact interleaving is unknown.
+
+GHCR publication and staging-artifact retention were skipped, leaving no exact image bytes for
+recovery. These images are not a qualified public release. The user approved a targeted harness
+correction with regressions and independent review, followed by a narrowly verified `0.7.3`
+continuation. Existing public `0.7.1` pins and historical candidate identities remain unchanged
+until actual `0.7.3` publication, adoption and deployment are verified.

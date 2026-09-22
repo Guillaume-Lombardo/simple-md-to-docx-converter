@@ -26,7 +26,7 @@ evidence for the base version must remain valid. Scheduled, Release, and manual 
 this exception. A later revision at the unchanged new version also fails until the published image
 has been adopted.
 
-The sole historical skipped-container exception covers the failed `0.6.0` cutover publication:
+The historical skipped-container exception covers the failed `0.6.0` cutover publication:
 PyPI and the exact GitHub tag/Release exist at the reviewed `0.6.0` base source, Compose remains on
 the `0.5.2` digest verified against its publication receipt and anonymous GHCR manifest bytes, and
 no container staging artifact was created. Both backend and frontend repositories must return the
@@ -45,6 +45,26 @@ That exception is now historical: protected release run `33725900729` published 
 images from source `78cb86d450e940a3190591de62ee0ebade216d8b`, and the separate adoption change pins both verified
 registry digests in Compose, the quickstarts, and the durable cutover evidence. Normal fully aligned
 public-release checks apply after adoption.
+
+The second bounded exception covers the incomplete `0.7.2` release. Its PyPI package and final
+GitHub tag/Release are bound to source `b28256486af4cf6d58c3aa06a27815c321df57f9`.
+Automatic run `35723245369` built the three images and passed their supply-chain checks and the
+complete standalone qualification. Distributed broker-restart qualification then rejected a
+fault-injection observer that selected a different synthetic attempt. The strict identity guard
+failed closed before crash injection. This is a harness defect, not evidence of a successful
+release qualification; the exact runtime interleaving was not retained.
+
+Registry login, publication and pre-mutation artifact retention were skipped. The run retained
+only `python-release-v0.7.2`; no staged image bytes are available for the recovery dispatch.
+Do not rebuild or republish `0.7.2`. The approved continuation corrects the harness and permits
+only the exact `0.7.2` to `0.7.3` pending transition. Its checks bind the failed run, source, Python
+artifact, tag/Release and absence of container evidence; verify the current `0.7.1` public receipts;
+and require structured absence of both the version and source tags in all three GHCR repositories.
+An authorization denial alone never proves absence. Only the frontend and reverse-attempt
+repositories may use the authenticated fallback with the existing ephemeral upstream identity;
+backend anonymous denial rejects the exception. The fallback still requires the exact missing-
+manifest response. Untrusted or unverifiable states fail closed. A successful `0.7.3` release must publish
+one fresh matched three-image set and adopt its actual public receipts before unrelated work.
 
 The `0.6.2` patch followed that normal paired-release path. Protected release run `34648944379`
 published the Python artifacts and paired images from source
@@ -227,12 +247,12 @@ replacing the established trust model. The frontend package identity is
 `v<version>` tag, GitHub Release, and protected human gate with the backend but has its own registry
 manifest digest, SBOMs, scan report, archive-to-registry receipt, and provenance.
 
-One release is deployable only when the PyPI artifact and both image receipts agree on version and
-source SHA, both public digests are anonymously readable, and the release evidence manifest binds
-the pair plus the frontend lockfile digest. T64 completes parity and the rollback rehearsal before
+One release is deployable only when the PyPI artifact and every required image receipt agree on
+version and source SHA, all public digests are anonymously readable, and the release evidence
+manifest binds the applicable set plus the frontend lockfile digest. T64 completes parity and the rollback rehearsal before
 removing the legacy renderer from candidate source. The `0.6.1` continuation source satisfies that
 gate; the release workflow builds and serializes each final image once, runs the complete rootless acceptance matrix
-against those exact staged bytes, and publish the same bytes. It must not test one image and rebuild
+against those exact staged bytes, and publishes the same bytes. It must not test one image and rebuild
 another after legacy removal. If publication is partial, recover the missing image/evidence from
 the retained exact staged bytes without rebuilding, or fail the release. Never pair an older
 frontend with a newer backend, infer a digest, or use a mutable tag as rollback identity.

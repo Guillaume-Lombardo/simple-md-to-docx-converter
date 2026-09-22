@@ -803,7 +803,7 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T84 | Continue responsibility-based decomposition of application Python modules above 1,000 lines, preserving imports, transaction/proof boundaries and the single private anydoc adapter | T79 |
 | T85 | Filter owner-scoped conversion history by output family and expiration before pagination, avoiding browser history scans | T12, T13, T45, T62, T82 |
 | T86 | Diagnose dependency CI failures and make immutable image acquisition resilient to transient transport failures | T22, T27 |
-| T87 | Validate final documentation, publish patch 0.7.2 with the matched three-image set, and adopt verified public receipts | T22, T83 |
+| T87 | Validate final documentation, publish patch 0.7.3 after failed 0.7.2 image qualification with the matched three-image set, and adopt verified public receipts | T22, T83 |
 
 The next priorities approved on 2026-09-21 are T50 qualification, then T73 reverse-conversion
 qualification, T85 history filtering, T86 CI/dependency reliability, and T83 structured PowerPoint
@@ -814,7 +814,11 @@ otherwise independent tickets or authorize a new public release version.
 
 On 2026-09-22, the user separately authorized T87: validate the final documentation, then publish
 patch 0.7.2 through the existing protected workflow, verify the complete public image set, adopt
-its exact registry receipts, and clean up the merged work branches. T87 completes T73's public
+its exact registry receipts, and clean up the merged work branches. The 0.7.2 Python artifacts and
+tag were published, but container qualification failed before image publication or artifact
+retention. The user subsequently authorized correcting the T73 harness and publishing 0.7.3 under
+a narrowly verified 0.7.2 failed-container continuation, preserving immutable 0.7.2 history and the
+existing 0.7.1 deployment pins until new public receipts exist. T87 completes T73's public
 reverse-attempt image criterion after technical qualification; it does not depend on that
 publication criterion being completed beforehand. T74 remains deferred.
 
