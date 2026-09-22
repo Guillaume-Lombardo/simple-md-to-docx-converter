@@ -347,7 +347,17 @@ def _wait_job(context: CommandContext, writer: OutputWriter, request: _Request) 
             raise CliError(
                 "wait_timeout", "The reverse job did not finish before the timeout."
             )
-        response = _client(context, request, timeout=remaining).get_reversion(job_id)
+        try:
+            response = _client(context, request, timeout=remaining).get_reversion(
+                job_id
+            )
+        except CliError as error:
+            if error.code == "network_error" and time.monotonic() >= deadline:
+                raise CliError(
+                    "wait_timeout",
+                    "The reverse job did not finish before the timeout.",
+                ) from error
+            raise
         job = _job(
             _payload(
                 response, expected_status=_SUCCESS, fallback="reversion_wait_failed"

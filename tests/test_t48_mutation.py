@@ -20,6 +20,7 @@ from scripts.ci.run_mutation_campaign import (
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "mutation/domains.json"
+CI_WORKFLOW = ROOT / ".github/workflows/ci.yml"
 
 
 def _write_manifest(tmp_path: Path, raw: object) -> Path:
@@ -64,6 +65,18 @@ def test_mutmut_generation_is_bounded_to_reviewed_manifest_modules() -> None:
 
 
 @pytest.mark.unit
+def test_mutmut_uses_project_import_configuration_without_coverage_gates() -> None:
+    configuration = tomllib.loads(
+        (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )["tool"]["mutmut"]
+
+    assert "--no-cov" in configuration["pytest_add_cli_args"]
+    assert "-c" not in configuration["pytest_add_cli_args"]
+    assert "/dev/null" not in configuration["pytest_add_cli_args"]
+    assert configuration["also_copy"] == ["scripts"]
+
+
+@pytest.mark.unit
 def test_observability_domain_preserves_the_preexisting_bounded_target() -> None:
     manifest = load_manifest(MANIFEST)
     observability = manifest.domains[0]
@@ -99,6 +112,26 @@ def test_reverse_result_domain_is_exact_and_risk_reviewed() -> None:
     )
     assert "owner scoping" in reverse.review_notes[0]
     assert "same-size wrong content" in reverse.review_notes[0]
+
+
+@pytest.mark.unit
+def test_required_ci_gate_runs_affected_domains_and_retains_a_report() -> None:
+    workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+    assert "name: CI / mutation" in workflow
+    assert (
+        "needs: [detect, light, python-tests, python-coverage, domain-plan, heavy, mutation]"
+        in workflow
+    )
+    assert (
+        "MUTATION_MODE: ${{ (github.event_name == 'schedule' || github.event_name == 'release' || github.event_name == 'workflow_dispatch') && 'all' || 'changed' }}"
+        in workflow
+    )
+    assert (
+        '--mode "$MUTATION_MODE" --base-sha "$BASE_SHA" --head-sha "$HEAD_SHA"'
+        in workflow
+    )
+    assert "path: mutation-results/report.json" in workflow
+    assert '[[ "$MUTATION_RESULT" == "success" ]]' in workflow
 
 
 @pytest.mark.unit
@@ -174,6 +207,35 @@ def test_changed_paths_select_only_affected_domains_and_global_files_select_all(
         select_domains(manifest, mode="changed", changed_paths=("pyproject.toml",))
         == manifest.domains
     )
+
+
+@pytest.mark.unit
+def test_changed_mode_returns_a_successful_not_affected_report(
+    tmp_path: Path, mocker
+) -> None:
+    artifact = tmp_path / "report.json"
+    mocker.patch.object(campaign, "changed_paths", return_value=("docs/unrelated.md",))
+
+    assert (
+        main(
+            [
+                "--mode",
+                "changed",
+                "--base-sha",
+                "base",
+                "--head-sha",
+                "head",
+                "--artifact",
+                str(artifact),
+            ]
+        )
+        == 0
+    )
+
+    report = json.loads(artifact.read_text(encoding="utf-8"))
+    assert report["status"] == "not-affected"
+    assert report["selected"] == 0
+    assert report["killed"] == 0
 
 
 @pytest.mark.unit

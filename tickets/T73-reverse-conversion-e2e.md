@@ -53,9 +53,11 @@ backend, frontend, and reverse-attempt images in both storage profiles.
   deterministic ordering/digest, private download headers, and the T70-generated content-free
   traceability manifest.
 * Prove with two regular users and one administrator that reverse source, status, cancellation, and
-  result routes are owner-only and non-enumerating. Verify that administrator operational metadata
-  is separately authorized, audited, content-free, and cannot reveal filenames, Markdown, assets,
-  content-derived digests, or a download capability.
+  result routes are owner-only and non-enumerating, including administrator denial on those routes.
+  Qualify the existing content-free operational metrics and the existing authorized administrator
+  surface exposing immutable, content-free audit records; neither surface may reveal filenames,
+  Markdown, assets, content-derived digests, or a download capability. A new reverse-job
+  administrator view is not required.
 * Extend selective and scheduled CI domains, SBOM/vulnerability/license evidence, mutation scope
   where risk-ranked, and release-install verification for the native anydoc dependency.
 * Complete user, API, operations, security, configuration, supported-format, limitation,
@@ -107,6 +109,25 @@ backend, frontend, and reverse-attempt images in both storage profiles.
 
 ## Progress
 
+* 2026-09-22: The clean canonical run at `27eba5082bb299f343ab3ab49420dbea65e7d9e3` passed 4,525
+  tests, with 56 engine-marked tests deselected and 11 warnings in 1,662.28 seconds. Coverage was
+  94.97% overall, 91.23% branches (6,408/7,024), and 100% of changed lines (15/15) from base
+  `582886e5c87799b6de19a5fc3c0369916055f7a0`; the earlier stale harness-order failure is now closed by the full run. A local normal merge
+  of reviewed T48 head `1bb4ca1b55588dc7b254d2a006b3d2df764a1056` was independently approved with
+  207 policy tests and global static checks, with no application-source diff against the canonical
+  result. The local adoption does not imply T48 main/PR completion. The actual 28-target campaign
+  then killed all 28 mutants in 55 seconds, with all six failure statuses at zero and domain counts
+  4/5/5/6/5/3; its generated report remains uncommitted. T50 and T85 closure mirrors and the T74
+  Backlog mirror are in the tracking scope. Remaining gates are exact final PR/main CI, including
+  the 56 engine-marked cases, verified main integration, and separate user clarification on the
+  literal public image publication criterion; no release is authorized.
+* 2026-09-22: The user selected qualification of the existing administrator surfaces. The acceptance
+  criterion now requires owner-only, non-enumerating reverse routes with administrator denial,
+  content-free operational metrics, and the existing authorized administrator surface exposing
+  immutable, content-free audit records. It does not require a new reverse-job administrator view.
+  This resolves the earlier scope ambiguity without waiving the criterion. Remaining current gates are the actual 28-mutant
+  campaign, engine-marked CI, exact-head and exact-main checks, and any release/publication decision;
+  T73 remains In Progress.
 * 2026-09-21: Final-source local qualification completed both full, unmodified profile workflows at
   `c6ff8b1e3913eda1c8103260d37bce00ca106567` against one matched backend/frontend/reverse-attempt
   candidate image set; each profile exited 0. The tracked runner hash, exact local image IDs and

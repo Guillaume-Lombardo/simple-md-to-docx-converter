@@ -2,7 +2,7 @@
 ticket: T48
 linear_id: G1L-424
 linear_url: https://linear.app/g1lom/issue/G1L-424/t48-expand-mutation-testing-across-critical-invariants
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -45,6 +45,23 @@ and verify it on main under the existing review process. This scope update does 
 workflow, change branch protection, or declare T48 complete.
 
 ## Progress
+
+* 2026-09-21: The mutation job passed the old PR head, including all 25 selected mutants,
+  but both final-image E2E jobs then failed on T86's stale six-package curl/OpenSSL RPM inventory.
+  The T86 correction is merged into this branch; the final exact-head CI run remains pending.
+
+* 2026-09-21: Corrected the activated campaign's generated-workspace test setup. Mutmut now
+  retains the project Pytest configuration without coverage gates and copies the repository-local
+  `scripts` package required by `conftest.py` and the branch-coverage plugin. A real local campaign
+  in the generated `mutants/` workspace killed all 25 selected mutants with every strict failure
+  status at zero.
+
+* 2026-09-21: Started repository-owned CI integration on branch
+  `ci/T48-mutation-gate`. The delivery adds affected-domain mutation testing to the
+  existing required `CI / gate`, retains a bounded scheduled/manual full campaign,
+  preserves strict selected-mutant failure statuses, and documents the accepted
+  pull-request mutability limitation. Workflow-policy changes require independent
+  review.
 
 * 2026-09-21: The user approved retaining mutation testing in repository-owned CI and abandoned
   contributor-immutable enforcement and all organization/Enterprise/transfer prerequisites.
@@ -102,8 +119,8 @@ workflow, change branch protection, or declare T48 complete.
 
 ## Coordination
 
-* Status: Backlog; repository-owned mutation CI integration and verification remain separate
-  follow-up work. No organization-level prerequisite remains, and T48 does not block T50 or T73.
+* Status: In Progress; repository-owned mutation CI integration and verification are underway.
+  No organization-level prerequisite remains, and T48 does not block T50 or T73.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.
