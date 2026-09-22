@@ -109,6 +109,18 @@ backend, frontend, and reverse-attempt images in both storage profiles.
 
 ## Progress
 
+* 2026-09-22: The clean canonical run at `27eba5082bb299f343ab3ab49420dbea65e7d9e3` passed 4,525
+  tests, with 56 engine-marked tests deselected and 11 warnings in 1,662.28 seconds. Coverage was
+  94.97% overall, 91.23% branches (6,408/7,024), and 100% of changed lines (15/15) from base
+  `582886e5c87799b6de19a5fc3c0369916055f7a0`; the earlier stale harness-order failure is now closed by the full run. A local normal merge
+  of reviewed T48 head `1bb4ca1b55588dc7b254d2a006b3d2df764a1056` was independently approved with
+  207 policy tests and global static checks, with no application-source diff against the canonical
+  result. The local adoption does not imply T48 main/PR completion. The actual 28-target campaign
+  then killed all 28 mutants in 55 seconds, with all six failure statuses at zero and domain counts
+  4/5/5/6/5/3; its generated report remains uncommitted. T50 and T85 closure mirrors and the T74
+  Backlog mirror are in the tracking scope. Remaining gates are exact final PR/main CI, including
+  the 56 engine-marked cases, verified main integration, and separate user clarification on the
+  literal public image publication criterion; no release is authorized.
 * 2026-09-22: The user selected qualification of the existing administrator surfaces. The acceptance
   criterion now requires owner-only, non-enumerating reverse routes with administrator denial,
   content-free operational metrics, and the existing authorized administrator surface exposing

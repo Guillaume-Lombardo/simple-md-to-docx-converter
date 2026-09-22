@@ -97,22 +97,30 @@ Scan output and bundle members remain in the retained local/operator evidence bu
 
 ## Local canonical checks and remaining work
 
-At source `5f90757aeadd4d15273ae6524379804f099f3781`, the canonical full Python invocation reported
-4,520 passed and one failed assertion: a CLI harness-order test expected one invocation after the
-intentional held-queue phase added a second. It also reported 56 engine-marked tests deselected and
-11 warnings. The full invocation therefore did not pass. The test was corrected to assert the normal
-and held-queue invocation contexts independently. At final source `c6ff8b1`, all 44 focused CLI and
-harness tests passed, and global Ruff format/check and `ty` checks passed. Coverage from the
-canonical run was 94.97% overall, 91.23% branch coverage (6,406/7,022), and 100% of changed
-application lines (15/15).
+The clean canonical run at `27eba5082bb299f343ab3ab49420dbea65e7d9e3` completed with 4,525 passed,
+56 engine-marked tests deselected, and 11 warnings in 1,662.28 seconds. Coverage was 94.97%
+overall and 91.23% branches (6,408/7,024), with 100% changed application coverage (15/15) from
+base `582886e5c87799b6de19a5fc3c0369916055f7a0`. The earlier `5f90757` stale harness-order assertion is retained as history; the full
+run now closes that failure. A local normal merge of reviewed T48 head `1bb4ca1b55588dc7b254d2a006b3d2df764a1056`
+was independently approved with 207 policy tests and global static checks, with no application
+source diff against the canonical result. This local adoption does not imply T48 is on `main` or
+that PR #253 is complete.
 
 The user selected qualification of the existing administrator surfaces. The criterion therefore
 requires owner-only, non-enumerating reverse routes with administrator denial, content-free
 operational metrics, and the existing authorized administrator surface exposing immutable,
-content-free audit records; it does not require a new reverse-job administrator view. The existing final-image evidence covers
-the owner/admin route denial and content-free operational behavior recorded by the current E2E
-workflow; no new endpoint is inferred here. The reviewed mutation manifest now contains 28 mutants,
-but the actual mutation campaign has not run. The 56 engine-marked tests remain unverified locally,
-and exact-head PR CI and exact-main checks remain pending. T73 remains In Progress. Public image
-publication and release qualification remain outside this evidence and require separately authorized
-release work.
+content-free audit records. It does not require a new reverse-job administrator view. The existing
+final-image evidence covers the owner/admin route denial and content-free operational behavior
+recorded by the current E2E workflow; no new endpoint is inferred here.
+
+The actual mutation campaign completed in 55 seconds at clean source
+`6fb3f701bfacbc151850055ae2ceaac16b8863cb`, with unchanged source guards before and after.
+All 28 mutants were killed; all six failure statuses were zero. The six domains selected
+4, 5, 5, 6, 5, and 3 mutants. The retained report SHA-256 is
+`bbe887d9d520c0dd83f87bb9152bc5c7183173998e04657f38889d0d697103e0`.
+The generated report is retained in the operator evidence bundle, not committed.
+
+Remaining gates are exact final PR/main CI, including the 56 engine-marked cases, and verified
+main integration. T50 and T85 closure mirrors and the T74 Backlog mirror are included in surrounding
+tracking scope. The public image publication criterion still awaits user clarification; no release
+is authorized. T73 remains In Progress.
