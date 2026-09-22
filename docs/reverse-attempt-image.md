@@ -72,11 +72,9 @@ checksum file before deployment; configure the broker with exactly the digest in
 `images.reverse_attempt.registry_manifest_digest`. Historical schema-1 manifests contain only the
 backend/frontend pair and do not authorize an attempt-image selection.
 
-Local builds and CI candidate bundles do not establish public publication. Technical final-image
-qualification is complete for T73 on `main` `31f19243ebe25345dec2c3bde843a5caf261d53a` (CI
-`35702469912`), and the historical T83 `4888cd067e848c59162d801c2399be99b7f81969` candidate passed
-both standalone and distributed profiles. Qualification of the new inventory-snapshot fix remains in
-progress. The T87/G1L-586 0.7.2
-release is authorized but not published, so no public third-image digest is selected here and existing
-0.7.1 pins remain authoritative. The documented image restrictions describe the container contract;
-exact-image CPU, memory, thread, and concurrency measurements do not establish a production envelope.
+Local builds and CI candidate bundles do not establish public publication. No public third-image
+digest is selected here; use only verified published release receipts. The documented image
+restrictions describe the container contract; exact-image CPU, memory, thread, and concurrency
+measurements do not establish a production envelope. See the
+[reverse qualification evidence](evidence/t73-reverse-conversion-qualification.md) for candidate
+history and validation boundaries.

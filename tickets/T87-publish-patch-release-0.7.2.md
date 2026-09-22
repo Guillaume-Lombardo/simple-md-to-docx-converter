@@ -39,3 +39,15 @@ The user explicitly requested final documentation validation followed by a patch
 ## Progress
 
 2026-09-22: Documentation and release-readiness audits started while the authorized PR #259 inventory snapshot correction is implemented. No version change or public publication has occurred.
+
+2026-09-22: PR #259 merged as `41329266140ce0a49a74cc8eab559e07a03df605` after successful
+exact-head CI `35713604587`, independent review and 4,698 passing local tests. Prepare the reversible
+release branch from that main commit while main CI `35716730560` runs. Publication remains gated on
+terminal successful prerequisite main CI and the release PR's own checks; no main qualification or
+public publication is claimed early.
+
+2026-09-22: Prerequisite main CI `35716730560` completed successfully at
+`41329266140ce0a49a74cc8eab559e07a03df605`. Independent version and documentation reviews
+approved the release preparation. The 177 focused release/version/OpenAPI tests and 159
+documentation/policy tests passed, as did static checks and exact version-transition gates.
+Public deployment pins remain on 0.7.1 until verified 0.7.2 publication receipts exist.

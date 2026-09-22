@@ -120,7 +120,18 @@ All 28 mutants were killed; all six failure statuses were zero. The six domains 
 `bbe887d9d520c0dd83f87bb9152bc5c7183173998e04657f38889d0d697103e0`.
 The generated report is retained in the operator evidence bundle, not committed.
 
-Remaining gates are exact final PR/main CI, including the 56 engine-marked cases, and verified
+At that qualification stage, remaining gates were exact final PR/main CI, including the 56 engine-marked cases, and verified
 main integration. T50 and T85 closure mirrors and the T74 Backlog mirror are included in surrounding
-tracking scope. The public image publication criterion still awaits user clarification; no release
-is authorized. T73 remains In Progress.
+tracking scope. Public image publication had not yet been authorized.
+
+## Main verification and release follow-up
+
+PR #258 merged as `31f19243ebe25345dec2c3bde843a5caf261d53a`; exact-main CI `35702469912`
+passed every check, including both complete reverse E2E profiles and document engines. The user
+subsequently authorized T87 to publish patch 0.7.2 with the matched three-image set and adopt its
+actual public receipts. T73 remains In Progress until that public-image criterion is verified.
+
+The later inventory snapshot correction and fixture-image retention fix merged through PR #259
+as `41329266140ce0a49a74cc8eab559e07a03df605`. Its exact-head CI `35713604587` passed all
+checks and both profiles; main CI `35716730560` also passed every check. These newer checks do not relabel the
+historical local images recorded above.

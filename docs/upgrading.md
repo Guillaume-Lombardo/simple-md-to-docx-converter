@@ -64,6 +64,26 @@ point a restored database at a newer or unrelated object-store version. A
 rollback is complete only after readiness and representative stable-object
 checks succeed on the restored previous version.
 
+### Reverse-conversion migration 19
+
+The target release that introduces migration 19 persists reverse-extraction options. Before starting
+it, create and verify the profile-consistent database and object backup required above, record the
+running broker configuration and native-broker package/virtual environment, and drain reverse work.
+Keep the application, frontend, reverse-attempt images, and native-broker executable at the same
+target release version and bind the three images to one verified schema-2 `release-images.json`.
+
+The reverse broker remains a host-native, externally isolated service; do not replace it with a
+container. Ordinary quickstarts do not configure the external broker. Configure its immutable
+attempt-image digest only from the verified release manifest, then require broker `READY` and one
+authenticated reverse smoke workflow before reopening reverse admission. Follow the current published
+quickstart and release receipts when selecting public image pins.
+
+If migration 19 or the matched reverse set fails, stop admission, restore the pre-upgrade database
+and object backup into isolated targets, restore the prior application/frontend/reverse image set,
+native-broker executable/virtual environment, and broker configuration together, then verify
+readiness before returning traffic. Do not mix a new broker policy or attempt image with a restored
+older application release.
+
 ### Next.js cutover releases
 
 A release containing the T64 cutover adds a separately published frontend
