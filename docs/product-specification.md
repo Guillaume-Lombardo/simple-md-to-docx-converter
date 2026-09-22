@@ -2,7 +2,7 @@
 
 **Status:** Functional, technical, and autonomous-development specification
 
-**Date:** September 3, 2026
+**Date:** September 22, 2026
 
 **Runtime target:** UBI 9 container, Python 3.14, rootless Podman, and OpenShift
 
@@ -12,12 +12,15 @@
 
 Build a Web service that converts Markdown documents to DOCX, PDF, or both and, through an
 experimental reverse workflow, converts supported office documents to structured Markdown through
-a browser interface and a documented HTTP API.
+a browser interface and a documented HTTP API. An optional, permission-gated Composer workspace
+supports guided document preparation and controlled revisions without changing the ordinary
+conversion requirement for a language-model connection.
 
 The service accepts a standalone `.md` file or a `.zip` archive containing Markdown and local resources. Users may select an administrable Word template or use Pandoc's native default reference document. The service resolves and normalizes local images, renders Mermaid diagrams locally, applies the selected document-style mode, and retains source and result files only for the configured asynchronous-processing and download period.
 
-The product includes Convert and experimental Revert workspaces, template administration, local
-authentication, two configurable storage profiles, a hardened UBI 9 image, selective GitHub
+The product includes Convert and experimental Revert workspaces, the optional Composer workspace,
+template administration, local authentication, two configurable storage profiles, a hardened UBI 9
+image, selective GitHub
 Actions workflows, and an autonomous Codex development workflow.
 
 ## 2. Fixed decisions
@@ -29,6 +32,9 @@ Actions workflows, and an autonomous Codex development workflow.
 | API boundary | FastAPI remains the sole authority for business behavior, authentication, authorization, persistence, conversions, templates, accounts, audit, health, readiness, metrics, and OpenAPI under exact `/api/v1`, `/api/v1/**`, and the documented operational routes |
 | Web migration target | A Next.js, TypeScript, and Tailwind CSS application under `web/` owns browser pages and assets after the staged T58–T64 migration; the existing FastAPI-rendered frontend remains active until verified cutover |
 | Browser boundary | Browser pages and both exact `/api/v1` and `/api/v1/**` use one public origin; Next.js route handlers must not duplicate FastAPI business or authorization rules |
+| Composer authority | FastAPI alone owns Composer authorization, connection and secret handling, model calls, knowledge filtering, proposal validation, revision publication, and Office edits; Next.js presents authorized data and sends same-origin requests |
+| Composer availability | A configured, enabled, and authorized OpenAI-compatible LLM connection is required to start Composer work; ordinary conversions never require one. A transient LLM failure must not remove authorized access to retained drafts, revisions, or exports |
+| Composer document execution | Backend-validated, bounded structured operations on copies of real DOCX/PPTX; no arbitrary shell, code execution, or document-controlled network access; document engines remain network-isolated |
 | Frontend topology | A separate stateless rootless Next.js process serves browser pages behind the same TLS router as FastAPI; browsers call FastAPI directly through relative same-origin exact `/api/v1` or `/api/v1/**` URLs, and the frontend has no business-service or persistence credentials |
 | Frontend runtime baseline | Linux/AMD64 UBI 9 Node.js 24 builder and minimal runtime pinned by digest, resolving to Node.js `24.19.0`; verified Corepack `0.36.0` selects pnpm `11.25.0`; Next.js `16.3.4`, TypeScript `6.0.3`, and Tailwind CSS `4.3.3` remain exact and root-lockfile-integrity pinned as reviewed on 2026-09-03 |
 | Processing | Asynchronous jobs with a persistent queue and status API |
@@ -125,13 +131,16 @@ Embedding source in the PPTX itself and full visual round-trip fidelity remain e
 The primary navigation displays the frontend build's Markweave release version as a
 small subscript beside the product name, derived from `pyproject.toml`.
 
-Provide a login page and three main browser workflows. The target implementation is the Next.js,
-TypeScript, and Tailwind CSS application under `web/`; the current server-rendered pages remain the
-production implementation until T64 completes parity, rootless E2E verification, and cutover:
+Provide a login page, the existing quick-conversion workflows, and the optional Composer workspace
+specified in section 3.6. The production implementation is the Next.js, TypeScript, and Tailwind
+CSS application under `web/`:
 
 - **2docx:** upload or drag-and-drop, choose Pandoc's default or search and select a template,
   choose output, create a job, poll with progressive backoff, cancel, inspect status, download, and
   display accessible English errors.
+- **2pptx:** prepare editable PowerPoint slides from Markdown or the documented Marp subset,
+  select the optional typed reference template, submit a durable job, and download PPTX or its
+  portable source package as specified in section 3.1.1.
 - **templates:** list visible templates and owners, filter “my templates,” create, download, rename, replace, restore, delete, and choose the preferred template.
 - **2md (Experimental):** upload or drag-and-drop a supported office document, create a local
   document-to-Markdown job, poll with progressive backoff, cancel, inspect status, download the
@@ -157,6 +166,10 @@ supported. Before the frontend catch-all, the public router returns a content-fr
 `/_frontend/health`, every descendant, and decoded or case-varied equivalents. Only platform probes
 may call the exact internal `/_frontend/health/live` and `/_frontend/health/ready` paths through the
 frontend Service's separate probe port; the public router reaches only the page port.
+
+T90 adds the named `/composer` browser route under the same frontend routing, cookie-stripping,
+same-origin API, CSP, and unknown-path rules. No Composer route is served by FastAPI-rendered HTML
+or by a Next.js API proxy.
 
 The router removes the complete `Cookie` request header before every request whose selected upstream
 is the frontend, regardless of method or route class, including named pages, `/_next/**`, and the
@@ -214,6 +227,11 @@ error, saturation, and draining responses, are outside nonce generation and fres
 T60 implements the interception hook as `web/proxy.ts` with the named `export function proxy`;
 structural and production-build tests reject the deprecated `middleware.ts` filename or
 `middleware` export.
+
+The sole later exception is the approved Composer native-preview boundary in section 3.6.5:
+only its parent route adds `frame-src 'self'`, and only its opaque sandboxed child may use inline
+styles under a separate CSP. The parent's script/style rules above remain unchanged, and no other
+page or frame receives that exception.
 
 The public TLS router adds exactly `Strict-Transport-Security: max-age=31536000` and
 `Permissions-Policy: camera=(), geolocation=(), microphone=(), payment=(), usb=()` to every HTTPS
@@ -445,6 +463,184 @@ state, safe failure category, attempt/lease state, timing, and byte counts. Thos
 source or result bytes, original filename, Markdown, asset name or bytes, content-derived digest, or
 download capability, and every administrator access follows the existing audit contract.
 
+### 3.6 Composer workspace (T88–T93)
+
+Composer is an optional guided workspace adjacent to Convert. The header has an explicit English
+**Convert | Composer** selector near the logo. Convert retains the independent `2docx`, `2pptx`,
+and `2md` quick workflows and their current semantics. Opening a source or result in Composer
+preserves the selected file, uploaded assets, unsent inputs, and saved draft across navigation and
+refresh. A handoff imports or references an immutable authorized source; it does not silently move,
+delete, overwrite, or turn a quick conversion into a model call. A user can identify which source,
+draft, and exact revision is open. The handoff retains proof that the original bytes passed the
+required malware boundary; an unattested or changed copy is a new upload and is scanned before
+validation or durable persistence.
+
+The backend advertises distinct states for no configured connection, disabled connection, lack of
+user authorization, available connection, and temporarily unavailable connection. Starting or
+resuming model-assisted work requires an enabled connection and current authorization. A temporary
+provider outage leaves authorized users able to inspect and edit retained drafts, review history,
+restore revisions, and download existing artifacts; new model-dependent steps report a safe,
+retryable error. Disabling a connection or revoking access stops further calls and stale in-flight
+results. Existing owner data remains reachable through an authorized read-only archive path unless
+ordinary document ownership is separately revoked. Connection health never becomes a dependency
+of ordinary conversion readiness, existing conversion jobs, or downloads. The UI may display
+Composer as unavailable to users without an eligible connection; it must explain the state without
+revealing another user's connection metadata.
+
+#### 3.6.1 Connection and data boundary
+
+FastAPI calls OpenAI-compatible APIs, including self-hosted vLLM or LiteLLM, through an explicit
+connection selected from those authorized for the current user. An administrator can configure an
+instance connection with a defined access policy; a user may configure a personal connection only
+when that capability is granted. An instance connection may use one shared server-held identity or
+require each authorized user to provide an individual server-held credential. A personal
+connection is private to its owner. The setup flow supports a bounded connection test, discovery
+or explicit selection of a permitted model, an API key and/or client certificate with private key
+for mTLS, and an explicitly trusted internal CA bundle. Never send a private key, API key, or
+client certificate to the browser after submission or return it through a read API. Protect secrets
+at rest with operator-managed key material outside the repository, image, and application database;
+the backup/restore plan must preserve access to that key through the operator's secret manager;
+restrict write/rotate/revoke rights and audit those operations without recording values. A
+connection test uses the same destination, TLS validation, credentials, policy, and bounded call
+path as production use. T89 includes a simple browser setup and test flow for authorized instance
+or personal configuration, model selection, write-only credential entry, rotation/revocation, mTLS
+client material, and internal CA management; FastAPI retains validation and secret handling. Do
+not silently turn off certificate validation.
+
+Operators explicitly allow connection destinations. Validate scheme, hostname, port, resolved
+addresses, redirects, and re-resolution against that policy, block document-supplied URLs and
+server-side request forgery, and set bounded payload, response, token, concurrency, and timeout
+limits. Only the backend's designated LLM egress component may reach those destinations; Pandoc,
+LibreOffice, Chromium/Mermaid, the isolated reverse attempt, and document-editing executors keep
+their existing network isolation. Before submission, the user can inspect the selected
+endpoint/model, the exact source excerpts and approved values selected for transmission, and the
+identities of author entries and cited library excerpts. Log only content-free operational/audit
+metadata; never put prompts, responses, document contents, credential material, or private
+citation text in logs. Retrieval permissions are checked before material is assembled for
+transmission and again before executing an asynchronously returned result. Prompt text and
+retrieved material have no
+authority to expand permissions, destinations, tool schemas, or document access.
+
+The real qualification endpoint `https://litellm.g1lom.xyz` and a cost-conscious model selected
+from its actual catalog are an operational test preference for T93, not a hardcoded provider,
+default model, or product requirement. No credential or model name is inferred from that URL.
+
+#### 3.6.2 Conversation, proposals, and human control
+
+Composer places chat on the left and a DOCX, PDF, or PPTX preview on the right. It accepts Markdown
+files or text dropped into the chat, exposes only authorized model choices, and asks for missing
+information through messages or structured forms. Its expandable step cards show the result,
+source or citation, proposed changes, validation state, and safe errors. The assistant may propose
+author details, findings, decisions, and other fields, but must distinguish supplied facts,
+cited evidence, user-approved data, uncertain inferences, and unanswered questions. Ambiguous or
+missing facts require a question or an explicitly unresolved field; the system must not present
+invented facts as established. A proposal remains pending until the user accepts, edits, or rejects
+it. Rejection produces no document mutation; editing records the human value and provenance.
+Later model output cannot silently overwrite a human correction or accepted value. Concurrent
+human edits and delayed model results use revision preconditions and require review or rebase.
+
+A model call is a bounded asynchronous step. Persist the conversation and pending question, then
+release the execution slot and any queue lease while awaiting a human answer; resuming is a new
+authorized step with a fresh permission and revision check. Cancellation, invalid model responses,
+provider timeouts, partial results, restart, retry, and duplicate delivery must not publish an
+unapproved change. Approved source content, field values, selected immutable template version,
+render options, and model identity are frozen per generation revision. Regeneration from those
+approved inputs is deterministic within the documented engine/version contract and makes no LLM
+call; a later model suggestion creates a new proposal and cannot change the frozen revision.
+
+#### 3.6.3 Knowledge and templates
+
+T91 first supplies a structured directory of authors. Entries belong to an individual unless
+explicitly shared with identified users or a reviewed group policy; the UI selects only authorized
+entries. Sharing and revocation are explicit, audited, and rechecked on search, selection, model
+transmission, resumed steps, and artifact publication. Revocation blocks fresh disclosure; retained
+revisions preserve historical provenance under their own owner authorization and retention rules.
+The existing globally searchable style-reference templates do not confer knowledge-directory or
+library access and are never silently ingested as private knowledge.
+
+T92 then adds a document library with owner/share permissions, bounded search, identified source
+versions and citations attached to proposals and accepted content. Retrieval filters authorization
+before returning snippets or placing them in a prompt. Search results and citations do not grant
+access to the underlying document. Revocation prevents later retrieval/transmission; publication
+of a delayed result revalidates every source reference. A citation must remain distinguishable from
+an unsupported model assertion, and unavailable or revoked sources are reported explicitly.
+
+Keep the current DOCX/PPTX Pandoc reference templates and their visibility/version rules. Add a
+separate typed filling-template concept with named fields, required/optional types, validation
+constraints, defaults only when explicitly authored, and repeatable sections with bounded counts.
+Validate schema and values server-side, report missing/ambiguous values for human resolution, and
+freeze the exact schema/template version and approved values in each generated revision. A Pandoc
+style reference alone cannot claim Word field-filling support. Template schema ownership and
+sharing must be explicit; no default access to private author or library records follows from a
+template's visibility. Invalid schema, unsupported field operation, or unsatisfied constraint
+fails safely without publication.
+
+#### 3.6.4 Controlled Office edits and revisions
+
+The model may request only versioned, allowlisted structured tools to read or modify real DOCX or
+PPTX content: text, tables, sections, images, styles, and, for PPTX, slides, objects, and notes.
+Tool arguments use bounded schemas and stable targets, not executable code, shell strings, raw
+subprocess arguments, arbitrary filesystem paths, or user-defined transformations. FastAPI
+validates ownership, target identity, schema, limits, operation support, source revision, and
+permissions; a constrained executor applies supported edits to a private copy and publishes only
+after revalidation. Unsupported operations receive explicit, useful errors and leave the current
+artifact intact. Qualification on real files defines the supported subset and measures preservation
+of non-target OOXML, relationships, formatting, media, and document behavior; fidelity is not
+assumed from a library's API. No document-controlled external resource is loaded. A field-fill or
+Office edit never mutates the existing conversion result in place.
+
+Every accepted content change, direct edit, template fill, or copy-forward restore creates an
+immutable revision with a monotonic identity, exact source and template references, author/actor,
+approved-data provenance, operation record, and matching preview/download artifacts. The metadata
+pointer and complete artifacts publish atomically in both storage profiles; an interrupted attempt
+is recoverable without a visible half-revision. `ETag`/`If-Match` and idempotency prevent lost
+updates, duplicate acceptance, and stale model publication. History is owner-scoped, with
+highlighted semantic change summaries; restore copies an old revision forward rather than
+rewriting history. The preview and download always refer to the same exact revision, including
+during rendering or rollback. Retention, quotas, backup, restore, cancellation, and cleanup apply
+to drafts and revisions as explicit configurable policy, without deleting a referenced artifact
+while its revision remains available.
+
+#### 3.6.5 Private preview and measured fidelity
+
+T88 evaluates locally bundled `docx-preview`, `@aiden0z/pptx-renderer`, and PDF.js against
+representative redistributable real documents, including edited and long files. T90 may ship only
+the qualified subset, and its first delivered Composer preview must include qualified native DOCX
+and PPTX viewing as well as PDF. A PDF rendition of an Office file may be offered as an explicitly
+labeled additional view, but it cannot replace native DOCX/PPTX acceptance. Rendering uses
+authorized same-origin downloads and self-hosted assets, with no third-party conversion service,
+public document URL, CDN, or remote fetch. Visible pages/slides are
+virtualized, adjacent ones preloaded, memory/cache bounded, and thumbnails loaded progressively.
+Changing revisions keeps the old preview until the new one is ready, preserves zoom and position
+when meaningful, and fences out obsolete asynchronous renders. Explain fidelity and unsupported
+features to users, especially DOCX pagination; a complete private file may still need to be
+downloaded and parsed before visible-page virtualization can begin. Measurements include initial
+parse, visible update, peak memory, cache eviction, long-file behavior, and representative fidelity;
+do not claim server pagination or constant download cost without evidence.
+
+The production parent CSP still forbids workers and inline style attributes; PDF.js commonly uses
+a worker and Office preview libraries inject styles. The user approved one narrowly scoped native
+Office preview boundary on 2026-09-23: only the Composer parent route may add `frame-src 'self'`.
+Its existing script and style restrictions stay unchanged. Render DOCX/PPTX in a dedicated
+opaque-origin iframe with `sandbox="allow-scripts"` and without `allow-same-origin`; child-only
+inline styles are allowed, while child scripts are nonce-bearing, self-hosted classic bundles.
+Do not add a CORS exception for document responses or static code. The child blocks network fetches,
+workers, objects, forms, and navigation, and permits only validated, bounded embedded image/font
+bytes. The authenticated parent obtains the exact authorized revision from FastAPI and transfers
+bounded bytes to the intended frame. Validate message source, origin, render token, document and
+revision identity; reject stale, replayed, or cross-frame messages. This approval does not cover a
+site-wide CSP relaxation, a PDF.js worker exception, or a different sandbox design. T88/T90 must
+still prove containment against hostile documents, no document-controlled egress, visual fidelity,
+render concurrency and cancellation, and media-heavy long-document memory/virtualization behavior
+before a production preview is accepted. No preview code may execute embedded document scripts or
+fetch external relationships.
+
+Visual side-by-side comparison, selecting a section from the preview to steer a later edit, and
+integrated ONLYOFFICE editing are future options. T88 may evaluate them but T89–T93 must not claim
+their delivery without separately approved scope. Numerical limits, retention periods, connection
+access defaults, preview cache budgets, and fidelity thresholds remain configurable or evidence-
+gated; this specification does not invent production values.
+
 ## 4. Input contract
 
 A standalone Markdown file is accepted only when it has no local-resource dependency. The service
@@ -518,6 +714,12 @@ and audit records. A conversion job stores either both template identifiers or n
 the domain and both databases. Object keys and paths derive only from stable identifiers, never
 visible names.
 
+T89 extends the same two profiles with owner-scoped Composer connections, drafts, conversation
+steps, immutable revisions, and artifact references. T91/T92 add permissioned knowledge and typed
+template records. Schema, object publication, optimistic concurrency, idempotency, retention,
+backup, and recovery must have equivalent behavior in SQLite/files and PostgreSQL/S3; no profile
+may expose a revision before its matching artifacts are complete.
+
 ## 7. HTTP API
 
 Use `/api/v1`. The contract must include:
@@ -534,6 +736,14 @@ Use `/api/v1`. The contract must include:
 - template creation, metadata update, current/previous content download, replacement, version listing, copy-forward restoration, deletion/archive, and per-user default selection;
 - `/health/live`, `/health/ready`, metrics, and `/docs`.
 
+T89–T92 add versioned `/api/v1` Composer capabilities, connection setup/test/model selection,
+owner-scoped drafts/conversation/proposals/revisions/artifacts, author records, typed templates,
+library search/citations, and structured edit operations. Documented routes enforce server-side
+authorization, CSRF for browser mutations, `ETag`/`If-Match` for revision changes, idempotency,
+bounded pagination and payloads, safe errors, and private no-store downloads. The installed CLI
+receives corresponding supported operations. Secrets are write-only and never appear in OpenAPI
+examples, response bodies, logs, or generated client fixtures.
+
 Support `Idempotency-Key` for job creation. Preserve the existing forward-conversion authorization
 contract. For reverse conversions, enforce the stricter owner-only content and lifecycle contract
 in section 3.5; administrator visibility is limited to its separately audited, content-free
@@ -549,6 +759,8 @@ readiness cheap; it must not run a conversion.
 - Use unique workspaces, fixed subprocess argument lists, `shell=False`, environment allowlists, process groups, timeouts, cancellation, periodic expiration, and reliable cleanup.
 - Run as arbitrary non-root UID with read-only root filesystem, no added Linux capability, bounded writable temporary areas, `/work` on disk-backed ephemeral storage, and `/data` only where the standalone profile needs persistence.
 - Restrict egress by profile and never allow document-controlled network access.
+- Permit Composer model egress only through the authorized backend connection boundary of section
+  3.6.1; document engines and rendered documents remain unable to initiate network requests.
 - Produce JSON logs with correlation identifiers and no content, filename, secret, or absolute path.
 - Expose queue depth and age, active jobs, step durations, failures, saturation, expiration, retry, and recovery metrics.
 - Audit actor, owner, operation, target, and version for every sensitive mutation.
@@ -615,6 +827,11 @@ readiness cheap; it must not run a conversion.
   startup warning. Infected uploads are rejected by the selected boundary; temporary material is
   securely removed and no durable quarantine is kept. The ClamAV INSTREAM adapter scans directly
   from bounded memory and therefore creates no scanner-side application temporary file.
+- Apply the same selected malware boundary to every new Composer Markdown, DOCX, PPTX, PDF,
+  attachment, typed-template, author-file, or library-document upload before parsing, validation,
+  indexing, previewing, model transmission, or durable persistence. An authorized handoff of
+  immutable bytes may reuse verified scan provenance; any changed or unproven bytes require a new
+  scan. Scanner failure remains fail-closed and never publishes a draft or revision artifact.
 - The standalone target is RPO 24 hours and RTO 4 hours. The distributed target is RPO 1 hour and
   RTO 2 hours. Exercise each deployed profile at least quarterly with an automated isolated restore
   and readiness check. Retain an immutable report containing backup identity, timestamps, measured
@@ -670,6 +887,16 @@ Unit tests remain fast and deterministic and use pytest-mock rather than direct 
 Functional tests exercise assembled application behavior with substituted adapters. Every feature that crosses a real boundary—document engine, database, object store, filesystem boundary, authentication mechanism, worker, or external process—has at least one integration test covering its primary successful path and every relevant failure behavior. Integration tests exercise real engines and both storage contracts. The corpus covers Unicode, headings, tables, footnotes, code, local images, malformed resources, Mermaid, fonts, multiple templates, malicious ZIP/SVG inputs, timeouts, and concurrency. Inspect DOCX as OpenXML and rasterize PDF for golden comparison with controlled tolerances.
 
 Every delivered user-visible or operational workflow has an E2E test against the final rootless image. Cover its primary path and every relevant critical failure, authorization, cancellation, recovery, or concurrency behavior. Use Playwright, two regular users, and one administrator where applicable. Cover both profiles, ownership, visibility, `202` submission, polling, cancellation, expiration, download, restart recovery, and absence of double execution. Preserve artifacts only on failure. Any integration or E2E exception requires explicit pull-request justification and explicit reviewer approval; cost, inconvenience, or a missing local dependency is not sufficient.
+
+Composer tests additionally cover connection enablement and permission changes, write-only secrets,
+TLS and mTLS validation with an internal CA, destination-policy and request-forgery rejection,
+provider outage/invalid responses, disclosure filtering before LLM calls, prompt-injection and
+tool misuse, human edits versus stale model results, exact revision/artifact pairing, atomic
+publication and recovery, regeneration without a provider, long-document preview behavior, and
+non-target DOCX/PPTX preservation. Run real component integration and final-rootless-image E2E in
+both profiles. T93 qualifies the real authorized LLM endpoint and exact final images; synthetic
+providers alone do not satisfy its provider acceptance. Each qualified iteration updates the
+docker-box test deployment with a verified matched candidate and rollback evidence.
 
 The project manager approved one sequencing exception for T06: its login, session, and local-account
 administration flows receive unit, functional ASGI, and real Argon2id/HTTP integration coverage in
@@ -804,6 +1031,16 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T85 | Filter owner-scoped conversion history by output family and expiration before pagination, avoiding browser history scans | T12, T13, T45, T62, T82 |
 | T86 | Diagnose dependency CI failures and make immutable image acquisition resilient to transient transport failures | T22, T27 |
 | T87 | Validate final documentation, publish patch 0.7.3 after failed 0.7.2 image qualification with the matched three-image set, and adopt verified public receipts | T22, T83 |
+| T88 | Specify Composer and qualify real Office editing and private previews before production code | T04, T12, T13, T20, T21, T45, T64, T82, T83, T87 |
+| T89 | Add secure authorized OpenAI-compatible connections, browser setup, and durable drafts, conversations, revisions, and artifacts in both profiles | T88 |
+| T90 | Deliver Convert/Composer navigation, chat, proposals, exact-revision previews, history, diffs, and restore | T89 |
+| T91 | Add permissioned structured author knowledge and typed repeating document templates | T90 |
+| T92 | Deliver qualified structured DOCX/PPTX editing tools and a cited, permissioned document library | T91 |
+| T93 | Complete two-profile/final-image Composer qualification, publish minor 0.8.0, adopt exact published receipts, and deploy the matched public set | T92 |
+
+The Composer programme approved on 2026-09-22 follows T88 qualification, then T89–T92 as four
+cohesive implementation iterations and T93 release/adoption. The earlier priority notes below
+record the preceding release programme; they do not supersede this sequence.
 
 The next priorities approved on 2026-09-21 are T50 qualification, then T73 reverse-conversion
 qualification, T85 history filtering, T86 CI/dependency reliability, and T83 structured PowerPoint
@@ -924,6 +1161,48 @@ the ticket before touching any path owned by another active ticket.
   separate product, privacy, security, cost, egress, retention, and operations decision.
 
 Do not silently resolve deferred parameters in unrelated implementation work.
+
+### Composer programme and decision gates
+
+T88 fixes the reviewable contract in section 3.6 and records reproducible real-file qualification
+before T89 production work. T88 may complete with measured real-file feasibility, explicit
+unsupported and unmeasured cases, and assigned downstream proof gates; it does not certify a
+production viewer, complete Composer workflow, or every Office edit family. T90 qualifies and
+delivers the native viewer/workflow, T92 qualifies each edit family, and T93 verifies the complete
+programme. T89–T92 form four cohesive implementation iterations; each requires an
+independent review, applicable canonical and final-image evidence, and a matched docker-box test
+deployment before the next iteration is treated as accepted. T93 closes cross-cutting acceptance,
+then changes the minor version from the current 0.7.3 baseline to 0.8.0. After the protected merge
+triggers publication, monitor PyPI and the complete matched GHCR image set through terminal success.
+Only then may the immediately following adoption pull request pin the exact published receipt
+digests in Compose/quickstarts and complete any release-owned command migration. Deploy that exact
+matched set and verify it. Never pre-pin an unpublished image or infer a registry digest.
+
+T88 evidence must distinguish: exact package/version and license provenance; document-family and
+operation matrix; non-target OOXML/format preservation; safe rejection of unsupported edits; exact
+production CSP compatibility; complete-file transfer/parse cost versus virtualized display;
+fidelity, pagination, memory, latency, and long-file limits. A failed or unproven edit/renderer
+capability remains excluded from enabled or advertised delivery until its downstream ticket proves
+it or a reviewed alternative changes the contract. Bounded implementation and tests may establish
+that proof. T88 qualification does not itself authorize a production dependency, endpoint,
+or relaxation of the site-wide security policy.
+
+The user decided on 2026-09-23 that qualified native DOCX/PPTX previews are required in the first
+Composer delivery. PDF-first substitution is rejected. The user subsequently approved only the
+isolated iframe and route-scoped CSP boundary specified in section 3.6.5 after independent
+feasibility review. This is authorization to qualify that design, not acceptance of renderer
+packages, security proof, visual fidelity, or production readiness.
+
+The following decisions require measured evidence or user approval before they change a public
+contract: any CSP exception beyond the approved Composer iframe boundary, including a PDF.js
+worker; the exact editable OOXML subset if real-file
+preservation cannot be shown; a default sharing/access policy for instance connections, authors,
+or library entries beyond private-by-default; numerical resource/retention limits; and whether a
+specific fidelity threshold is acceptable for DOCX pagination. Keep harmless numerical limits
+configurable pending T88/T93 measurements. The requested real LiteLLM test endpoint is authorized
+for qualification, while its actual models and credential source are resolved operationally; no
+provider-specific product promise follows. Visual comparison, preview section selection, and
+ONLYOFFICE remain deferred.
 
 
 ### T83 follow-up scope
