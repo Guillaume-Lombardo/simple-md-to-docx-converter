@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
+from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
@@ -117,6 +118,70 @@ def test_state_rejects_duplicate_or_foreign_job_identity(tmp_path) -> None:
     path.write_text(json.dumps(state))
     with pytest.raises(workflow.WorkflowFailure, match="forward evidence"):
         workflow._read_state(path, "standalone", "worker-restart")
+
+
+def test_diagnostic_watcher_announces_after_first_targeted_query(
+    tmp_path, mocker
+) -> None:
+    state = _state()
+    state_path = tmp_path / "state.json"
+    state_path.write_text(json.dumps(state))
+    output = tmp_path / "binding.json"
+    ready = tmp_path / "watching.json"
+    attempt_id = str(uuid4())
+    values = {
+        "job_id": state["recovery_job_id"],
+        "attempt_id": attempt_id,
+        "attempt_number": 1,
+        "leased_at": None,
+        "lease_expires_at": None,
+        "create_sequence": None,
+        "create_intent_at": None,
+        "unit_id": None,
+        "proof_id": None,
+        "proof_unit_id": None,
+        "proof_recorded_at": None,
+        "proof_acknowledged_at": None,
+    }
+    row = SimpleNamespace(**values, _mapping=values)
+    connection = mocker.MagicMock()
+
+    def execute(_statement):
+        if connection.execute.call_count == 1:
+            assert not ready.exists()
+            return SimpleNamespace(all=list)
+        assert ready.exists()
+        return SimpleNamespace(all=lambda: [row])
+
+    connection.execute.side_effect = execute
+    connection.__enter__.return_value = connection
+    engine = mocker.Mock()
+    engine.connect.return_value = connection
+    mocker.patch.object(workflow, "create_database_engine", return_value=engine)
+    mocker.patch.object(
+        workflow,
+        "Settings",
+        return_value=SimpleNamespace(
+            storage_profile=workflow.StorageProfile.STANDALONE,
+            standalone_data_directory=tmp_path,
+        ),
+    )
+    mocker.patch.object(workflow.time, "sleep")
+
+    workflow.diagnostics(
+        state_path,
+        output,
+        wait_for_recovery_attempt=True,
+        ready_marker=ready,
+    )
+
+    assert connection.execute.call_count == 2
+    assert json.loads(ready.read_text()) == {
+        "schema": "t73-reverse-diagnostics-watcher-v1",
+        "recovery_job_id": state["recovery_job_id"],
+    }
+    assert json.loads(output.read_text())["attempts"][0]["attempt_id"] == attempt_id
+    engine.dispose.assert_called_once_with()
 
 
 def test_result_receipt_is_exact_bounded_proof_bound_metadata(tmp_path, mocker) -> None:

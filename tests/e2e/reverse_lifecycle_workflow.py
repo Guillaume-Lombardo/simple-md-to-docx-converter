@@ -408,7 +408,11 @@ def verify(  # noqa: PLR0913, PLR0917 - explicit final-image evidence inputs
 
 
 def diagnostics(
-    state_file: Path, output: Path, *, wait_for_recovery_attempt: bool = False
+    state_file: Path,
+    output: Path,
+    *,
+    wait_for_recovery_attempt: bool = False,
+    ready_marker: Path | None = None,
 ) -> None:
     """Project content-free attempt fencing evidence for synthetic job UUIDs only."""
     state = _read_state(state_file)
@@ -443,9 +447,19 @@ def diagnostics(
             .order_by(ReversionAttemptRow.leased_at, ReversionAttemptRow.attempt_id)
             .limit(_MAX_DIAGNOSTIC_ATTEMPTS + 1)
         )
+        watcher_ready = False
         while True:
             with engine.connect() as connection:
                 rows = connection.execute(statement).all()
+            if ready_marker is not None and not watcher_ready:
+                _write_json(
+                    ready_marker,
+                    {
+                        "schema": "t73-reverse-diagnostics-watcher-v1",
+                        "recovery_job_id": state["recovery_job_id"],
+                    },
+                )
+                watcher_ready = True
             if not wait_for_recovery_attempt or any(
                 row.job_id == state["recovery_job_id"] for row in rows
             ):
@@ -634,6 +648,7 @@ def main() -> int:
     command.add_argument("--state-file", type=Path, required=True)
     command.add_argument("--output", type=Path, required=True)
     command.add_argument("--wait-for-recovery-attempt", action="store_true")
+    command.add_argument("--ready-marker", type=Path)
     args = parser.parse_args()
     try:
         if args.operation == "prepare":
@@ -648,10 +663,13 @@ def main() -> int:
                 args.result_receipt,
             )
         else:
+            if args.ready_marker is not None and not args.wait_for_recovery_attempt:
+                parser.error("--ready-marker requires --wait-for-recovery-attempt")
             diagnostics(
                 args.state_file,
                 args.output,
                 wait_for_recovery_attempt=args.wait_for_recovery_attempt,
+                ready_marker=args.ready_marker,
             )
     except (OSError, subprocess.SubprocessError, WorkflowFailure) as error:
         print(f"T73 reverse lifecycle E2E failed: {error}", file=sys.stderr)

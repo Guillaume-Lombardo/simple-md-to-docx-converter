@@ -135,3 +135,19 @@ The later inventory snapshot correction and fixture-image retention fix merged t
 as `41329266140ce0a49a74cc8eab559e07a03df605`. Its exact-head CI `35713604587` passed all
 checks and both profiles; main CI `35716730560` also passed every check. These newer checks do not relabel the
 historical local images recorded above.
+
+## Failed 0.7.2 image qualification and approved continuation
+
+Release preparation PR #260 merged as `b28256486af4cf6d58c3aa06a27815c321df57f9`.
+PR CI `35719688632` and main CI `35723245238` passed every check. Automatic release
+`35723245369` published PyPI and the final tag/Release at that source, and an isolated public
+Python 3.14 installation passed import/version/CLI verification. Its complete standalone
+release-image qualification passed. Distributed broker-restart qualification failed because the
+fault-injection observer paused a new synthetic unit before binding the exact recovery attempt.
+The strict guard rejected the mismatch before crash injection; the exact interleaving is unknown.
+
+GHCR publication and staging-artifact retention were skipped, leaving no exact image bytes for
+recovery. These images are not a qualified public release. The user approved a targeted harness
+correction with regressions and independent review, followed by a narrowly verified `0.7.3`
+continuation. Existing public `0.7.1` pins and historical candidate identities remain unchanged
+until actual `0.7.3` publication, adoption and deployment are verified.

@@ -31,6 +31,11 @@ IMAGE_REPOSITORY = "ghcr.io/guillaume-lombardo/md-converter"
 FRONTEND_IMAGE_REPOSITORY = "ghcr.io/guillaume-lombardo/md-converter-web"
 REGISTRY_PATH = "guillaume-lombardo/md-converter"
 FRONTEND_REGISTRY_PATH = "guillaume-lombardo/md-converter-web"
+REVERSE_REGISTRY_PATH = "guillaume-lombardo/md-converter-reverse-attempt"
+PARTIAL_072_SOURCE = "b28256486af4cf6d58c3aa06a27815c321df57f9"
+REPOSITORY_ID = 1343515292
+PARTIAL_072_RUN = 35723245369
+PARTIAL_072_ARTIFACT = 10692228358
 PYPI_URL = f"https://pypi.org/pypi/{PROJECT}/json"
 GITHUB_API = f"https://api.github.com/repos/{REPOSITORY}"
 GITHUB_RELEASES = f"https://github.com/{REPOSITORY}/releases/download"
@@ -476,6 +481,7 @@ def _require_ghcr_tag_publicly_absent(
     repository_path: str,
     version: str,
     credentials: RegistryCredentials | None,
+    allow_reverse_fallback: bool = False,
 ) -> None:
     token_url = (
         f"https://ghcr.io/token?service=ghcr.io&scope=repository:{repository_path}:pull"
@@ -490,7 +496,9 @@ def _require_ghcr_tag_publicly_absent(
         )
     else:
         _require_exact_anonymous_denial(anonymous)
-        if repository_path != FRONTEND_REGISTRY_PATH:
+        if repository_path != FRONTEND_REGISTRY_PATH and not (
+            allow_reverse_fallback and repository_path == REVERSE_REGISTRY_PATH
+        ):
             raise AlignmentError("GHCR backend anonymous access was denied")
         if credentials is None:
             raise AlignmentError("GHCR read-only fallback credentials are unavailable")
@@ -515,7 +523,8 @@ def _require_ghcr_tag_publicly_absent(
         ) from error
     errors = document.get("errors") if isinstance(document, dict) else None
     if (
-        set(document) != {"errors"}
+        not isinstance(document, dict)
+        or set(document) != {"errors"}
         or not isinstance(errors, list)
         or len(errors) != 1
         or not isinstance(errors[0], dict)
@@ -605,6 +614,79 @@ def _require_skipped_container_release(
         )
 
 
+def _require_partial_072_transition(
+    transport: Transport,
+    *,
+    project_version: str,
+    compose: ComposeIdentity,
+    base: BaseIdentity | None,
+    credentials: RegistryCredentials | None,
+) -> None:
+    """Admit only the reviewed Python-only 0.7.2 to fresh 0.7.3 transition."""
+    if (
+        project_version != "0.7.3"
+        or compose.version != "0.7.1"
+        or base != BaseIdentity("0.7.2", PARTIAL_072_SOURCE)
+    ):
+        raise AlignmentError("repository state is not the exact 0.7.3 transition")
+    source, assets = _release_identity(transport, version="0.7.2")
+    if source != PARTIAL_072_SOURCE or assets:
+        raise AlignmentError("partial 0.7.2 release identity or empty evidence differs")
+    run_url = f"{GITHUB_API}/actions/runs/{PARTIAL_072_RUN}"
+    run = _json_response(transport, run_url)
+    expected_run = {
+        "id": PARTIAL_072_RUN,
+        "head_sha": PARTIAL_072_SOURCE,
+        "head_branch": "main",
+        "event": "push",
+        "path": ".github/workflows/release.yml",
+        "status": "completed",
+        "conclusion": "failure",
+        "run_attempt": 1,
+    }
+    if any(run.get(key) != value for key, value in expected_run.items()):
+        raise AlignmentError("partial 0.7.2 failed run identity differs")
+    artifacts = _json_response(transport, f"{run_url}/artifacts?per_page=2")
+    entries = artifacts.get("artifacts")
+    if (
+        artifacts.get("total_count") != 1
+        or not isinstance(entries, list)
+        or len(entries) != 1
+        or not isinstance(entries[0], dict)
+    ):
+        raise AlignmentError("partial 0.7.2 must have only its Python artifact")
+    artifact = entries[0]
+    expected_artifact = {
+        "id": PARTIAL_072_ARTIFACT,
+        "name": "python-release-v0.7.2",
+        "expired": False,
+    }
+    workflow = artifact.get("workflow_run")
+    if (
+        any(artifact.get(key) != value for key, value in expected_artifact.items())
+        or not isinstance(workflow, dict)
+        or workflow.get("id") != PARTIAL_072_RUN
+        or workflow.get("head_sha") != PARTIAL_072_SOURCE
+        or workflow.get("head_branch") != "main"
+        or workflow.get("repository_id") != REPOSITORY_ID
+        or workflow.get("head_repository_id") != REPOSITORY_ID
+    ):
+        raise AlignmentError("partial 0.7.2 Python artifact identity differs")
+    for repository_path in (
+        REGISTRY_PATH,
+        FRONTEND_REGISTRY_PATH,
+        REVERSE_REGISTRY_PATH,
+    ):
+        for tag in ("0.7.2", f"source-{PARTIAL_072_SOURCE}"):
+            _require_ghcr_tag_publicly_absent(
+                transport,
+                repository_path=repository_path,
+                version=tag,
+                credentials=credentials,
+                allow_reverse_fallback=True,
+            )
+
+
 def _git_output(arguments: Sequence[str]) -> bytes:
     try:
         return subprocess.run(  # noqa: S603 - fixed executable and bounded arguments
@@ -643,7 +725,7 @@ def _base_identity(
     )
 
 
-def check_alignment(  # noqa: PLR0913 - explicit injectable release surfaces
+def check_alignment(  # noqa: PLR0912, PLR0913 - explicit release transition cases and injectable surfaces
     *,
     project_version: str,
     compose: ComposeIdentity,
@@ -657,7 +739,18 @@ def check_alignment(  # noqa: PLR0913 - explicit injectable release surfaces
     if event_name not in KNOWN_EVENTS:
         raise AlignmentError(f"unsupported GitHub event: {event_name}")
     pypi_version = _pypi_version(transport)
-    if pypi_version != compose.version:
+    partial_072 = pypi_version == "0.7.2" and pypi_version != compose.version
+    if partial_072:
+        if event_name not in PENDING_EVENTS:
+            raise AlignmentError("this event requires fully published alignment")
+        _require_partial_072_transition(
+            transport,
+            project_version=project_version,
+            compose=compose,
+            base=base,
+            credentials=registry_credentials,
+        )
+    elif pypi_version != compose.version:
         if (
             event_name not in PENDING_EVENTS
             or pypi_version != SKIPPED_CONTAINER_PUBLIC_VERSION
@@ -671,7 +764,9 @@ def check_alignment(  # noqa: PLR0913 - explicit injectable release surfaces
             registry_credentials=registry_credentials,
         )
         return "pending-skipped-container"
-    if project_version != compose.version:
+    if partial_072:
+        state = "pending-partial-0.7.2"
+    elif project_version != compose.version:
         if event_name not in PENDING_EVENTS:
             raise AlignmentError("this event requires fully published alignment")
         if (

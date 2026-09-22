@@ -268,9 +268,7 @@ def _bounded_json(path: Path) -> dict:
     return value
 
 
-def _require_synthetic_binding(
-    state: dict, diagnostics: dict, attempt_id: UUID
-) -> None:
+def _synthetic_attempt_id(state: dict, diagnostics: dict) -> UUID:
     if (
         state.get("schema") != "t73-reverse-lifecycle-v1"
         or diagnostics.get("schema") != "t73-reverse-attempt-diagnostics-v1"
@@ -289,10 +287,16 @@ def _require_synthetic_binding(
     ):
         raise RuntimeError("T73 diagnostic attempt bound is invalid")
     matches = [row for row in rows if row.get("job_id") == target]
-    if len(matches) != 1 or matches[0].get("attempt_id") != str(attempt_id):
-        raise RuntimeError("T73 paused unit is not the synthetic recovery attempt")
+    if len(matches) != 1:
+        raise RuntimeError("T73 synthetic recovery attempt is not unique")
     if matches[0].get("attempt_number") != 1:
-        raise RuntimeError("T73 barrier did not capture the first attempt")
+        raise RuntimeError("T73 synthetic recovery first attempt is unavailable")
+    try:
+        return UUID(str(matches[0]["attempt_id"]))
+    except (KeyError, TypeError, ValueError) as error:
+        raise RuntimeError(
+            "T73 synthetic recovery attempt identity is invalid"
+        ) from error
 
 
 def _no_cgroup_removal(_path: Path) -> None:
@@ -311,12 +315,12 @@ def _resume_owned(
             command(("unpause", identity))
 
 
-def _await_binding(state: dict, path: Path, attempt_id: UUID, deadline: float) -> None:
+def _await_binding(state: dict, path: Path, deadline: float) -> UUID:
     while not path.with_suffix(".ready").exists() and time.monotonic() < deadline:
         time.sleep(0.01)
     if not path.with_suffix(".ready").exists():
         raise RuntimeError("T73 diagnostic binding readiness timed out")
-    _require_synthetic_binding(state, _bounded_json(path), attempt_id)
+    return _synthetic_attempt_id(state, _bounded_json(path))
 
 
 def watch_pause(
@@ -364,12 +368,14 @@ def watch_pause(
 
     previous_handler = signal.signal(signal.SIGTERM, interrupted)
     try:
+        target_attempt = _await_binding(state, binding_path, deadline)
         while time.monotonic() < deadline:
             units = inventory.unacknowledged(limit=config.max_units)
             candidates = {
                 unit.unit_id: unit
                 for unit in units
                 if unit.unit_id not in previous
+                and unit.attempt_id == target_attempt
                 and unit.principal.principal_id == WORKER_ID
                 and unit.policy_revision == POLICY
                 and unit.policy_specification
@@ -396,7 +402,6 @@ def watch_pause(
                     inspected = runtime._inspect(paused_id)
                     if inspected.get("State", {}).get("Paused") is not True:
                         raise RuntimeError("T73 exact unit did not pause")
-                    _await_binding(state, binding_path, unit.attempt_id, deadline)
                     if (
                         runtime._inspect(paused_id).get("State", {}).get("Paused")
                         is not True

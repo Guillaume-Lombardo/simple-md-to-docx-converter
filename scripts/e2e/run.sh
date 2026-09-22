@@ -579,6 +579,7 @@ run_reverse_lifecycle() {
   local stem="reverse-$scenario"
   local state="$browser_session_directory/$stem.json"
   local binding="$browser_session_directory/$stem-binding.json"
+  local diagnostics_watching="$browser_session_directory/$stem-binding-watching.json"
   local diagnostics="$browser_session_directory/$stem-diagnostics.json"
   local receipt="$browser_session_directory/$stem-result.json"
   local barrier="$broker_directory/$stem-paused.json"
@@ -601,7 +602,8 @@ run_reverse_lifecycle() {
   (
     podman exec "$application_name" /opt/md-converter/venv/bin/python \
       /e2e/reverse_lifecycle_workflow.py diagnostics --wait-for-recovery-attempt \
-      --state-file "/browser-session/$stem.json" --output "/browser-session/$stem-binding.json"
+      --state-file "/browser-session/$stem.json" --output "/browser-session/$stem-binding.json" \
+      --ready-marker "/browser-session/$stem-binding-watching.json"
     podman exec "$application_name" chmod 0644 "/browser-session/$stem-binding.json"
     touch "${binding%.json}.ready"
   ) &
@@ -609,6 +611,7 @@ run_reverse_lifecycle() {
   uv run python -m scripts.e2e.reverse_broker watch-pause --root "$broker_directory" \
     --state "$state" --binding "$binding" --barrier "$barrier" &
   reverse_pause_pid=$!
+  wait_reverse_marker "$diagnostics_watching" "$reverse_diagnostics_pid"
   wait_reverse_marker "${barrier%.json}.ready" "$reverse_pause_pid"
   if [[ "$profile" == standalone ]]; then start_reverse_broker; else podman unpause "$runtime" >/dev/null; fi
   wait_reverse_marker "$barrier" "$reverse_pause_pid"

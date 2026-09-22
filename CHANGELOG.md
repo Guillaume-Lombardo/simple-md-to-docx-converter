@@ -10,6 +10,21 @@ Use the [upgrade guide](docs/upgrading.md) for supported transitions and rollbac
 [release process](docs/releasing.md) for artifact evidence, the [security policy](SECURITY.md) for
 private reporting, and the [support policy](SUPPORT.md) for help with a published release.
 
+<a id="release-0-7-3"></a>
+
+## [0.7.3] - 2026-09-22
+
+### Fixed
+
+- Reverse-recovery qualification selects the exact synthetic first attempt before fault injection,
+  preserving strict runtime identity checks when several conversions are queued.
+
+### Release notes
+
+- Continues the incomplete 0.7.2 release with a fresh matched image set. The 0.7.2 Python package
+  remains published; its container qualification failed before image publication or retention.
+  Deployments remain on the verified 0.7.1 image digests until 0.7.3 publication and adoption pass.
+
 <a id="release-0-7-2"></a>
 
 ## [0.7.2] - 2026-09-22

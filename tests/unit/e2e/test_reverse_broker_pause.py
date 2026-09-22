@@ -7,7 +7,7 @@ import signal
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from pytest_mock import MockerFixture
@@ -19,6 +19,7 @@ pytestmark = pytest.mark.unit
 
 def _setup(tmp_path: Path, mocker: MockerFixture):
     attempt, unit_id, job = uuid4(), uuid4(), uuid4()
+    other_attempt, other_unit_id = uuid4(), uuid4()
     incarnation, specification = object(), object()
     unit = SimpleNamespace(
         unit_id=unit_id,
@@ -27,6 +28,14 @@ def _setup(tmp_path: Path, mocker: MockerFixture):
         policy_revision=fixture.POLICY,
         policy_specification=specification,
         runtime_incarnation=incarnation,
+    )
+    other_unit = SimpleNamespace(
+        unit_id=other_unit_id,
+        attempt_id=other_attempt,
+        principal=SimpleNamespace(principal_id=fixture.WORKER_ID),
+        policy_revision=fixture.POLICY,
+        policy_specification=specification,
+        runtime_incarnation=object(),
     )
     config = SimpleNamespace(
         state_directory=tmp_path,
@@ -42,8 +51,9 @@ def _setup(tmp_path: Path, mocker: MockerFixture):
         fixture, "policy_specification_evidence", return_value=specification
     )
     inventory = mocker.Mock()
-    inventory.unacknowledged.side_effect = [(), (unit,)]
+    inventory.unacknowledged.side_effect = [(), (other_unit, unit)]
     inventory.unit = unit
+    inventory.other_unit = other_unit
     mocker.patch.object(fixture, "SQLiteBrokerInventory", return_value=inventory)
     mocker.patch.object(fixture, "_runtime_environment", return_value=({}, {}))
     command = mocker.Mock(return_value=(0, b""))
@@ -56,7 +66,14 @@ def _setup(tmp_path: Path, mocker: MockerFixture):
         incarnation=incarnation,
         container_id="a" * 64,
     )
-    runtime.discover.return_value = (observed,)
+    other_observed = SimpleNamespace(
+        unit_id=other_unit_id,
+        attempt_id=other_attempt,
+        principal_id=fixture.WORKER_ID,
+        incarnation=other_unit.runtime_incarnation,
+        container_id="b" * 64,
+    )
+    runtime.discover.return_value = (other_observed, observed)
     runtime._inspect.return_value = {"State": {"Paused": True}}
     mocker.patch.object(fixture, "PodmanIsolationRuntime", return_value=runtime)
     state = tmp_path / "state.json"
@@ -99,22 +116,23 @@ def test_pause_is_bound_to_exact_synthetic_attempt_and_resumed(
     fixture.watch_pause(tmp_path, state, binding, barrier)
     assert json.loads(barrier.read_text())["container_id"] == observed.container_id
     assert command.call_args_list[0].args == (("pause", observed.container_id),)
+    assert all("b" * 64 not in call.args[0] for call in command.call_args_list)
     assert command.call_args_list[-1].args == (("unpause", observed.container_id),)
 
 
-def test_binding_mismatch_unpauses_without_crash_marker(
+def test_binding_mismatch_never_pauses_or_writes_crash_marker(
     tmp_path: Path, mocker: MockerFixture
 ) -> None:
-    state, binding, barrier, command, _runtime, observed, _inventory = _setup(
+    state, binding, barrier, command, _runtime, _observed, _inventory = _setup(
         tmp_path, mocker
     )
     value = json.loads(binding.read_text())
     value["attempts"] = []
     binding.write_text(json.dumps(value))
-    with pytest.raises(RuntimeError, match="not the synthetic"):
+    with pytest.raises(RuntimeError, match="not unique"):
         fixture.watch_pause(tmp_path, state, binding, barrier)
     assert not barrier.exists()
-    command.assert_any_call(("unpause", observed.container_id))
+    command.assert_not_called()
 
 
 def test_runtime_incarnation_mismatch_never_pauses(
@@ -144,10 +162,10 @@ def test_pause_deadline_unpauses_exact_owned_unit(
 
 
 @pytest.mark.parametrize("field", ["schema", "profile", "scenario", "job_ids"])
-def test_diagnostic_source_mismatch_unpauses(
+def test_diagnostic_source_mismatch_never_pauses(
     tmp_path: Path, mocker: MockerFixture, field: str
 ) -> None:
-    state, binding, barrier, command, _runtime, observed, _inventory = _setup(
+    state, binding, barrier, command, _runtime, _observed, _inventory = _setup(
         tmp_path, mocker
     )
     value = json.loads(binding.read_text())
@@ -156,7 +174,7 @@ def test_diagnostic_source_mismatch_unpauses(
     with pytest.raises(RuntimeError, match="source binding differs"):
         fixture.watch_pause(tmp_path, state, binding, barrier)
     assert not barrier.exists()
-    command.assert_any_call(("unpause", observed.container_id))
+    command.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -186,15 +204,66 @@ def test_observer_termination_resumes_owned_unit(
     state, binding, barrier, command, _runtime, observed, _inventory = _setup(
         tmp_path, mocker
     )
-    mocker.patch.object(
-        fixture,
-        "_await_binding",
-        side_effect=lambda *_args: signal.raise_signal(signal.SIGTERM),
-    )
+
+    def interrupt_pause(arguments, **_kwargs):
+        if arguments[0] == "pause":
+            signal.raise_signal(signal.SIGTERM)
+        return 0, b""
+
+    command.side_effect = interrupt_pause
     with pytest.raises(InterruptedError, match="observer interrupted"):
         fixture.watch_pause(tmp_path, state, binding, barrier)
     assert not barrier.exists()
     command.assert_any_call(("unpause", observed.container_id))
+
+
+def test_late_binding_is_resolved_before_candidate_selection(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    state, binding, _barrier, _command, _runtime, observed, _inventory = _setup(
+        tmp_path, mocker
+    )
+    binding.with_suffix(".ready").unlink()
+
+    def publish_binding(_seconds: float) -> None:
+        binding.with_suffix(".ready").touch()
+
+    mocker.patch.object(fixture.time, "sleep", side_effect=publish_binding)
+    assert fixture._await_binding(
+        json.loads(state.read_text()), binding, fixture.time.monotonic() + 1
+    ) == UUID(str(observed.attempt_id))
+
+
+def test_second_attempt_binding_never_pauses(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    state, binding, barrier, command, _runtime, _observed, _inventory = _setup(
+        tmp_path, mocker
+    )
+    value = json.loads(binding.read_text())
+    value["attempts"][0]["attempt_number"] = 2
+    binding.write_text(json.dumps(value))
+    with pytest.raises(RuntimeError, match="first attempt is unavailable"):
+        fixture.watch_pause(tmp_path, state, binding, barrier)
+    command.assert_not_called()
+    assert not barrier.exists()
+
+
+def test_vanished_target_never_pauses_unrelated_unit(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    state, binding, barrier, command, runtime, _observed, inventory = _setup(
+        tmp_path, mocker
+    )
+    inventory.unacknowledged.side_effect = None
+    inventory.unacknowledged.return_value = (inventory.other_unit,)
+    runtime.discover.return_value = ()
+    mocker.patch.object(fixture.time, "monotonic", side_effect=[0, 0, 31])
+    mocker.patch.object(fixture.time, "sleep")
+    with pytest.raises(RuntimeError, match="pause timed out"):
+        fixture.watch_pause(tmp_path, state, binding, barrier)
+    command.assert_not_called()
+    assert not barrier.exists()
 
 
 @pytest.mark.parametrize("signal_name", ["TERM", "KILL"])
