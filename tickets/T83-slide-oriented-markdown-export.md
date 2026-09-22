@@ -28,6 +28,18 @@ T82 forward PowerPoint baseline; T69-T72 reverse-conversion isolation and lifecy
 
 ## Progress
 
+2026-09-22: PR #259 at `d14055e1d6c974ac9b2b3d007888a470e93947cd` exposed an outdated
+final-image API smoke assertion: the validator required seven capability keys and rejected the new T83 `extraction` field. The user authorized the minimal correction and resumed lifecycle.
+The validator now requires the exact eight-key schema and structured extraction object, including
+actual boolean defaults; all earlier authentication, availability, headers, determinism and execution
+guards remain unchanged. Independent review approved the two-file correction. All 75 container-asset
+tests and global Ruff/ty pass. The correction affects the host-side test harness, not application
+or image build inputs. The existing-qualified-image API smoke passed in 26.2 seconds against exact backend configuration
+`e7c53afc1d239e06bd2f907e7dd5b372b931cda2f06702fcaf4b53ad8c36861b`; both legacy-unavailable
+and configured standalone workflows passed, temporary resources were removed, and tested harness
+hashes remained unchanged. Evidence bundle: `t83-pr259-api-smoke-20260922T082722Z`. New exact-head
+CI remains pending.
+
 2026-09-22: A new local final-image candidate was built and qualified from clean source
 `4888cd067e848c59162d801c2399be99b7f81969`. Preflight and 13 focused boundary tests passed; the
 28-mutant campaign, the three-image build, and the uncompressed reverse-runtime
