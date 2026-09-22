@@ -56,6 +56,8 @@ shortcut to the installed client:
 ```text
 markweave jobs reverse capabilities --profile work
 markweave jobs reverse submit report.docx --idempotency-key report-42 --profile work
+markweave jobs reverse submit edited-deck.pptx --extraction slides --profile work
+markweave jobs reverse submit edited-deck.pptx --extraction marp --no-include-notes --profile work
 markweave jobs reverse list --limit 50 --profile work
 markweave jobs reverse show JOB_UUID --profile work
 markweave --timeout 300 jobs reverse wait JOB_UUID --poll-interval 2 --profile work
@@ -69,6 +71,15 @@ before submission, and still leaves content detection and malware scanning to th
 only the source basename, because the owner-visible job contract retains the safe original stem;
 it never sends a local directory path. `--retries` repeats only ambiguous network failures and
 requires the same explicit idempotency key.
+
+For a `.pptx` advertised by the capability response, `--extraction slides` requests
+slide-oriented Markdown and `--extraction marp` requests the documented Marp output. The connected
+service advertises the defaults for presenter notes and images; use `--no-include-notes` or
+`--no-include-images` only for a structured PowerPoint mode. The default `--extraction anydoc`
+keeps the existing document extraction behavior and requires both options to remain enabled. When
+an option is omitted, the CLI
+uses the connected service's advertised default. The CLI freezes all three values
+with the idempotency key when retrying, so a retry cannot change the original request.
 
 Reverse listing, status, cancellation, and result download remain owner-only even for global
 administrators. Waiting requires the global positive `--timeout`. Downloads use the same private,
@@ -85,8 +96,11 @@ each profile retains its own session credentials.
 The advertised extensions and upload limit come from the service. Submission checks the local file
 and then relies on server-side scanning and content detection. The workflow uses a local engine,
 without OCR or hosted Firecrawl fallback. PDF text is extracted without its images or layout;
-scanned or image-only PDFs fail with `needs_ocr`. Reverse conversion remains experimental while
-exact final-image qualification is in progress.
+scanned or image-only PDFs fail with `needs_ocr`. Technical final-image qualification is complete:
+T73 was verified on `main` `31f19243ebe25345dec2c3bde843a5caf261d53a` by CI run `35702469912`, and
+T83 candidate `4888cd067e848c59162d801c2399be99b7f81969` historically passed both profiles. The new
+inventory-snapshot fix remains under qualification. The authorized T87/G1L-586 0.7.2 release is not
+published; existing 0.7.1 pins remain authoritative and no current public digest is implied.
 
 ## Authentication profiles
 

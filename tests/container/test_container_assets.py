@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import io
 import json
@@ -61,6 +62,61 @@ def smoke_pdf_client(
     return client, job
 
 
+def reversion_capabilities_payload() -> dict[str, object]:
+    """Return the final-image capability contract consumed by the smoke driver."""
+
+    return {
+        "schema_version": 1,
+        "format_families": [
+            {
+                "family": family,
+                "extensions": list(extensions),
+                "content_detection": "local content detection",
+            }
+            for family, extensions in api_workflow_smoke.REVERSION_FORMAT_EXTENSIONS
+        ],
+        "admission": {
+            "extension_is_hint": True,
+            "undetected_policy": "CSV is admitted by bounded validation",
+            "scanner_order": "malware scan before format parsing or durable persistence",
+        },
+        "maximum_upload_bytes": 4_194_304,
+        "result_package_modes": [
+            "markdown",
+            "markdown_with_assets",
+            "markdown_with_unavailable_assets",
+        ],
+        "pdf": {"contract": "text extraction only", "image_preservation": False},
+        "execution": {"local": True, "ocr": False, "hosted_fallback": False},
+        "extraction": {
+            "modes": ["anydoc", "slides", "marp"],
+            "default_mode": "anydoc",
+            "structured_extensions": [".pptx"],
+            "include_notes_default": True,
+            "include_images_default": True,
+        },
+    }
+
+
+def reversion_capabilities_client(mocker, payload: dict[str, object]):
+    """Return a client exposing deterministic authenticated capabilities bytes."""
+
+    content = json.dumps(payload, separators=(",", ":")).encode()
+    client = mocker.Mock(spec=api_workflow_smoke.Client)
+    client.request.side_effect = (
+        (
+            200,
+            {
+                "cache-control": "private, no-store",
+                "x-content-type-options": "nosniff",
+            },
+            content,
+        ),
+        (200, {}, content),
+    )
+    return client
+
+
 def test_container_domain_is_active_and_runs_rootless_harness() -> None:
     registry = json.loads(Path(".github/ci/domains.json").read_text(encoding="utf-8"))
     assert registry["container"] == {
@@ -102,6 +158,61 @@ def test_container_workflow_rejects_mixed_v1_v2_manifest(mocker) -> None:
 
     with pytest.raises(RuntimeError, match="manifest invariants mismatch"):
         api_workflow_smoke.validate_result(client, job, "pdf")
+
+
+def test_container_workflow_accepts_structured_reversion_capabilities(mocker) -> None:
+    client = reversion_capabilities_client(mocker, reversion_capabilities_payload())
+
+    api_workflow_smoke.validate_reversion_capabilities(client, 4_194_304)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    (
+        (lambda payload: payload.pop("extraction"), "top-level schema"),
+        (lambda payload: payload.update({"unknown": None}), "top-level schema"),
+        (lambda payload: payload.update({"extraction": []}), "extraction capabilities"),
+        (
+            lambda payload: payload["extraction"].update({"unknown": None}),
+            "extraction capabilities",
+        ),
+        (
+            lambda payload: payload["extraction"].update(
+                {"modes": ["anydoc", "slides"]}
+            ),
+            "extraction capabilities",
+        ),
+        (
+            lambda payload: payload["extraction"].update({"default_mode": "slides"}),
+            "extraction capabilities",
+        ),
+        (
+            lambda payload: payload["extraction"].update(
+                {"structured_extensions": [".ppt"]}
+            ),
+            "extraction capabilities",
+        ),
+        (
+            lambda payload: payload["extraction"].update(
+                {"include_notes_default": False}
+            ),
+            "extraction capabilities",
+        ),
+        (
+            lambda payload: payload["extraction"].update({"include_images_default": 1}),
+            "extraction capabilities",
+        ),
+    ),
+)
+def test_container_workflow_rejects_structured_capability_drift(
+    mocker, mutation: Callable[[dict[str, object]], object], message: str
+) -> None:
+    payload = copy.deepcopy(reversion_capabilities_payload())
+    mutation(payload)
+    client = reversion_capabilities_client(mocker, payload)
+
+    with pytest.raises(RuntimeError, match=message):
+        api_workflow_smoke.validate_reversion_capabilities(client, 4_194_304)
 
 
 @pytest.mark.parametrize(

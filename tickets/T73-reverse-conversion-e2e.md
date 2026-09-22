@@ -109,6 +109,14 @@ backend, frontend, and reverse-attempt images in both storage profiles.
 
 ## Progress
 
+* 2026-09-22: PR #258 passed every exact-head check in CI `35699385675` at
+  `9f9bcc77ea5f1bcbeef75ff9407515ac69be3087`, including both complete E2E profiles,
+  document engines, coverage, and the actual 28-mutant campaign. The independently reviewed
+  qualification was squash-merged as `31f19243ebe25345dec2c3bde843a5caf261d53a`, and its exact
+  source branch was removed locally and remotely. Main CI `35702469912` is running. T73 remains
+  In Progress while exact-main verification and the separately authorized public-image publication
+  criterion remain pending; no product release was triggered.
+
 * 2026-09-22: The clean canonical run at `27eba5082bb299f343ab3ab49420dbea65e7d9e3` passed 4,525
   tests, with 56 engine-marked tests deselected and 11 warnings in 1,662.28 seconds. Coverage was
   94.97% overall, 91.23% branches (6,408/7,024), and 100% of changed lines (15/15) from base
@@ -175,3 +183,24 @@ backend, frontend, and reverse-attempt images in both storage profiles.
 
 Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria,
 implementation boundaries, or progress changes.
+
+* 2026-09-22: The user authorized the inventory concurrency correction after PR #259 CI
+  35705172160 failed standalone E2E and its dependent aggregate gate; all other jobs passed.
+  Independent diagnosis found that
+  autocommit permits inventory rows and their authenticated manifest to come from different
+  committed states. The stack matches that failure branch, but absent database artifacts prevent
+  proving the historical interleaving. The correction will preserve all integrity checks while
+  using a consistent read transaction for verification and returned data, including constructor
+  verification, with deterministic concurrent-writer and tamper-rejection regression coverage.
+  Final matched images must be requalified after this product change.
+* 2026-09-22: The user also authorized a final documentation audit, then a patch release through
+  public image publication, exact-digest adoption and cleanup. A separate release ticket will own
+  publication. T73 remains In Progress until the public reverse-image criterion is verified.
+* 2026-09-22: The minimal correction now holds an explicit SQLite read transaction through
+  verification and returned reads, including constructor verification. All six inventory read
+  APIs retain the same integrity checks; writer transactions and signatures are unchanged.
+  Three deterministic real-WAL concurrent-writer regressions and the existing inventory/tamper
+  tests passed (45 total). Independent review approved the change and proved all three new tests
+  fail when the snapshot is removed in a test-process-only negative control. Subsequent reads on
+  the same reader also observe the newly committed state. Exact-head CI qualification remains
+  pending; historical image receipts do not qualify this application-source change.

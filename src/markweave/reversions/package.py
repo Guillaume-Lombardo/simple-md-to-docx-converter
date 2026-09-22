@@ -142,6 +142,7 @@ def build_reverse_package(  # noqa: PLR0913 - explicit bounded package contract
     unavailable_asset_count: int,
     source: ManifestSource,
     limits: PackageLimits,
+    extractor: str | None = None,
 ) -> ReversePackage:
     """Build plain Markdown or the closed deterministic ZIP layout."""
 
@@ -175,6 +176,7 @@ def build_reverse_package(  # noqa: PLR0913 - explicit bounded package contract
             asset_bytes=asset_bytes,
             unavailable_asset_count=unavailable_asset_count,
         ),
+        extractor=extractor,
     )
     entries = (
         ("document.md", markdown_bytes),

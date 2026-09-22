@@ -47,6 +47,13 @@ def _capabilities(*, maximum: int = 32) -> dict[str, object]:
                 "content_detection": "bounded text",
                 "selected_parser_format": "csv",
             },
+            {
+                "family": "powerpoint",
+                "extensions": [".pptx"],
+                "detected_formats": ["pptx"],
+                "content_detection": "OPC",
+                "selected_parser_format": None,
+            },
         ],
         "admission": {
             "extension_is_hint": True,
@@ -66,6 +73,13 @@ def _capabilities(*, maximum: int = 32) -> dict[str, object]:
             "warning": "not preserved",
         },
         "execution": {"local": True, "ocr": False, "hosted_fallback": False},
+        "extraction": {
+            "modes": ["anydoc", "slides", "marp"],
+            "default_mode": "anydoc",
+            "structured_extensions": [".pptx"],
+            "include_notes_default": True,
+            "include_images_default": True,
+        },
     }
 
 
@@ -234,6 +248,9 @@ def test_submit_preflights_capabilities_and_retries_same_request(
         assert call.kwargs == {
             "filename": source.name,
             "idempotency_key": "stable-key",
+            "extraction": "anydoc",
+            "include_notes": True,
+            "include_images": True,
         }
         assert call.args == (b"PK\x03\x04document",)
 
@@ -270,6 +287,101 @@ def test_submit_rejects_unsafe_or_oversized_source_before_post(
     assert main(("jobs", "reverse", "submit", str(tmp_path / "missing.docx"))) == 1
     assert "unavailable" in capsys.readouterr().err
     client.submit_reversion.assert_not_called()
+
+
+def test_submit_requires_server_structured_capabilities_and_freezes_options(
+    tmp_path: Path, mocker, capsys
+) -> None:
+    source = tmp_path / "slides.pptx"
+    source.write_bytes(b"PK\x03\x04slides")
+    client = mocker.Mock()
+    client.reversion_capabilities.return_value = _response(
+        payload={
+            **_capabilities(maximum=64),
+            "format_families": [
+                {
+                    "family": "powerpoint",
+                    "extensions": [".pptx"],
+                    "detected_formats": ["pptx"],
+                    "content_detection": "OPC",
+                    "selected_parser_format": None,
+                }
+            ],
+        }
+    )
+    client.submit_reversion.side_effect = [
+        CliError("network_error", "offline"),
+        _response(202, _job(), retry_after="1"),
+    ]
+    mocker.patch.object(reversions, "_client", return_value=client)
+
+    assert (
+        main(
+            (
+                "jobs",
+                "reverse",
+                "submit",
+                str(source),
+                "--extraction",
+                "marp",
+                "--no-include-notes",
+                "--idempotency-key",
+                "stable-key",
+                "--retries",
+                "1",
+            )
+        )
+        == 0
+    )
+    for call in client.submit_reversion.call_args_list:
+        assert call.kwargs["extraction"] == "marp"
+        assert call.kwargs["include_notes"] is False
+        assert call.kwargs["include_images"] is True
+
+    assert (
+        main(
+            (
+                "jobs",
+                "reverse",
+                "submit",
+                str(source),
+                "--no-include-images",
+            )
+        )
+        == 1
+    )
+    assert "Anydoc extraction requires" in capsys.readouterr().err
+
+
+def test_submit_uses_advertised_defaults_when_options_are_omitted(
+    tmp_path: Path, mocker
+) -> None:
+    source = tmp_path / "slides.pptx"
+    source.write_bytes(b"PK\x03\x04slides")
+    client = mocker.Mock()
+    client.reversion_capabilities.return_value = _response(
+        payload={
+            **_capabilities(maximum=64),
+            "extraction": {
+                "modes": ["slides", "marp"],
+                "default_mode": "marp",
+                "structured_extensions": [".pptx"],
+                "include_notes_default": False,
+                "include_images_default": False,
+            },
+        }
+    )
+    client.submit_reversion.return_value = _response(202, _job(), retry_after="1")
+    mocker.patch.object(reversions, "_client", return_value=client)
+
+    assert main(("jobs", "reverse", "submit", str(source))) == 0
+    assert client.submit_reversion.call_args.kwargs == {
+        "filename": source.name,
+        "idempotency_key": None,
+        "extraction": "marp",
+        "include_notes": False,
+        "include_images": False,
+    }
 
 
 def test_submit_retries_require_key_and_preserve_terminal_network_error(
@@ -515,6 +627,10 @@ def test_http_client_uses_reverse_paths_csrf_and_atomic_download(
     )
     assert request.call_args_list[3].kwargs["csrf"] is True
     assert request.call_args_list[4].kwargs["headers"]["Idempotency-Key"] == "key"
+    body = request.call_args_list[4].kwargs["body"]
+    assert b'name="extraction"\r\n\r\nanydoc' in body
+    assert b'name="include_notes"\r\n\r\ntrue' in body
+    assert b'name="include_images"\r\n\r\ntrue' in body
 
     response = _DownloadResponse(b"markdown")
     mocker.patch.object(client, "_open", return_value=response)

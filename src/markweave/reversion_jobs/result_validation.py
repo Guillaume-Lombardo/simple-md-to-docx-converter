@@ -32,6 +32,7 @@ from markweave.reversions.manifest import (
     canonical_manifest_bytes,
 )
 from markweave.reversions.models import ReverseContentLimits, ReverseOutputMode
+from markweave.reversions.options import PPTX_EXTRACTOR, ReverseExtraction
 from markweave.reversions.package import build_reverse_package
 
 _ASSET_PATH = re.compile(r"^assets/image-(\d{4,})\.png$")
@@ -100,9 +101,15 @@ def _trace_from_manifest(
             object_pairs_hook=_unique,
             parse_constant=lambda _value: (_ for _ in ()).throw(ValueError()),
         )
-        manifest = _mapping(
-            decoded, {"schema_version", "engine", "source", "result", "execution"}
+        expected_extractor = (
+            None
+            if job.options.extraction is ReverseExtraction.ANYDOC
+            else PPTX_EXTRACTOR
         )
+        keys = {"schema_version", "engine", "source", "result", "execution"}
+        if expected_extractor is not None:
+            keys.add("extractor")
+        manifest = _mapping(decoded, keys)
         engine = _mapping(manifest["engine"], {"name", "version"})
         source = _mapping(manifest["source"], {"family", "detected_format"})
         result = _mapping(
@@ -116,6 +123,7 @@ def _trace_from_manifest(
             source,
             result["mode"],
             execution,
+            manifest.get("extractor"),
         )
         expected_identity = (
             1,
@@ -126,6 +134,7 @@ def _trace_from_manifest(
             },
             mode.value,
             {"local": True, "ocr": False, "hosted_fallback": False},
+            expected_extractor,
         )
         if identity != expected_identity:
             raise ValueError("Manifest identity is invalid")
@@ -139,6 +148,7 @@ def _trace_from_manifest(
             asset_count=cast(int, result["asset_count"]),
             asset_bytes=cast(int, result["asset_bytes"]),
             unavailable_asset_count=cast(int, result["unavailable_asset_count"]),
+            extractor=cast(str | None, manifest.get("extractor")),
         )
         canonical = canonical_manifest_bytes(
             ManifestSource(
@@ -151,6 +161,7 @@ def _trace_from_manifest(
                 trace.asset_bytes,
                 trace.unavailable_asset_count,
             ),
+            extractor=expected_extractor,
         )
     except KeyError, TypeError, ValueError, UnicodeDecodeError, RecursionError:
         reject(ReverseErrorCategory.PROTOCOL_ERROR)
@@ -170,6 +181,11 @@ def _markdown_trace(job: ReversionJob) -> ReversionTraceMetadata:
         asset_count=0,
         asset_bytes=0,
         unavailable_asset_count=0,
+        extractor=(
+            None
+            if job.options.extraction is ReverseExtraction.ANYDOC
+            else PPTX_EXTRACTOR
+        ),
     )
 
 
@@ -265,6 +281,7 @@ def _zip_result(  # noqa: PLR0912 - closed archive validation boundary
             cast(DetectedFormat, job.admission.parser_format),
         ),
         limits=limits.package_limits,
+        extractor=trace.extractor,
     )
     if rebuilt.content != content:
         reject(ReverseErrorCategory.PROTOCOL_ERROR)

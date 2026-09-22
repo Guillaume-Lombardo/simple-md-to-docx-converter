@@ -205,6 +205,20 @@
       },
       "Body_create_reversion_api_v1_reversions_post": {
         "properties": {
+          "extraction": {
+            "$ref": "#/components/schemas/ReverseExtraction",
+            "default": "anydoc"
+          },
+          "include_images": {
+            "default": true,
+            "title": "Include Images",
+            "type": "boolean"
+          },
+          "include_notes": {
+            "default": true,
+            "title": "Include Notes",
+            "type": "boolean"
+          },
           "source": {
             "contentMediaType": "application/octet-stream",
             "title": "Source",
@@ -876,6 +890,16 @@
         "title": "PresentationPlanResponse",
         "type": "object"
       },
+      "ReverseExtraction": {
+        "description": "Explicit opt-in alternatives to the original anydoc extraction.",
+        "enum": [
+          "anydoc",
+          "slides",
+          "marp"
+        ],
+        "title": "ReverseExtraction",
+        "type": "string"
+      },
       "ReverseOutputMode": {
         "description": "Deterministic result shapes approved by T69.",
         "enum": [
@@ -929,6 +953,9 @@
           "execution": {
             "$ref": "#/components/schemas/ReversionExecutionCapabilitiesResponse"
           },
+          "extraction": {
+            "$ref": "#/components/schemas/ReversionExtractionCapabilitiesResponse"
+          },
           "format_families": {
             "items": {
               "$ref": "#/components/schemas/ReversionFormatCapabilityResponse"
@@ -964,7 +991,8 @@
           "maximum_upload_bytes",
           "result_package_modes",
           "pdf",
-          "execution"
+          "execution",
+          "extraction"
         ],
         "title": "ReversionCapabilitiesResponse",
         "type": "object"
@@ -991,6 +1019,45 @@
           "hosted_fallback"
         ],
         "title": "ReversionExecutionCapabilitiesResponse",
+        "type": "object"
+      },
+      "ReversionExtractionCapabilitiesResponse": {
+        "description": "Authoritative structured PowerPoint extraction controls.",
+        "properties": {
+          "default_mode": {
+            "$ref": "#/components/schemas/ReverseExtraction"
+          },
+          "include_images_default": {
+            "title": "Include Images Default",
+            "type": "boolean"
+          },
+          "include_notes_default": {
+            "title": "Include Notes Default",
+            "type": "boolean"
+          },
+          "modes": {
+            "items": {
+              "$ref": "#/components/schemas/ReverseExtraction"
+            },
+            "title": "Modes",
+            "type": "array"
+          },
+          "structured_extensions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Structured Extensions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "modes",
+          "default_mode",
+          "structured_extensions",
+          "include_notes_default",
+          "include_images_default"
+        ],
+        "title": "ReversionExtractionCapabilitiesResponse",
         "type": "object"
       },
       "ReversionFormatCapabilityResponse": {
@@ -1064,6 +1131,27 @@
         ],
         "title": "ReversionJobStep",
         "type": "string"
+      },
+      "ReversionOptions": {
+        "description": "Canonical options included in durable request identity.",
+        "properties": {
+          "extraction": {
+            "$ref": "#/components/schemas/ReverseExtraction",
+            "default": "anydoc"
+          },
+          "include_images": {
+            "default": true,
+            "title": "Include Images",
+            "type": "boolean"
+          },
+          "include_notes": {
+            "default": true,
+            "title": "Include Notes",
+            "type": "boolean"
+          }
+        },
+        "title": "ReversionOptions",
+        "type": "object"
       },
       "ReversionPageResponse": {
         "description": "Paginated owner-only reverse job response.",
@@ -1223,6 +1311,9 @@
             "title": "Id",
             "type": "string"
           },
+          "options": {
+            "$ref": "#/components/schemas/ReversionOptions"
+          },
           "owner_id": {
             "format": "uuid",
             "title": "Owner Id",
@@ -1280,6 +1371,7 @@
           "source_extension",
           "detected_format",
           "component_versions",
+          "options",
           "correlation_id",
           "state",
           "step",

@@ -479,6 +479,22 @@ def _is_bounded_csv_text(data: bytes) -> bool:
     return "\x00" not in text
 
 
+def detect_source(data: bytes, extension: str) -> FormatAdmission:
+    """Use the pinned native detector without flattening a structured presentation."""
+
+    _check_version_and_surface()
+    _require_type(data, bytes)
+    try:
+        detected = anydoc.format_from_bytes(data)
+    except anydoc.ConvertError as error:
+        _raise_mapped(error)
+    return admit_format(
+        extension,
+        detected,
+        csv_text_validated=detected is None and _is_bounded_csv_text(data),
+    )
+
+
 def parse_source(data: bytes, extension: str) -> ParsedSource:
     """Detect and admit child-local input, then parse or render it exactly once.
 
@@ -487,17 +503,7 @@ def parse_source(data: bytes, extension: str) -> ParsedSource:
     with literal OCR rejection; every other admitted format returns one parsed model.
     """
 
-    _check_version_and_surface()
-    _require_type(data, bytes)
-    try:
-        detected = anydoc.format_from_bytes(data)
-    except anydoc.ConvertError as error:
-        _raise_mapped(error)
-    admission = admit_format(
-        extension,
-        detected,
-        csv_text_validated=detected is None and _is_bounded_csv_text(data),
-    )
+    admission = detect_source(data, extension)
     if admission.family is not FormatFamily.PDF:
         return ParsedSource(
             admission=admission,

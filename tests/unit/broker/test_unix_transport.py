@@ -856,3 +856,41 @@ def test_public_stop_wait_rejects_invalid_timeout(
 
     with pytest.raises(ValueError, match="wait timeout"):
         server.wait_stopping(cast("float", timeout))
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("max_input_bytes", None),
+        ("max_input_bytes", True),
+        ("max_pptx_archive_entries", True),
+        ("max_pptx_archive_entries", "100"),
+        ("max_pptx_archive_entries", 0),
+        ("max_pptx_xml_depth", 65),
+    ],
+)
+def test_workspace_client_revalidates_required_and_optional_limits_before_transport(
+    tmp_path: Path, mocker: MockerFixture, field: str, value: object
+) -> None:
+    parent = _private_parent(tmp_path)
+    client = UnixBrokerClient(
+        parent / "broker.sock",
+        expected_server_uid=os.geteuid(),
+        expected_principal=PRINCIPAL,
+        operation_timeout_seconds=1,
+        workspace_limits=CHANNEL_LIMITS,
+    )
+    declared = ReverseContentLimits(
+        1000, 2000, 100, 10, 10, 100, 10, 5, 2, 100, 200, 500, 1000
+    )
+    object.__setattr__(declared, field, value)
+    request = WorkspaceStageRequest(
+        REQUEST_ID, 7, ATTEMPT_ID, UNIT_ID, 3, ".docx", declared, b"source"
+    )
+    encode = mocker.patch("markweave.broker.unix_transport.encode_workspace_request")
+    socket_factory = mocker.patch("markweave.broker.unix_transport.socket.socket")
+    with pytest.raises(BrokerError) as captured:
+        client.stage_workspace(request)
+    assert captured.value.category is BrokerErrorCategory.PROTOCOL_ERROR
+    encode.assert_not_called()
+    socket_factory.assert_not_called()

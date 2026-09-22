@@ -966,8 +966,12 @@ def test_reverse_full_matrix_runs_outside_primary_diagnostic() -> None:
         'if [[ "${MARKWEAVE_E2E_REVERSE_PRIMARY_ONLY:-false}" == true ]]'
     )
     corpus = runner.index("tests.e2e.reverse_corpus_workflow")
-    assert diagnostic < runner.index("exit 0", diagnostic) < corpus
-    assert runner.count("/e2e/browser-next-reversion.test.mjs") == 3
+    structured = runner.index("tests.e2e.structured_pptx_workflow")
+    structured_cli = runner.index("--phase structured-pptx")
+    structured_browser = runner.index("MARKWEAVE_E2E_REVERSE_PHASE=structured")
+    assert diagnostic < runner.index("exit 0", diagnostic) < corpus < structured
+    assert structured < structured_cli < structured_browser
+    assert runner.count("/e2e/browser-next-reversion.test.mjs") == 4
     primary = runner.index("--env MARKWEAVE_E2E_REVERSE_PHASE=primary")
     held = runner.index("--env MARKWEAVE_WORKER_IDLE_POLL_SECONDS=600")
     admission = runner.index("--env MARKWEAVE_E2E_REVERSE_PHASE=admission")

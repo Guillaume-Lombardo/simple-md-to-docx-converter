@@ -8,6 +8,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
+from time import monotonic
 from uuid import uuid4
 
 import pytest
@@ -68,7 +69,9 @@ from markweave.reversion_jobs.runtime import (
     ReversionWorkerRuntime,
 )
 from markweave.reversion_jobs.worker import ReversionWorker
+from markweave.reversions.formats import admit_format
 from markweave.reversions.models import ReverseAttemptSuccess, ReverseOutputMode
+from markweave.reversions.options import ReverseExtraction, ReversionOptions
 from markweave.storage import FilesystemObjectStore, ObjectKey, ObjectScope, ObjectStore
 from markweave.templates.models import TemplateVersion
 from tests.reversion_job_repository_contracts import (
@@ -145,9 +148,16 @@ class _ResultProcessor:
 class _Until:
     def __init__(self, predicate: Callable[[], bool]) -> None:
         self._predicate = predicate
+        self._deadline = monotonic() + 30
 
     def is_set(self) -> bool:
-        return bool(self._predicate())
+        if self._predicate():
+            return True
+        if monotonic() >= self._deadline:
+            raise TimeoutError(
+                "The integration worker did not reach its expected state"
+            )
+        return False
 
     def wait(self, timeout: float) -> bool:
         del timeout
@@ -192,11 +202,21 @@ def _queue(
     repository: SqlReversionJobRepository,
     objects: ObjectStore,
     owner: User,
+    options: ReversionOptions | None = None,
 ) -> ReversionJob:
     source = b"source"
     queued, _ = repository.create(
         replace(
-            submission(owner.id),
+            submission(
+                owner.id,
+                options=options,
+                admission=(
+                    admit_format(".pptx", "pptx")
+                    if options is not None
+                    and options.extraction is not ReverseExtraction.ANYDOC
+                    else None
+                ),
+            ),
             source_sha256=sha256(source).hexdigest(),
             source_size=len(source),
         )
@@ -276,20 +296,30 @@ def _runtime(
     )
 
 
+@pytest.mark.parametrize(
+    "options",
+    [
+        ReversionOptions(),
+        ReversionOptions(ReverseExtraction.SLIDES, False, True),
+        ReversionOptions(ReverseExtraction.MARP, True, False),
+    ],
+)
 def test_real_unix_supervisor_publishes_and_retires_exact_proof(
     tmp_path: Path,
+    options: ReversionOptions,
 ) -> None:
     repository, owner, engine = _repository()
     objects = FilesystemObjectStore(tmp_path / "objects")
     server, client, _service, _broker_runtime = _server(tmp_path)
     clock = [NOW]
     runtime = _runtime(repository, objects, client, clock)
-    job = _queue(repository, objects, owner)
+    job = _queue(repository, objects, owner, options)
     try:
         with server:
             assert ReversionWorker(runtime).run_once()
         retained = repository.get_internal(job.id)
         assert retained is not None and retained.state is ReversionJobState.SUCCEEDED
+        assert retained.options == options
         attempts = repository.list_attempts(job.id)
         assert len(attempts) == 1 and attempts[0].proof_acknowledged_at == NOW
     finally:

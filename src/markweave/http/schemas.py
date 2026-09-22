@@ -12,6 +12,7 @@ from markweave.presentations.models import PresentationOptions
 from markweave.reversion_jobs.models import ReversionJobState, ReversionJobStep
 from markweave.reversions.formats import FormatFamily
 from markweave.reversions.models import ReverseOutputMode
+from markweave.reversions.options import ReverseExtraction, ReversionOptions
 from markweave.templates.models import (
     TemplateKind,
     TemplateSelectionSource,
@@ -236,6 +237,16 @@ class ReversionExecutionCapabilitiesResponse(BaseModel):
     hosted_fallback: bool
 
 
+class ReversionExtractionCapabilitiesResponse(BaseModel):
+    """Authoritative structured PowerPoint extraction controls."""
+
+    modes: tuple[ReverseExtraction, ...]
+    default_mode: ReverseExtraction
+    structured_extensions: tuple[str, ...]
+    include_notes_default: bool
+    include_images_default: bool
+
+
 class ReversionCapabilitiesResponse(BaseModel):
     """Versioned authoritative reverse-conversion runtime contract."""
 
@@ -246,6 +257,7 @@ class ReversionCapabilitiesResponse(BaseModel):
     result_package_modes: tuple[ReverseOutputMode, ...]
     pdf: ReversionPdfCapabilitiesResponse
     execution: ReversionExecutionCapabilitiesResponse
+    extraction: ReversionExtractionCapabilitiesResponse
 
 
 class ReversionResponse(BaseModel):
@@ -258,6 +270,7 @@ class ReversionResponse(BaseModel):
     source_extension: str
     detected_format: str | None
     component_versions: tuple[tuple[str, str], ...]
+    options: ReversionOptions
     correlation_id: str
     state: ReversionJobState
     step: ReversionJobStep

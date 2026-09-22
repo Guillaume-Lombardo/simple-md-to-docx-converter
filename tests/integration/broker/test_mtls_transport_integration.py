@@ -55,6 +55,7 @@ from markweave.broker.workspace_protocol import (
 )
 from markweave.reversions.errors import ReverseErrorCategory
 from markweave.reversions.models import ReverseContentLimits, ReverseOutputMode
+from markweave.reversions.options import ReverseExtraction, ReversionOptions
 
 pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
 
@@ -459,8 +460,16 @@ def test_real_paired_mtls_reconciliation_binds_certificate_principal(
     )
 
 
+@pytest.mark.parametrize(
+    "options",
+    [
+        ReversionOptions(),
+        ReversionOptions(ReverseExtraction.SLIDES, False, True),
+        ReversionOptions(ReverseExtraction.MARP, True, False),
+    ],
+)
 def test_real_paired_mtls_workspace_exchange(
-    certificates: CertificateSet, mocker: MockerFixture
+    certificates: CertificateSet, mocker: MockerFixture, options: ReversionOptions
 ) -> None:
     request = WorkspaceStageRequest(
         REQUEST_ID,
@@ -468,9 +477,10 @@ def test_real_paired_mtls_workspace_exchange(
         ATTEMPT_ID,
         UNIT_ID,
         1,
-        ".docx",
+        ".docx" if options.extraction is ReverseExtraction.ANYDOC else ".pptx",
         CONTENT_LIMITS,
         b"private",
+        options,
     )
     receipt = WorkspaceStageReceipt(
         REQUEST_ID, 2, ATTEMPT_ID, UNIT_ID, 1, INCARNATION_ID

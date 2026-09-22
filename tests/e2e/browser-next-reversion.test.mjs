@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { chromium } from "playwright-core";
@@ -88,12 +89,82 @@ async function inspectRecoveredResult(page, context, profile) {
   assert.ok(bytes.subarray(0, 4).equals(Buffer.from([80, 75, 3, 4])));
 }
 
+async function openReversionWorkspace(page) {
+  const capabilities = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/v1/reversions/capabilities") &&
+      response.request().method() === "GET",
+  );
+  await page.getByRole("link", { name: "2md, Experimental" }).click();
+  await page.waitForURL("**/revert");
+  assert.equal((await capabilities).status(), 200);
+  await page
+    .getByRole("heading", { name: "New conversion to Markdown" })
+    .waitFor();
+}
+
+async function exerciseStructuredPptx(page) {
+  const source = process.env.MARKWEAVE_E2E_STRUCTURED_PPTX_SOURCE;
+  assert.ok(source);
+  await openReversionWorkspace(page);
+  const input = page.getByLabel(/Source document/);
+  await input.setInputFiles(source);
+  await page.getByText("Selected markweave-t83-edited.pptx").waitFor();
+  const extraction = page.getByRole("group", { name: "PowerPoint extraction" });
+  const anydoc = extraction.getByRole("radio", {
+    name: "Standard document extraction",
+  });
+  assert.equal(await anydoc.isChecked(), true);
+  await extraction.getByRole("radio", { name: "Marp Markdown" }).check();
+  const notes = extraction.getByRole("checkbox", {
+    name: "Include presenter notes",
+  });
+  const images = extraction.getByRole("checkbox", { name: "Include images" });
+  assert.equal(await notes.isChecked(), true);
+  assert.equal(await images.isChecked(), true);
+  const accepted = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/v1/reversions") &&
+      response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Start conversion" }).click();
+  const response = await accepted;
+  assert.equal(response.status(), 202);
+  const job = await response.json();
+  assert.match(job.id, /^[0-9a-f-]{36}$/);
+  assert.deepEqual(job.options, {
+    extraction: "marp",
+    include_notes: true,
+    include_images: true,
+  });
+  await page.locator(`button[title="${job.id}"]`).click();
+  const button = page.getByRole("button", { name: "Download result" });
+  await button.waitFor({ timeout: 60_000 });
+  const downloaded = page.waitForEvent("download");
+  await button.click();
+  const download = await downloaded;
+  assert.match(download.suggestedFilename(), /\.zip$/);
+  const path = await download.path();
+  assert.ok(path);
+  execFileSync(
+    "python",
+    [
+      "-c",
+      String.raw`import json,sys,zipfile; z=zipfile.ZipFile(sys.argv[1]); assert z.namelist()==['document.md','assets/image-0001.png','manifest.json']; m=z.read('document.md'); assert m.startswith(b'---\nmarp: true\n---\n\n'); assert b'T83 edited first slide' in m and b'T83 edited second slide' in m and b'<!--\nT83 edited presenter note\n-->' in m and b'![Edited pixels](assets/image-0001.png)' in m; assert json.loads(z.read('manifest.json'))['extractor']=='markweave-pptx-v1'`,
+      path,
+    ],
+    { timeout: 10_000 },
+  );
+}
+
 test(
   "Next Revert workspace uses live capabilities and the real reverse lifecycle",
   { timeout: 600_000 },
   async () => {
     const phase = process.env.MARKWEAVE_E2E_REVERSE_PHASE ?? "primary";
-    assert.ok(["primary", "admission", "recovered"].includes(phase));
+    assert.ok(
+      ["primary", "structured", "admission", "recovered"].includes(phase),
+    );
     const profile = process.env.MARKWEAVE_E2E_PROFILE;
     assert.ok(profile === "standalone" || profile === "distributed");
     const browser = await chromium.launch({
@@ -113,6 +184,11 @@ test(
         return;
       }
       await login(page);
+      if (phase === "structured") {
+        await exerciseStructuredPptx(page);
+        await context.close();
+        return;
+      }
       await page.getByLabel(/Source file/).setInputFiles({
         buffer: Buffer.from("# Forward conversion source"),
         mimeType: "text/markdown",

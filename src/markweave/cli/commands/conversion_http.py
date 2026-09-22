@@ -142,15 +142,24 @@ class ConversionHttpClient:
         """Read the authoritative reverse-conversion admission contract."""
         return self.request("GET", "/api/v1/reversions/capabilities")
 
-    def submit_reversion(
+    def submit_reversion(  # noqa: PLR0913 - fixed multipart API contract
         self,
         source: bytes,
         *,
         filename: str,
         idempotency_key: str | None,
+        extraction: str = "anydoc",
+        include_notes: bool = True,
+        include_images: bool = True,
     ) -> ConversionHttpResponse:
         """Submit one reverse conversion with its basename only."""
-        body, content_type = _reversion_multipart_body(source, filename=filename)
+        body, content_type = _reversion_multipart_body(
+            source,
+            filename=filename,
+            extraction=extraction,
+            include_notes=include_notes,
+            include_images=include_images,
+        )
         headers = {"Content-Type": content_type}
         if idempotency_key is not None:
             headers["Idempotency-Key"] = idempotency_key
@@ -327,7 +336,14 @@ def _multipart_body(  # noqa: PLR0913 - explicit multipart API contract
     return b"".join(chunks), f"multipart/form-data; boundary={boundary}"
 
 
-def _reversion_multipart_body(source: bytes, *, filename: str) -> tuple[bytes, str]:
+def _reversion_multipart_body(
+    source: bytes,
+    *,
+    filename: str,
+    extraction: str = "anydoc",
+    include_notes: bool = True,
+    include_images: bool = True,
+) -> tuple[bytes, str]:
     if (
         not filename
         or filename in {".", ".."}
@@ -347,6 +363,18 @@ def _reversion_multipart_body(source: bytes, *, filename: str) -> tuple[bytes, s
             ).encode(),
             b"Content-Type: application/octet-stream\r\n\r\n",
             source,
+            b"\r\n",
+            f"--{boundary}\r\n".encode(),
+            b'Content-Disposition: form-data; name="extraction"\r\n\r\n',
+            extraction.encode("ascii"),
+            b"\r\n",
+            f"--{boundary}\r\n".encode(),
+            b'Content-Disposition: form-data; name="include_notes"\r\n\r\n',
+            str(include_notes).lower().encode("ascii"),
+            b"\r\n",
+            f"--{boundary}\r\n".encode(),
+            b'Content-Disposition: form-data; name="include_images"\r\n\r\n',
+            str(include_images).lower().encode("ascii"),
             b"\r\n",
             f"--{boundary}--\r\n".encode(),
         )

@@ -82,13 +82,27 @@ def _settings(tmp_path: Path, **overrides: object) -> Settings:
 def test_unix_execution_policy_and_client_use_every_explicit_ceiling(
     tmp_path: Path,
 ) -> None:
-    settings = _settings(tmp_path)
+    settings = _settings(
+        tmp_path,
+        reversion_pptx_max_archive_entries=200,
+        reversion_pptx_max_member_bytes=9_000,
+        reversion_pptx_max_uncompressed_bytes=25_000,
+        reversion_pptx_max_xml_elements=5_000,
+        reversion_pptx_max_xml_depth=32,
+        reversion_pptx_max_xml_attributes=6_000,
+    )
     policies = build_reversion_execution_policies(settings)
     client = build_reversion_broker_client(settings, policies)
 
     assert isinstance(client, UnixBrokerClient)
     assert policies.worker.running_limit == 1
     assert policies.content_limits.max_input_bytes == 10_000
+    assert policies.content_limits.max_pptx_archive_entries == 200
+    assert policies.content_limits.max_pptx_member_bytes == 9_000
+    assert policies.content_limits.max_pptx_uncompressed_bytes == 25_000
+    assert policies.content_limits.max_pptx_xml_elements == 5_000
+    assert policies.content_limits.max_pptx_xml_depth == 32
+    assert policies.content_limits.max_pptx_xml_attributes == 6_000
     assert policies.broker_policy.channel_limits.max_output_bytes == 30_000
     assert policies.broker_policy.limits.memory_bytes == 512_000_000
 

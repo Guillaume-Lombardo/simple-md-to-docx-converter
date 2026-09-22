@@ -115,6 +115,12 @@ class Settings(BaseSettings):
     reversion_asset_max_total_output_bytes: int | None = Field(default=None, gt=0)
     reversion_markdown_max_bytes: int | None = Field(default=None, gt=0)
     reversion_package_max_bytes: int | None = Field(default=None, gt=0)
+    reversion_pptx_max_archive_entries: int | None = Field(default=None, gt=0)
+    reversion_pptx_max_member_bytes: int | None = Field(default=None, gt=0)
+    reversion_pptx_max_uncompressed_bytes: int | None = Field(default=None, gt=0)
+    reversion_pptx_max_xml_elements: int | None = Field(default=None, gt=0)
+    reversion_pptx_max_xml_depth: int | None = Field(default=None, gt=0, le=64)
+    reversion_pptx_max_xml_attributes: int | None = Field(default=None, gt=0)
     reversion_running_limit: int | None = Field(default=None, gt=0)
     reversion_worker_lease_seconds: float | None = Field(
         default=None, gt=0, allow_inf_nan=False

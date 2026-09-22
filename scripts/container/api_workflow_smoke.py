@@ -193,6 +193,7 @@ def validate_reversion_capabilities(
         "result_package_modes",
         "pdf",
         "execution",
+        "extraction",
     }:
         raise RuntimeError("reversion capabilities top-level schema is invalid")
     if (
@@ -208,6 +209,21 @@ def validate_reversion_capabilities(
         != {"local": True, "ocr": False, "hosted_fallback": False}
     ):
         raise RuntimeError("reversion capabilities runtime contract is invalid")
+    extraction = payload["extraction"]
+    if (
+        type(extraction) is not dict
+        or extraction
+        != {
+            "modes": ["anydoc", "slides", "marp"],
+            "default_mode": "anydoc",
+            "structured_extensions": [".pptx"],
+            "include_notes_default": True,
+            "include_images_default": True,
+        }
+        or type(extraction.get("include_notes_default")) is not bool
+        or type(extraction.get("include_images_default")) is not bool
+    ):
+        raise RuntimeError("reversion extraction capabilities contract is invalid")
     formats = payload["format_families"]
     if [
         (entry.get("family"), tuple(entry.get("extensions", ()))) for entry in formats

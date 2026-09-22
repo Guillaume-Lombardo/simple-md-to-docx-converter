@@ -26,6 +26,11 @@ from markweave.reversions.errors import ReverseConversionError, ReverseErrorCate
 from markweave.reversions.formats import FormatAdmission, FormatFamily
 from markweave.reversions.manifest import ManifestSource
 from markweave.reversions.models import ReverseContentLimits, ReverseOutputMode
+from markweave.reversions.options import (
+    PPTX_EXTRACTOR,
+    ReverseExtraction,
+    ReversionOptions,
+)
 from markweave.reversions.package import build_reverse_package
 
 pytestmark = pytest.mark.unit
@@ -49,7 +54,10 @@ LIMITS = ReverseContentLimits(
 WORD_SOURCE = ManifestSource("word", "docx")
 
 
-def _job(admission: FormatAdmission | None = None) -> ReversionJob:
+def _job(
+    admission: FormatAdmission | None = None,
+    options: ReversionOptions | None = None,
+) -> ReversionJob:
     return ReversionJob(
         id=UUID("10000000-0000-4000-8000-000000000001"),
         owner_id=UUID("20000000-0000-4000-8000-000000000001"),
@@ -67,6 +75,7 @@ def _job(admission: FormatAdmission | None = None) -> ReversionJob:
         step=ReversionJobStep.QUEUED,
         created_at=NOW,
         updated_at=NOW,
+        options=options or ReversionOptions(),
     )
 
 
@@ -85,6 +94,7 @@ def _package(
     assets: tuple[NormalizedAsset, ...] = (),
     unavailable: int = 0,
     source: ManifestSource = WORD_SOURCE,
+    extractor: str | None = None,
 ) -> bytes:
     references = tuple(asset.path for asset in assets) + (None,) * unavailable
     markdown = "".join(f"![]({asset.path.as_posix()})\n" for asset in assets)
@@ -97,6 +107,7 @@ def _package(
         unavailable_asset_count=unavailable,
         source=source,
         limits=LIMITS.package_limits,
+        extractor=extractor,
     ).content
 
 
@@ -182,6 +193,40 @@ def test_validates_unavailable_only_package() -> None:
 
     assert result.trace.asset_count == 0
     assert result.trace.unavailable_asset_count == 2
+
+
+def test_structured_result_requires_and_records_truthful_extractor() -> None:
+    options = ReversionOptions(ReverseExtraction.SLIDES, True, True)
+    job = _job(
+        FormatAdmission(FormatFamily.POWERPOINT, ".pptx", "pptx", "pptx"),
+        options,
+    )
+    content = _package(
+        unavailable=1,
+        source=ManifestSource("powerpoint", "pptx"),
+        extractor=PPTX_EXTRACTOR,
+    )
+
+    result = validate_reverse_result(
+        job, ReverseOutputMode.MARKDOWN_WITH_UNAVAILABLE_ASSETS, content, LIMITS
+    )
+
+    assert result.trace.extractor == PPTX_EXTRACTOR
+    missing = _package(
+        unavailable=1,
+        source=ManifestSource("powerpoint", "pptx"),
+    )
+    assert (
+        _category(
+            lambda: validate_reverse_result(
+                job,
+                ReverseOutputMode.MARKDOWN_WITH_UNAVAILABLE_ASSETS,
+                missing,
+                LIMITS,
+            )
+        )
+        is ReverseErrorCategory.PROTOCOL_ERROR
+    )
 
 
 def test_csv_trace_records_selected_parser() -> None:

@@ -244,7 +244,8 @@ class _SQLiteInventoryStorage:
             path.parent.mkdir(parents=True, exist_ok=True)
             with self._connect() as connection:
                 self._initialize_or_verify_schema(connection)
-                self._verify_all(connection)
+                with self._read_snapshot(connection):
+                    self._verify_all(connection)
         except OSError, sqlite3.DatabaseError, ValueError:
             _inventory_fail()
 
@@ -279,9 +280,17 @@ class _SQLiteInventoryStorage:
             _inventory_fail()
 
     @contextmanager
+    def _read_snapshot(self, connection: sqlite3.Connection) -> Iterator[None]:
+        connection.execute("BEGIN")
+        try:
+            yield
+        finally:
+            connection.rollback()
+
+    @contextmanager
     def _verified_connection(self) -> Iterator[sqlite3.Connection]:
         try:
-            with self._connect() as connection:
+            with self._connect() as connection, self._read_snapshot(connection):
                 self._verify_all(connection)
                 yield connection
         except sqlite3.DatabaseError, ValueError:

@@ -153,10 +153,21 @@ forward worker and no production default is provided.
 | `MARKWEAVE_REVERSION_OUTPUT_MAX_BYTES`, `MARKWEAVE_REVERSION_MARKDOWN_MAX_BYTES`, `MARKWEAVE_REVERSION_PACKAGE_MAX_BYTES` | Required positive result/channel ceilings with Markdown and package bounded by output |
 | `MARKWEAVE_REVERSION_IMAGE_MAX_SOURCE_BYTES`, `MARKWEAVE_REVERSION_IMAGE_MAX_WIDTH_PIXELS`, `MARKWEAVE_REVERSION_IMAGE_MAX_HEIGHT_PIXELS`, `MARKWEAVE_REVERSION_IMAGE_MAX_PIXELS`, `MARKWEAVE_REVERSION_IMAGE_MAX_SVG_ELEMENTS`, `MARKWEAVE_REVERSION_IMAGE_MAX_SVG_DEPTH` | Required reverse-only image ceilings |
 | `MARKWEAVE_REVERSION_ASSET_MAX_COUNT`, `MARKWEAVE_REVERSION_ASSET_MAX_TOTAL_SOURCE_BYTES`, `MARKWEAVE_REVERSION_ASSET_MAX_TOTAL_OUTPUT_BYTES` | Required reverse-only aggregate asset ceilings |
+| `MARKWEAVE_REVERSION_PPTX_MAX_ARCHIVE_ENTRIES`, `MARKWEAVE_REVERSION_PPTX_MAX_MEMBER_BYTES`, `MARKWEAVE_REVERSION_PPTX_MAX_UNCOMPRESSED_BYTES` | Optional positive structured-PPTX archive overrides; when omitted, the reader derives them from the configured reverse input, asset-source, and Markdown byte ceilings |
+| `MARKWEAVE_REVERSION_PPTX_MAX_XML_ELEMENTS`, `MARKWEAVE_REVERSION_PPTX_MAX_XML_DEPTH`, `MARKWEAVE_REVERSION_PPTX_MAX_XML_ATTRIBUTES` | Optional positive structured-PPTX XML overrides; depth is capped at 64, while omitted values derive from the configured Markdown ceiling and the reviewed depth ceiling |
 | `MARKWEAVE_REVERSION_RUNNING_LIMIT` | Required positive global reverse-running claim cap; it does not replace shared queue admission |
 | `MARKWEAVE_REVERSION_WORKER_LEASE_SECONDS`, `MARKWEAVE_REVERSION_WORKER_HEARTBEAT_SECONDS`, `MARKWEAVE_REVERSION_WORKER_MAX_DURATION_SECONDS`, `MARKWEAVE_REVERSION_WORKER_INCOMPLETE_SUBMISSION_SECONDS`, `MARKWEAVE_REVERSION_WORKER_COLLECT_POLL_SECONDS` | Required positive attempt timings; heartbeat is shorter than lease and polling does not exceed heartbeat |
 | `MARKWEAVE_REVERSION_WORKER_RECOVERY_LEASE_SECONDS`, `MARKWEAVE_REVERSION_WORKER_RECOVERY_BATCH_SIZE`, `MARKWEAVE_REVERSION_WORKER_RECONCILIATION_ACK_BATCH_SIZE` | Required positive recovery and reconciliation bounds |
 | `MARKWEAVE_REVERSION_WORKER_CLEANUP_LEASE_SECONDS`, `MARKWEAVE_REVERSION_WORKER_CLEANUP_INTERVAL_SECONDS`, `MARKWEAVE_REVERSION_WORKER_CLEANUP_BATCH_SIZE`, `MARKWEAVE_REVERSION_WORKER_ERROR_BACKOFF_SECONDS` | Required positive maintenance and retry bounds |
+
+The derived structured-PPTX limits are deterministic: archive entries use at least one entry and
+otherwise `REVERSION_UPLOAD_MAX_BYTES / 46`; one member uses the upload ceiling; total
+uncompressed bytes use the sum of the upload, total asset-source, and Markdown ceilings; XML
+elements and attributes use the Markdown ceiling; and XML depth uses 64. Set an override when
+measured workloads require a lower reviewed ceiling. Structured PPTX requests extend the existing
+workspace protocol with extraction options and these six limits, so deploy the T83 API/worker,
+broker, and attempt image as one synchronized set. Default `anydoc` requests retain the legacy
+version-1 wire shape during that update.
 
 For `unix`, also set the absolute `MARKWEAVE_REVERSION_BROKER_SOCKET_PATH`; all mTLS fields must be
 absent. For `mtls`, set `MARKWEAVE_REVERSION_BROKER_ENDPOINT_HOST` to a canonical IPv4 address,
@@ -173,8 +184,12 @@ absent. Pydantic settings encode the pin tuple as a JSON array in the environmen
 The broker is a host-native service with its own owner-only runtime configuration and mTLS material.
 See [broker deployment](reverse-broker-deployment.md) for its principal, certificate, readiness,
 and image requirements. Worker and broker policy, transport identity, and immutable attempt-image
-digest must agree; do not copy forward-conversion limits or use an unpublished image digest. The
-exact matched-image, two-profile qualification remains in progress.
+digest must agree; do not copy forward-conversion limits or use an unpublished image digest. Technical
+matched-image qualification is complete for T73 on `main`
+`31f19243ebe25345dec2c3bde843a5caf261d53a` (CI `35702469912`) and the historical T83
+`4888cd067e848c59162d801c2399be99b7f81969` two-profile candidate. The new inventory-snapshot fix
+remains under qualification. T87/G1L-586
+authorizes, but has not published, 0.7.2; keep the existing 0.7.1 pins and do not infer a digest.
 
 ## Jobs, workers, metrics, and retention
 

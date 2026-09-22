@@ -8,6 +8,7 @@ import sys
 from typing import cast
 
 from markweave.reversions._anydoc_compat import (
+    detect_source,
     extract_asset_sources,
     parse_source,
     render_document_result,
@@ -27,7 +28,9 @@ from markweave.reversions.models import (
     ReverseAttemptSuccess,
     ReverseOutputMode,
 )
+from markweave.reversions.options import PPTX_EXTRACTOR, ReverseExtraction
 from markweave.reversions.package import build_reverse_package
+from markweave.reversions.pptx import render_pptx
 
 _MAX_INPUT_ENV = "MARKWEAVE_REVERSE_MAX_INPUT_BYTES"
 _MAX_OUTPUT_ENV = "MARKWEAVE_REVERSE_MAX_OUTPUT_BYTES"
@@ -81,6 +84,8 @@ def _retain_rendered_assets(
 def convert_request(request: ReverseAttemptRequest) -> ReverseAttemptSuccess:
     """Convert one admitted source into an unpublished bounded result."""
 
+    if request.options.extraction is not ReverseExtraction.ANYDOC:
+        return _convert_pptx(request)
     parsed = parse_source(request.source, request.extension)
     normalized_assets = ()
     asset_references = ()
@@ -119,6 +124,31 @@ def convert_request(request: ReverseAttemptRequest) -> ReverseAttemptSuccess:
         mode = ReverseOutputMode.MARKDOWN_WITH_ASSETS
     else:
         mode = ReverseOutputMode.MARKDOWN_WITH_UNAVAILABLE_ASSETS
+    return ReverseAttemptSuccess(request.attempt_id, mode, package.content)
+
+
+def _convert_pptx(request: ReverseAttemptRequest) -> ReverseAttemptSuccess:
+    admission = detect_source(request.source, request.extension)
+    if admission.parser_format != "pptx":
+        raise ReverseConversionError(ReverseErrorCategory.UNSUPPORTED)
+    rendered = render_pptx(request.source, request.options, request.limits)
+    normalized = rendered.normalized
+    package = build_reverse_package(
+        rendered.markdown,
+        normalized.assets,
+        tuple(reference.path for reference in normalized.references),
+        unavailable_asset_count=normalized.unavailable_asset_count,
+        source=ManifestSource("powerpoint", "pptx"),
+        limits=request.limits.package_limits,
+        extractor=PPTX_EXTRACTOR,
+    )
+    mode = (
+        ReverseOutputMode.MARKDOWN
+        if package.extension == ".md"
+        else ReverseOutputMode.MARKDOWN_WITH_ASSETS
+        if normalized.assets
+        else ReverseOutputMode.MARKDOWN_WITH_UNAVAILABLE_ASSETS
+    )
     return ReverseAttemptSuccess(request.attempt_id, mode, package.content)
 
 

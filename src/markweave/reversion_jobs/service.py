@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 from contextlib import suppress
 from dataclasses import dataclass
@@ -23,6 +24,7 @@ from markweave.reversion_jobs.models import (
     ReversionSubmission,
 )
 from markweave.reversion_jobs.ports import ReversionRepository
+from markweave.reversions.options import ReverseExtraction
 from markweave.storage import (
     BoundedObjectStore,
     ObjectKey,
@@ -93,6 +95,7 @@ class ReversionService:
                 idempotency_digest=_idempotency_digest(idempotency_key),
                 correlation_id=request.correlation_id or str(job_id),
                 created_at=request.now,
+                options=request.options,
             )
         )
         if replayed:
@@ -172,7 +175,7 @@ def _digest(value: bytes) -> str:
 
 
 def _request_digest(request: ReversionRequest, source_sha256: str) -> str:
-    fields = (
+    fields = [
         source_sha256,
         str(len(request.source)),
         request.source_stem,
@@ -181,7 +184,11 @@ def _request_digest(request: ReversionRequest, source_sha256: str) -> str:
         request.admission.detected_format or "",
         request.admission.parser_format,
         repr(request.component_versions),
-    )
+    ]
+    if request.options.extraction is not ReverseExtraction.ANYDOC:
+        fields.append(
+            json.dumps(request.options.to_dict(), separators=(",", ":"), sort_keys=True)
+        )
     return _digest("\0".join(fields).encode())
 
 

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from markweave.reversions.errors import ReverseErrorCategory, reject
+from markweave.reversions.options import PPTX_EXTRACTOR
 
 SourceFamily = Literal[
     "word", "powerpoint", "excel", "opendocument", "rtf", "epub", "csv", "pdf"
@@ -78,12 +79,20 @@ def _validate_result(result: ManifestResult) -> None:
 def canonical_manifest_bytes(
     source: ManifestSource,
     result: ManifestResult,
+    *,
+    extractor: str | None = None,
 ) -> bytes:
     """Return the sole canonical schema-v1 manifest serialization."""
 
     if source.detected_format not in _FAMILY_FORMATS.get(source.family, frozenset()):
         reject(ReverseErrorCategory.PROTOCOL_ERROR)
     _validate_result(result)
+    if extractor is not None and (
+        extractor != PPTX_EXTRACTOR
+        or source.family != "powerpoint"
+        or source.detected_format != "pptx"
+    ):
+        reject(ReverseErrorCategory.PROTOCOL_ERROR)
     manifest = {
         "schema_version": 1,
         "engine": {"name": "firecrawl-anydoc", "version": "0.2.4"},
@@ -99,6 +108,8 @@ def canonical_manifest_bytes(
         },
         "execution": {"local": True, "ocr": False, "hosted_fallback": False},
     }
+    if extractor is not None:
+        manifest["extractor"] = extractor
     return (
         json.dumps(manifest, ensure_ascii=False, separators=(",", ":")) + "\n"
     ).encode("utf-8")

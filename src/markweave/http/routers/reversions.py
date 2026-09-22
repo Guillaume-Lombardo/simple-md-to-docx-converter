@@ -9,6 +9,7 @@ from fastapi import (
     APIRouter,
     Depends,
     File,
+    Form,
     Header,
     Query,
     Request,
@@ -37,6 +38,7 @@ from markweave.reversion_jobs.service import ReversionService
 from markweave.reversions.capabilities import build_reversion_capabilities
 from markweave.reversions.detection import admit_reverse_source
 from markweave.reversions.models import ReverseOutputMode
+from markweave.reversions.options import ReverseExtraction, ReversionOptions
 
 _RESULT_MEDIA_TYPES = {
     ReverseOutputMode.MARKDOWN: "text/markdown; charset=utf-8",
@@ -113,6 +115,13 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:
                 "ocr": capabilities.execution.ocr,
                 "hosted_fallback": capabilities.execution.hosted_fallback,
             },
+            extraction={
+                "modes": tuple(ReverseExtraction),
+                "default_mode": ReverseExtraction.ANYDOC,
+                "structured_extensions": (".pptx",),
+                "include_notes_default": True,
+                "include_images_default": True,
+            },
         )
 
     @router.post(
@@ -139,6 +148,9 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:
         actor: Annotated[User, Depends(dependencies.mutation_actor)],
         runtime: Annotated[ReversionService, Depends(dependencies.reversion_runtime)],
         source: Annotated[UploadFile, File()],
+        extraction: Annotated[ReverseExtraction, Form()] = ReverseExtraction.ANYDOC,
+        include_notes: Annotated[bool, Form()] = True,
+        include_images: Annotated[bool, Form()] = True,
         idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
     ) -> ReversionResponse:
         maximum = dependencies.settings.reversion_upload_max_bytes
@@ -150,6 +162,11 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:
             await source.close()
             raise ReversionJobRequestError
         filename = source.filename
+        try:
+            options = ReversionOptions(extraction, include_notes, include_images)
+        except ValueError:
+            await source.close()
+            raise ReversionJobRequestError from None
         try:
             content = await source.read(maximum + 1)
         finally:
@@ -169,6 +186,7 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:
                     now=datetime.now(UTC),
                     source=content,
                     correlation_id=getattr(request.state, CORRELATION_STATE_KEY),
+                    options=options,
                 ),
                 idempotency_key,
             )

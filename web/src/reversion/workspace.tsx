@@ -51,6 +51,11 @@ export function ReversionWorkspace({
 
   if (authState.phase !== "authenticated") return null;
   const extensionHint = state.extensions.join(", ");
+  const supportsStructuredSource =
+    state.source &&
+    state.capabilities?.extraction.structured_extensions.some((extension) =>
+      state.source?.name.toLowerCase().endsWith(extension),
+    );
   return (
     <AppShell
       current="Revert"
@@ -157,6 +162,75 @@ export function ReversionWorkspace({
                   {state.source ? "Change file" : "Choose file"}
                 </span>
               </label>
+              {supportsStructuredSource && state.options && (
+                <fieldset className="space-y-3 rounded-control border border-muted p-4">
+                  <legend className="px-1 font-medium">
+                    PowerPoint extraction
+                  </legend>
+                  <p className="text-sm text-muted">
+                    Slide-oriented output preserves slide boundaries.
+                    Unsupported meaningful content is marked with a clear
+                    placeholder.
+                  </p>
+                  {state.capabilities?.extraction.modes.includes("anydoc") && (
+                    <label className="flex items-center gap-2">
+                      <input
+                        checked={state.options.extraction === "anydoc"}
+                        name="extraction"
+                        onChange={() => controller.setExtraction("anydoc")}
+                        type="radio"
+                      />
+                      Standard document extraction
+                    </label>
+                  )}
+                  {state.capabilities?.extraction.modes.includes("slides") && (
+                    <label className="flex items-center gap-2">
+                      <input
+                        checked={state.options.extraction === "slides"}
+                        name="extraction"
+                        onChange={() => controller.setExtraction("slides")}
+                        type="radio"
+                      />
+                      Slide-oriented Markdown
+                    </label>
+                  )}
+                  {state.capabilities?.extraction.modes.includes("marp") && (
+                    <label className="flex items-center gap-2">
+                      <input
+                        checked={state.options.extraction === "marp"}
+                        name="extraction"
+                        onChange={() => controller.setExtraction("marp")}
+                        type="radio"
+                      />
+                      Marp Markdown
+                    </label>
+                  )}
+                  {state.options.extraction !== "anydoc" && (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <label className="flex items-center gap-2">
+                        <input
+                          checked={state.options.include_notes}
+                          onChange={(event) =>
+                            controller.setIncludeNotes(event.target.checked)
+                          }
+                          type="checkbox"
+                        />
+                        Include presenter notes
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input
+                          checked={state.options.include_images}
+                          onChange={(event) =>
+                            controller.setIncludeImages(event.target.checked)
+                          }
+                          type="checkbox"
+                        />
+                        Include images
+                      </label>
+                    </div>
+                  )}
+                </fieldset>
+              )}
               <button
                 className="primary-button"
                 disabled={state.submitting}

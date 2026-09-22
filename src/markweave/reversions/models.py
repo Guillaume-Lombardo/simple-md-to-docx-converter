@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from uuid import UUID
 
@@ -10,7 +10,10 @@ from markweave.conversion.images import ImageLimits
 from markweave.reversions.assets import ReverseAssetLimits
 from markweave.reversions.errors import ReverseErrorCategory
 from markweave.reversions.formats import normalize_extension_hint
+from markweave.reversions.options import ReverseExtraction, ReversionOptions
 from markweave.reversions.package import PackageLimits
+
+MAX_PPTX_XML_DEPTH = 64
 
 
 class ReverseOutputMode(StrEnum):
@@ -38,6 +41,12 @@ class ReverseContentLimits:
     max_total_asset_output_bytes: int
     max_markdown_bytes: int
     max_package_bytes: int
+    max_pptx_archive_entries: int | None = None
+    max_pptx_member_bytes: int | None = None
+    max_pptx_uncompressed_bytes: int | None = None
+    max_pptx_xml_elements: int | None = None
+    max_pptx_xml_depth: int | None = None
+    max_pptx_xml_attributes: int | None = None
 
     def __post_init__(self) -> None:
         for value in (
@@ -52,6 +61,21 @@ class ReverseContentLimits:
             if type(value) is not int or value <= 0:
                 raise ValueError("Reverse content limits must be positive integers")
         _ = self.image_limits
+        for value in (
+            self.max_pptx_archive_entries,
+            self.max_pptx_member_bytes,
+            self.max_pptx_uncompressed_bytes,
+            self.max_pptx_xml_elements,
+            self.max_pptx_xml_depth,
+            self.max_pptx_xml_attributes,
+        ):
+            if value is not None and (type(value) is not int or value <= 0):
+                raise ValueError("Reverse PPTX limits must be positive integers")
+        if (
+            self.max_pptx_xml_depth is not None
+            and self.max_pptx_xml_depth > MAX_PPTX_XML_DEPTH
+        ):
+            raise ValueError("Reverse PPTX XML depth exceeds the reader safety ceiling")
         if (
             self.max_markdown_bytes > self.max_output_bytes
             or self.max_package_bytes > self.max_output_bytes
@@ -100,6 +124,7 @@ class ReverseAttemptRequest:
     extension: str
     limits: ReverseContentLimits
     source: bytes
+    options: ReversionOptions = field(default_factory=ReversionOptions)
 
     def __post_init__(self) -> None:
         if type(self.attempt_id) is not UUID:
@@ -111,6 +136,11 @@ class ReverseAttemptRequest:
             raise ValueError("Reverse-attempt input must not be empty")
         if len(self.source) > self.limits.max_input_bytes:
             raise ValueError("Reverse-attempt input exceeds its configured limit")
+        if type(self.options) is not ReversionOptions or (
+            self.options.extraction is not ReverseExtraction.ANYDOC
+            and self.extension != ".pptx"
+        ):
+            raise ValueError("Reverse extraction options do not match the source")
 
 
 @dataclass(frozen=True, slots=True)

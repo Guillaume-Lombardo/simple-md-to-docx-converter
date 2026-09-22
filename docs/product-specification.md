@@ -803,6 +803,7 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T84 | Continue responsibility-based decomposition of application Python modules above 1,000 lines, preserving imports, transaction/proof boundaries and the single private anydoc adapter | T79 |
 | T85 | Filter owner-scoped conversion history by output family and expiration before pagination, avoiding browser history scans | T12, T13, T45, T62, T82 |
 | T86 | Diagnose dependency CI failures and make immutable image acquisition resilient to transient transport failures | T22, T27 |
+| T87 | Validate final documentation, publish patch 0.7.2 with the matched three-image set, and adopt verified public receipts | T22, T83 |
 
 The next priorities approved on 2026-09-21 are T50 qualification, then T73 reverse-conversion
 qualification, T85 history filtering, T86 CI/dependency reliability, and T83 structured PowerPoint
@@ -810,6 +811,12 @@ extraction. T48 mutation CI integration is independent work. T74 remains deferre
 Kubernetes deployment need justifies it. Small documentation and obsolete-code cleanups may
 accompany focused, reviewed changes. This ordering does not add blocking dependencies between
 otherwise independent tickets or authorize a new public release version.
+
+On 2026-09-22, the user separately authorized T87: validate the final documentation, then publish
+patch 0.7.2 through the existing protected workflow, verify the complete public image set, adopt
+its exact registry receipts, and clean up the merged work branches. T87 completes T73's public
+reverse-attempt image criterion after technical qualification; it does not depend on that
+publication criterion being completed beforehand. T74 remains deferred.
 
 Recommended delivery order: T00 and T01 can start in parallel, and T00 may continue alongside only foundation work that does not depend on its unresolved outcomes. T04 still waits for both T00 and T01. Continue with the remaining autonomous foundation (T02–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23), followed by the trusted-upstream deployment option, its rootless compatibility correction, the public-origin correction, the CI/origin reliability follow-up, the bounded SSH-tunnel evaluation mode, optional-template conversion, and startup user provisioning with required password renewal (T24–T30). For the frontend migration, complete T58 first; T59 and T60 may then proceed independently, followed by T61, the authoritative runtime-metadata prerequisite T65, and the authoritative session-policy-bounds prerequisite T66 before the parallel workflow migrations T62 and T63 and the single verified cutover T64.
 

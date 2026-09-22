@@ -101,8 +101,12 @@ release. Confirm the broker reports `READY` only after its inventoried attempt s
 verify the authenticated capabilities response and configured upload limit before reopening reverse
 submission. Treat queued or interrupted reverse jobs according to their recovered persisted state;
 do not run workers against an unverified attempt-image digest or mix broker and application release
-identities. Exact-image reverse recovery qualification remains in progress until T73 acceptance
-passes.
+identities. Technical final-image qualification is complete for T73 on `main`
+`31f19243ebe25345dec2c3bde843a5caf261d53a` (CI `35702469912`); the historical T83 candidate
+`4888cd067e848c59162d801c2399be99b7f81969` passed both profiles. Qualification of the new
+inventory-snapshot fix remains in progress.
+T87/G1L-586 authorizes 0.7.2 but it is not published: retain existing 0.7.1 pins and do not infer a
+new public image digest.
 
 Run the production restore command with `--report-directory` and `--evidence-id`. This measures the
 approved profile RPO/RTO and exclusively retains a content-free owner-only report. The compatibility

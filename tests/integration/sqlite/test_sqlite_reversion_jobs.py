@@ -53,6 +53,7 @@ from markweave.reversion_jobs.models import (
 )
 from markweave.reversion_jobs.policy import ReversionAdmissionPolicy
 from markweave.reversion_jobs.reconciliation import ReversionBrokerReconciler
+from markweave.reversions.options import ReverseExtraction
 from tests.reversion_job_repository_contracts import (
     LEASE_END,
     NOW,
@@ -64,6 +65,9 @@ from tests.reversion_job_repository_contracts import (
     proof,
     submission,
     trace,
+)
+from tests.reversion_options_migration_contract import (
+    exercise_reversion_options_migration,
 )
 
 REVERSION_MIGRATION = import_module(
@@ -113,11 +117,12 @@ def test_sqlite_reversion_repository_contract_and_restart(tmp_path: Path) -> Non
     engine.dispose()
 
     reopened = create_database_engine(url)
-    assert (
-        SqlReversionJobRepository(reopened)
-        .list_owner(owner.id, offset=0, limit=10)
-        .total
-        == 1
+    restarted = SqlReversionJobRepository(reopened).list_owner(
+        owner.id, offset=0, limit=10
+    )
+    assert restarted.total == 2
+    assert any(
+        item.options.extraction is ReverseExtraction.MARP for item in restarted.items
     )
     reopened.dispose()
 
@@ -891,3 +896,10 @@ def test_sqlite_conflicting_idempotent_submissions_never_replay(tmp_path: Path) 
     assert len(successes) == 1
     assert len(failures) == 1 and isinstance(failures[0], ReversionJobConflictError)
     engine.dispose()
+
+
+@pytest.mark.integration
+def test_sqlite_reversion_options_migration_preserves_populated_jobs(
+    tmp_path: Path,
+) -> None:
+    exercise_reversion_options_migration(standalone_database_url(tmp_path))

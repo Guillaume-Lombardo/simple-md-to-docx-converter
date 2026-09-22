@@ -385,6 +385,13 @@ def test_reversion_capabilities_are_authenticated_content_free_and_deterministic
             ),
         },
         "execution": {"local": True, "ocr": False, "hosted_fallback": False},
+        "extraction": {
+            "modes": ["anydoc", "slides", "marp"],
+            "default_mode": "anydoc",
+            "structured_extensions": [".pptx"],
+            "include_notes_default": True,
+            "include_images_default": True,
+        },
     }
     assert {
         name for name in sys.modules if name == "anydoc" or name.startswith("anydoc.")

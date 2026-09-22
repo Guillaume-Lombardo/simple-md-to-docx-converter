@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 
 import pytest
 
@@ -62,3 +63,24 @@ def test_json_error_reads_stderr_and_requires_the_stable_code(mocker) -> None:
 
     with pytest.raises(workflow.WorkflowFailure, match="reverse CLI error code"):
         workflow._require_error_code(error, "source_type_invalid")
+
+
+def test_main_dispatches_structured_pptx_phase(mocker, monkeypatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "reverse_cli_workflow.py",
+            "--container",
+            "final-app",
+            "--profile",
+            "standalone",
+            "--phase",
+            "structured-pptx",
+        ],
+    )
+    structured = mocker.patch.object(workflow, "_exercise_structured_pptx")
+
+    assert workflow.main() == 0
+
+    structured.assert_called_once_with("final-app", "standalone")

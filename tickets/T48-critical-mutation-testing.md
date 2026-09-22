@@ -2,7 +2,7 @@
 ticket: T48
 linear_id: G1L-424
 linear_url: https://linear.app/g1lom/issue/G1L-424/t48-expand-mutation-testing-across-critical-invariants
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -45,6 +45,14 @@ and verify it on main under the existing review process. This scope update does 
 workflow, change branch protection, or declare T48 complete.
 
 ## Progress
+
+* 2026-09-22: Completed after exact main `6e46707ef47b5213fae7ae0f6bbb64174d66056b`
+  passed all checks in CI `35698832218`, including both full E2E profiles and the required
+  mutation gate. The downloaded main mutation report records 25 selected and 25 killed mutants,
+  with all six failure-status counts zero. PR #253 is squash-merged and its exact source branch
+  removed locally and remotely. Repository-owned CI remains the documented enforcement boundary;
+  no organization or Enterprise feature is required. T73 adds three independently reviewed
+  reverse-result targets, whose PR #258 CI campaign separately reports 28 selected and 28 killed.
 
 * 2026-09-22: PR #253 was squash-merged as
   `6e46707ef47b5213fae7ae0f6bbb64174d66056b` after exact-head verification and

@@ -58,7 +58,31 @@ service advertises the supported format families and current upload limit.
 
 If the service cannot provide supported-format information, or the page does not recognize its
 capability schema, submission stays disabled. Ask the service operator if Revert remains unavailable.
-Reverse conversion is experimental; its exact final-image qualification is still in progress.
+Reverse conversion is experimental. Technical final-image qualification is complete for T73 on
+`main` `31f19243ebe25345dec2c3bde843a5caf261d53a` (CI `35702469912`) and for the historical T83
+`4888cd067e848c59162d801c2399be99b7f81969` two-profile candidate. Qualification of the new
+inventory-snapshot fix remains in progress. The authorized T87/G1L-586 0.7.2 release is not
+published, so existing 0.7.1 pins remain authoritative and no new public digest is implied.
+
+## Extract an edited PowerPoint presentation
+
+Open `/revert` (2md) and select an accepted document. The default extraction uses the existing
+document-oriented anydoc workflow. For an accepted `.pptx`, choose **Slide-oriented Markdown** to
+preserve slide boundaries or **Marp Markdown** for the documented Marp subset. These choices are
+opt-in: they do not change ordinary document extraction.
+
+Structured PowerPoint extraction starts with the service's advertised presenter-note and image
+defaults. You can exclude either before submission. The output identifies meaningful PowerPoint
+content that cannot be represented safely with a clear placeholder; it does not silently omit that
+content. Images use the normal safe result package when assets are present or unavailable, so
+download the ZIP when the job reports an asset package.
+
+This extracts the edited presentation; it does not recover the original Markdown or a source
+archive from a 2pptx output, and it does not promise full visual round-trip fidelity. Layout,
+master, and background details appear as warning placeholders when they matter. OCR, arbitrary
+CSS, executable presentation formats, and hosted fallbacks are unavailable. Documents whose text
+requires OCR still fail with the displayed safe error; embedded images are preserved as assets
+without text recognition.
 
 ## Templates
 
