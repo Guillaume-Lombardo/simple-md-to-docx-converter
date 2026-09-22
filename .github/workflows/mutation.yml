@@ -4,14 +4,6 @@ on:
   schedule:
     - cron: "43 4 * * 2"
   workflow_dispatch:
-    inputs:
-      target:
-        description: Bounded Python symbol pattern to mutate
-        required: true
-        type: choice
-        default: markweave.observability.x__normalize_method__mutmut_*
-        options:
-          - markweave.observability.x__normalize_method__mutmut_*
 
 permissions:
   contents: read
@@ -22,7 +14,7 @@ concurrency:
 
 jobs:
   mutation:
-    name: Mutation / targeted
+    name: Mutation / full campaign
     if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -43,36 +35,17 @@ jobs:
           enable-cache: false
       - name: Synchronize locked dependencies
         run: uv sync --locked --all-groups
-      - name: Run a fresh, non-empty targeted mutation campaign
+      - name: Run the reviewed full mutation campaign
         env:
-          MUTATION_TARGET: ${{ inputs.target || 'markweave.observability.x__normalize_method__mutmut_*' }}
-        run: |
-          set -euo pipefail
-          rm -rf -- mutants
-          uv run mutmut run "$MUTATION_TARGET"
-          uv run mutmut export-cicd-stats
-          uv run python - <<'PY'
-          import json
-          from pathlib import Path
-
-          stats = json.loads(
-              Path("mutants/mutmut-cicd-stats.json").read_text(encoding="utf-8")
-          )
-          if stats.get("killed", 0) <= 0:
-              raise SystemExit("Mutation campaign produced no killed mutants.")
-          failures = {
-              name: stats.get(name, 0)
-              for name in (
-                  "survived",
-                  "no_tests",
-                  "suspicious",
-                  "timeout",
-                  "check_was_interrupted_by_user",
-                  "segfault",
-              )
-              if stats.get(name, 0) != 0
-          }
-          if failures:
-              raise SystemExit(f"Mutation campaign left non-killed mutants: {failures}")
-          print(f"Mutation campaign killed {stats['killed']} mutants.")
-          PY
+          MUTATION_MODE: all
+        run: >-
+          uv run python -m scripts.ci.run_mutation_campaign --mode "$MUTATION_MODE"
+          --artifact mutation-results/report.json
+      - name: Retain mutation evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: mutation-results/report.json
+          if-no-files-found: error
+          retention-days: 30
