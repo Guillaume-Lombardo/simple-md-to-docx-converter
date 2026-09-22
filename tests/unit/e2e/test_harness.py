@@ -991,9 +991,13 @@ def test_reverse_fault_injection_waits_for_bound_pause_and_joins_observers() -> 
     assert lifecycle.index('wait_reverse_marker "$barrier"') < lifecycle.index(
         'podman kill --signal KILL "$runtime"'
     )
-    assert lifecycle.index(
-        'chmod 0644 "/browser-session/$stem-binding.json"'
-    ) < lifecycle.index('touch "${binding%.json}.ready"')
+    assert 'chmod 0644 "/browser-session/$stem-binding.json"' not in lifecycle
+    assert 'touch "${binding%.json}.ready"' not in lifecycle
+    assert '--output-ready-marker "/browser-session/$stem-binding.ready"' in lifecycle
+    assert (
+        '--diagnostics "$temporary_directory/browser-artifacts/'
+        '$stem-pause-state.json"' in lifecycle
+    )
     verification = lifecycle[lifecycle.index("reverse_lifecycle_workflow verify") :]
     assert verification.index('chmod 0644 "$state"') < verification.index(
         'podman exec "$application_name"'

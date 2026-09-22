@@ -603,13 +603,13 @@ run_reverse_lifecycle() {
     podman exec "$application_name" /opt/md-converter/venv/bin/python \
       /e2e/reverse_lifecycle_workflow.py diagnostics --wait-for-recovery-attempt \
       --state-file "/browser-session/$stem.json" --output "/browser-session/$stem-binding.json" \
-      --ready-marker "/browser-session/$stem-binding-watching.json"
-    podman exec "$application_name" chmod 0644 "/browser-session/$stem-binding.json"
-    touch "${binding%.json}.ready"
+      --ready-marker "/browser-session/$stem-binding-watching.json" \
+      --output-ready-marker "/browser-session/$stem-binding.ready"
   ) &
   reverse_diagnostics_pid=$!
   uv run python -m scripts.e2e.reverse_broker watch-pause --root "$broker_directory" \
-    --state "$state" --binding "$binding" --barrier "$barrier" &
+    --state "$state" --binding "$binding" --barrier "$barrier" \
+    --diagnostics "$temporary_directory/browser-artifacts/$stem-pause-state.json" &
   reverse_pause_pid=$!
   wait_reverse_marker "$diagnostics_watching" "$reverse_diagnostics_pid"
   wait_reverse_marker "${barrier%.json}.ready" "$reverse_pause_pid"

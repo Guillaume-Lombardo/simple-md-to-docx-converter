@@ -56,7 +56,21 @@ def _setup(tmp_path: Path, mocker: MockerFixture):
     inventory.other_unit = other_unit
     mocker.patch.object(fixture, "SQLiteBrokerInventory", return_value=inventory)
     mocker.patch.object(fixture, "_runtime_environment", return_value=({}, {}))
-    command = mocker.Mock(return_value=(0, b""))
+    runtime_state = {
+        "Status": "running",
+        "Running": True,
+        "Paused": False,
+        "ExitCode": 0,
+    }
+
+    def run_command(arguments, **_kwargs):
+        if arguments[0] == "pause":
+            runtime_state["Paused"] = True
+        elif arguments[0] == "unpause":
+            runtime_state["Paused"] = False
+        return 0, b""
+
+    command = mocker.Mock(side_effect=run_command)
     mocker.patch.object(fixture, "BoundedCommandRunner", return_value=command)
     runtime = mocker.Mock()
     observed = SimpleNamespace(
@@ -73,8 +87,9 @@ def _setup(tmp_path: Path, mocker: MockerFixture):
         incarnation=other_unit.runtime_incarnation,
         container_id="b" * 64,
     )
-    runtime.discover.return_value = (other_observed, observed)
-    runtime._inspect.return_value = {"State": {"Paused": True}}
+    runtime.discover.side_effect = [(), (other_observed, observed)]
+    runtime._inspect.side_effect = lambda _identity: {"State": dict(runtime_state)}
+    runtime.state = runtime_state
     mocker.patch.object(fixture, "PodmanIsolationRuntime", return_value=runtime)
     state = tmp_path / "state.json"
     state_value = {
@@ -113,11 +128,70 @@ def test_pause_is_bound_to_exact_synthetic_attempt_and_resumed(
     state, binding, barrier, command, _runtime, observed, _inventory = _setup(
         tmp_path, mocker
     )
-    fixture.watch_pause(tmp_path, state, binding, barrier)
+
+    def discover(*, limit: int):
+        assert limit == 16
+        if _runtime.discover.call_count == 1:
+            assert not barrier.with_suffix(".ready").exists()
+            return ()
+        return (_runtime.other_observed, observed)
+
+    _runtime.other_observed = SimpleNamespace(
+        unit_id=_inventory.other_unit.unit_id,
+        attempt_id=_inventory.other_unit.attempt_id,
+        principal_id=fixture.WORKER_ID,
+        incarnation=_inventory.other_unit.runtime_incarnation,
+        container_id="b" * 64,
+    )
+    _runtime.discover.side_effect = discover
+    fixture.watch_pause(
+        tmp_path, state, binding, barrier, tmp_path / "pause-state.json"
+    )
     assert json.loads(barrier.read_text())["container_id"] == observed.container_id
+    assert _runtime.discover.call_count == 2
     assert command.call_args_list[0].args == (("pause", observed.container_id),)
     assert all("b" * 64 not in call.args[0] for call in command.call_args_list)
     assert command.call_args_list[-1].args == (("unpause", observed.container_id),)
+    evidence = json.loads((tmp_path / "pause-state.json").read_text())
+    timings = evidence.pop("timings_millis")
+    assert evidence == {
+        "failure": None,
+        "inventory_incarnation": str(_inventory.unit.runtime_incarnation),
+        "inventory_unit_id": str(_inventory.unit.unit_id),
+        "paused": True,
+        "phase": "paused",
+        "runtime_attempt_id": str(observed.attempt_id),
+        "runtime_container_id": observed.container_id,
+        "runtime_incarnation": str(observed.incarnation),
+        "runtime_state_before_pause": {
+            "exit_code": 0,
+            "paused": False,
+            "running": True,
+            "status": "running",
+        },
+        "runtime_state_on_failure": None,
+        "schema": "t73-reverse-pause-state-v1",
+        "target_attempt_id": str(observed.attempt_id),
+    }
+    assert set(timings) == {
+        "prearmed",
+        "binding_resolved",
+        "inventory_observed",
+        "runtime_verified",
+        "paused",
+        "failed",
+    }
+    assert all(
+        type(timings[field]) is int
+        for field in (
+            "prearmed",
+            "binding_resolved",
+            "inventory_observed",
+            "runtime_verified",
+            "paused",
+        )
+    )
+    assert timings["failed"] is None
 
 
 def test_binding_mismatch_never_pauses_or_writes_crash_marker(
@@ -130,7 +204,27 @@ def test_binding_mismatch_never_pauses_or_writes_crash_marker(
     value["attempts"] = []
     binding.write_text(json.dumps(value))
     with pytest.raises(RuntimeError, match="not unique"):
-        fixture.watch_pause(tmp_path, state, binding, barrier)
+        fixture.watch_pause(
+            tmp_path, state, binding, barrier, tmp_path / "pause-state.json"
+        )
+    assert not barrier.exists()
+    command.assert_not_called()
+
+
+def test_preflight_failure_never_announces_or_pauses(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    state, binding, barrier, command, runtime, _observed, _inventory = _setup(
+        tmp_path, mocker
+    )
+    runtime.discover.side_effect = RuntimeError("runtime discovery failed")
+
+    with pytest.raises(RuntimeError, match="runtime discovery failed"):
+        fixture.watch_pause(
+            tmp_path, state, binding, barrier, tmp_path / "pause-state.json"
+        )
+
+    assert not barrier.with_suffix(".ready").exists()
     assert not barrier.exists()
     command.assert_not_called()
 
@@ -143,9 +237,16 @@ def test_runtime_incarnation_mismatch_never_pauses(
     )
     observed.incarnation = object()
     with pytest.raises(RuntimeError, match="binding differs"):
-        fixture.watch_pause(tmp_path, state, binding, barrier)
+        fixture.watch_pause(
+            tmp_path, state, binding, barrier, tmp_path / "pause-state.json"
+        )
     command.assert_not_called()
     assert not barrier.exists()
+    evidence = json.loads((tmp_path / "pause-state.json").read_text())
+    assert evidence["phase"] == "failed"
+    assert evidence["failure"] == "RuntimeError"
+    assert evidence["target_attempt_id"] == str(observed.attempt_id)
+    assert evidence["runtime_container_id"] is None
 
 
 def test_pause_deadline_unpauses_exact_owned_unit(
@@ -157,8 +258,121 @@ def test_pause_deadline_unpauses_exact_owned_unit(
     barrier.with_suffix(".release").unlink()
     mocker.patch.object(fixture.time, "monotonic", side_effect=[0, 0, 31])
     with pytest.raises(RuntimeError, match="release timed out"):
-        fixture.watch_pause(tmp_path, state, binding, barrier)
+        fixture.watch_pause(
+            tmp_path, state, binding, barrier, tmp_path / "pause-state.json"
+        )
     command.assert_any_call(("unpause", observed.container_id))
+    evidence = json.loads((tmp_path / "pause-state.json").read_text())
+    assert evidence["runtime_state_on_failure"] == {
+        "exit_code": 0,
+        "paused": True,
+        "running": True,
+        "status": "running",
+    }
+
+
+def test_cleanup_failure_preserves_observer_failure(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    state, binding, barrier, command, runtime, observed, _inventory = _setup(
+        tmp_path, mocker
+    )
+    barrier.with_suffix(".release").unlink()
+    mocker.patch.object(fixture.time, "monotonic", side_effect=[0, 0, 31])
+
+    def fail_cleanup(arguments, **_kwargs):
+        if arguments[0] == "pause":
+            runtime.state["Paused"] = True
+            return 0, b""
+        if arguments[:2] == ("container", "exists"):
+            raise RuntimeError("cleanup inspection failed")
+        return 0, b""
+
+    command.side_effect = fail_cleanup
+    with pytest.raises(ExceptionGroup) as raised:
+        fixture.watch_pause(
+            tmp_path, state, binding, barrier, tmp_path / "pause-state.json"
+        )
+    assert [str(error) for error in raised.value.exceptions] == [
+        "T73 pause barrier release timed out",
+        "cleanup inspection failed",
+    ]
+    assert json.loads((tmp_path / "pause-state.json").read_text())["failure"] == (
+        "RuntimeError"
+    )
+    assert observed.container_id == "a" * 64
+
+
+@pytest.mark.parametrize(
+    ("post_failure", "diagnostic_failure"),
+    [("exited", False), ("absent", False), ("exited", True)],
+)
+def test_pause_failure_preserves_original_and_bounded_state(
+    tmp_path: Path,
+    mocker: MockerFixture,
+    post_failure: str,
+    diagnostic_failure: bool,
+) -> None:
+    state, binding, barrier, command, runtime, observed, _inventory = _setup(
+        tmp_path, mocker
+    )
+    pause_error = RuntimeError("pause command failed")
+
+    def fail_pause(arguments, **_kwargs):
+        if arguments[0] == "pause":
+            if post_failure == "exited":
+                runtime.state.update(
+                    Status="exited", Running=False, Paused=False, ExitCode=125
+                )
+            raise pause_error
+        if arguments[:2] == ("container", "exists"):
+            return 1, b""
+        return 0, b""
+
+    command.side_effect = fail_pause
+    original_inspect = runtime._inspect.side_effect
+    if post_failure == "absent":
+        runtime._inspect.side_effect = [
+            original_inspect(observed.container_id),
+            RuntimeError("container absent"),
+        ]
+    if diagnostic_failure:
+        original_write = fixture._write_bounded_json
+        write_count = 0
+
+        def fail_second_write(path, value):
+            nonlocal write_count
+            write_count += 1
+            if write_count == 2:
+                raise OSError("diagnostic write failed")
+            original_write(path, value)
+
+        mocker.patch.object(fixture, "_write_bounded_json", fail_second_write)
+
+    with pytest.raises(RuntimeError) as raised:
+        fixture.watch_pause(
+            tmp_path, state, binding, barrier, tmp_path / "pause-state.json"
+        )
+
+    assert raised.value is pause_error
+    assert not barrier.exists()
+    assert all("b" * 64 not in call.args[0] for call in command.call_args_list)
+    evidence = json.loads((tmp_path / "pause-state.json").read_text())
+    if diagnostic_failure:
+        assert evidence["phase"] == "runtime-verified"
+    else:
+        assert evidence["phase"] == "failed"
+        assert evidence["failure"] == "RuntimeError"
+        assert evidence["runtime_state_on_failure"] == (
+            {
+                "exit_code": 125,
+                "paused": False,
+                "running": False,
+                "status": "exited",
+            }
+            if post_failure == "exited"
+            else None
+        )
 
 
 @pytest.mark.parametrize("field", ["schema", "profile", "scenario", "job_ids"])
@@ -172,7 +386,9 @@ def test_diagnostic_source_mismatch_never_pauses(
     value[field] = "wrong"
     binding.write_text(json.dumps(value))
     with pytest.raises(RuntimeError, match="source binding differs"):
-        fixture.watch_pause(tmp_path, state, binding, barrier)
+        fixture.watch_pause(
+            tmp_path, state, binding, barrier, tmp_path / "pause-state.json"
+        )
     assert not barrier.exists()
     command.assert_not_called()
 
@@ -193,7 +409,9 @@ def test_foreign_policy_or_principal_never_pauses(
     mocker.patch.object(fixture.time, "monotonic", side_effect=[0, 0, 31])
     mocker.patch.object(fixture.time, "sleep")
     with pytest.raises(RuntimeError, match="pause timed out"):
-        fixture.watch_pause(tmp_path, state, binding, barrier)
+        fixture.watch_pause(
+            tmp_path, state, binding, barrier, tmp_path / "pause-state.json"
+        )
     command.assert_not_called()
     assert not barrier.exists()
 
@@ -207,12 +425,17 @@ def test_observer_termination_resumes_owned_unit(
 
     def interrupt_pause(arguments, **_kwargs):
         if arguments[0] == "pause":
+            _runtime.state["Paused"] = True
             signal.raise_signal(signal.SIGTERM)
+        if arguments[0] == "unpause":
+            _runtime.state["Paused"] = False
         return 0, b""
 
     command.side_effect = interrupt_pause
     with pytest.raises(InterruptedError, match="observer interrupted"):
-        fixture.watch_pause(tmp_path, state, binding, barrier)
+        fixture.watch_pause(
+            tmp_path, state, binding, barrier, tmp_path / "pause-state.json"
+        )
     assert not barrier.exists()
     command.assert_any_call(("unpause", observed.container_id))
 
@@ -244,7 +467,9 @@ def test_second_attempt_binding_never_pauses(
     value["attempts"][0]["attempt_number"] = 2
     binding.write_text(json.dumps(value))
     with pytest.raises(RuntimeError, match="first attempt is unavailable"):
-        fixture.watch_pause(tmp_path, state, binding, barrier)
+        fixture.watch_pause(
+            tmp_path, state, binding, barrier, tmp_path / "pause-state.json"
+        )
     command.assert_not_called()
     assert not barrier.exists()
 
@@ -258,10 +483,13 @@ def test_vanished_target_never_pauses_unrelated_unit(
     inventory.unacknowledged.side_effect = None
     inventory.unacknowledged.return_value = (inventory.other_unit,)
     runtime.discover.return_value = ()
+    runtime.discover.side_effect = None
     mocker.patch.object(fixture.time, "monotonic", side_effect=[0, 0, 31])
     mocker.patch.object(fixture.time, "sleep")
     with pytest.raises(RuntimeError, match="pause timed out"):
-        fixture.watch_pause(tmp_path, state, binding, barrier)
+        fixture.watch_pause(
+            tmp_path, state, binding, barrier, tmp_path / "pause-state.json"
+        )
     command.assert_not_called()
     assert not barrier.exists()
 

@@ -128,6 +128,7 @@ def test_diagnostic_watcher_announces_after_first_targeted_query(
     state_path.write_text(json.dumps(state))
     output = tmp_path / "binding.json"
     ready = tmp_path / "watching.json"
+    output_ready = tmp_path / "binding.ready"
     attempt_id = str(uuid4())
     values = {
         "job_id": state["recovery_job_id"],
@@ -173,6 +174,7 @@ def test_diagnostic_watcher_announces_after_first_targeted_query(
         output,
         wait_for_recovery_attempt=True,
         ready_marker=ready,
+        output_ready_marker=output_ready,
     )
 
     assert connection.execute.call_count == 2
@@ -181,6 +183,54 @@ def test_diagnostic_watcher_announces_after_first_targeted_query(
         "recovery_job_id": state["recovery_job_id"],
     }
     assert json.loads(output.read_text())["attempts"][0]["attempt_id"] == attempt_id
+    assert output.stat().st_mode & 0o777 == 0o644
+    assert json.loads(output_ready.read_text()) == {
+        "schema": "t73-reverse-diagnostics-binding-v1",
+        "recovery_job_id": state["recovery_job_id"],
+    }
+    engine.dispose.assert_called_once_with()
+
+
+def test_binding_permission_failure_never_publishes_ready_marker(
+    tmp_path, mocker
+) -> None:
+    state = _state()
+    state_path = tmp_path / "state.json"
+    state_path.write_text(json.dumps(state))
+    output = tmp_path / "binding.json"
+    output_ready = tmp_path / "binding.ready"
+    connection = mocker.MagicMock()
+    connection.execute.return_value.all.return_value = []
+    connection.__enter__.return_value = connection
+    engine = mocker.Mock()
+    engine.connect.return_value = connection
+    mocker.patch.object(workflow, "create_database_engine", return_value=engine)
+    mocker.patch.object(
+        workflow,
+        "Settings",
+        return_value=SimpleNamespace(
+            storage_profile=workflow.StorageProfile.STANDALONE,
+            standalone_data_directory=tmp_path,
+        ),
+    )
+    original_chmod = workflow.os.chmod
+
+    def fail_published_output(path, mode):
+        if path == output:
+            raise PermissionError("denied")
+        original_chmod(path, mode)
+
+    mocker.patch.object(workflow.os, "chmod", side_effect=fail_published_output)
+
+    with pytest.raises(PermissionError, match="denied"):
+        workflow.diagnostics(
+            state_path,
+            output,
+            output_ready_marker=output_ready,
+        )
+
+    assert output.exists()
+    assert not output_ready.exists()
     engine.dispose.assert_called_once_with()
 
 

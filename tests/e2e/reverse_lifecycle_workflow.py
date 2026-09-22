@@ -413,6 +413,7 @@ def diagnostics(
     *,
     wait_for_recovery_attempt: bool = False,
     ready_marker: Path | None = None,
+    output_ready_marker: Path | None = None,
 ) -> None:
     """Project content-free attempt fencing evidence for synthetic job UUIDs only."""
     state = _read_state(state_file)
@@ -490,6 +491,15 @@ def diagnostics(
             "attempts": projected,
         },
     )
+    if output_ready_marker is not None:
+        os.chmod(output, 0o644)
+        _write_json(
+            output_ready_marker,
+            {
+                "schema": "t73-reverse-diagnostics-binding-v1",
+                "recovery_job_id": state["recovery_job_id"],
+            },
+        )
 
 
 def _timestamp(value: object, field: str) -> datetime:
@@ -649,6 +659,7 @@ def main() -> int:
     command.add_argument("--output", type=Path, required=True)
     command.add_argument("--wait-for-recovery-attempt", action="store_true")
     command.add_argument("--ready-marker", type=Path)
+    command.add_argument("--output-ready-marker", type=Path)
     args = parser.parse_args()
     try:
         if args.operation == "prepare":
@@ -665,11 +676,19 @@ def main() -> int:
         else:
             if args.ready_marker is not None and not args.wait_for_recovery_attempt:
                 parser.error("--ready-marker requires --wait-for-recovery-attempt")
+            if (
+                args.output_ready_marker is not None
+                and not args.wait_for_recovery_attempt
+            ):
+                parser.error(
+                    "--output-ready-marker requires --wait-for-recovery-attempt"
+                )
             diagnostics(
                 args.state_file,
                 args.output,
                 wait_for_recovery_attempt=args.wait_for_recovery_attempt,
                 ready_marker=args.ready_marker,
+                output_ready_marker=args.output_ready_marker,
             )
     except (OSError, subprocess.SubprocessError, WorkflowFailure) as error:
         print(f"T73 reverse lifecycle E2E failed: {error}", file=sys.stderr)

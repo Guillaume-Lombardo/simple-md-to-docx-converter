@@ -77,3 +77,24 @@ The bounded release-alignment exception passes 105 tests and live verification o
 GHCR tags. Its code and documentation are independently approved. Version/OpenAPI/clean-install
 checks pass 81 tests, and documentation/changelog checks pass 38. Global formatting, lint, typing,
 lockfile and dependency checks pass. Full qualification and public 0.7.3 publication remain pending.
+
+2026-09-22: PR #261 CI `35731906682` attempt 2 passed image acquisition and the primary
+API, CLI, corpus and structured-PPTX paths, then failed while pausing the exact recovery target
+in the distributed lifecycle harness. Target completion before pause is plausible but unproven;
+target-state evidence was absent. One authorized network retry was consumed. The remaining
+network retry does not cover this failure.
+
+The user authorized preparing runtime verification before observer readiness, publishing a readable
+binding directly from the diagnostic process, and retaining bounded content-free target-state
+evidence. Regression tests, independent review and actual local qualification of both profiles must
+precede resumed publication. Isolation, signed identity, exact-attempt selection and cleanup guards
+remain required. Version 0.7.3, deployment and cleanup remain pending.
+
+The follow-up harness correction passes 77 focused unit/integration tests, including preflight
+failure without readiness, permission failure without binding publication, exited or absent target
+state, and preservation of the original pause error when diagnostic writing fails. Global Ruff and
+typing checks pass. Current 0.7.3 application images were built from `6be1533`; the later harness
+changes do not change image inputs. Independent review approved the correction and reproduced all
+77 passing tests; local profile qualification remains pending. A disk-capacity failure during the reverse-image build was resolved by explicitly
+authorized removal of the three obsolete local `e3fb99b` candidates after live verification of their
+archived OCI checksums on docker-box. The active `4888cd0` images and rollback evidence remain.

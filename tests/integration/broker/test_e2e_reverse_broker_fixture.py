@@ -99,6 +99,7 @@ def test_lifecycle_diagnostic_watcher_is_querying_before_target_release(
     state_path.write_text(json.dumps(state))
     ready = tmp_path / "watching.json"
     output = tmp_path / "binding.json"
+    output_ready = tmp_path / "binding.ready"
     mocker.patch.object(
         lifecycle,
         "Settings",
@@ -115,6 +116,7 @@ def test_lifecycle_diagnostic_watcher_is_querying_before_target_release(
             output,
             wait_for_recovery_attempt=True,
             ready_marker=ready,
+            output_ready_marker=output_ready,
         )
         deadline = time.monotonic() + 5
         while not ready.exists() and time.monotonic() < deadline:
@@ -142,6 +144,12 @@ def test_lifecycle_diagnostic_watcher_is_querying_before_target_release(
             )
         future.result(timeout=5)
 
+    assert output_ready.exists()
+    assert stat.S_IMODE(output.stat().st_mode) == 0o644
+    assert json.loads(output_ready.read_text()) == {
+        "schema": "t73-reverse-diagnostics-binding-v1",
+        "recovery_job_id": jobs[0],
+    }
     evidence = json.loads(output.read_text())
     assert evidence["attempts"] == [
         {
