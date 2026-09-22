@@ -28,6 +28,37 @@ T82 forward PowerPoint baseline; T69-T72 reverse-conversion isolation and lifecy
 
 ## Progress
 
+2026-09-22: A new local final-image candidate was built and qualified from clean source
+`4888cd067e848c59162d801c2399be99b7f81969`. Preflight and 13 focused boundary tests passed; the
+28-mutant campaign, the three-image build, and the uncompressed reverse-runtime
+OCI export also passed. The initial final-image run stopped before workflow execution because Podman
+could not unpack a layer after the host filesystem filled (`ENOSPC`). Its rollback/pull failure is
+retained as diagnostic evidence. The corrected attempt used only the verified disk prerequisite and
+artifact offload; the runner and source were unchanged. It completed standalone and distributed
+workflows, 21 resource measurements, and all three CI-mode supply-chain scans. Independent ASTRA
+review approved the recorded checksums and source/runner guards. The scans reported zero Critical
+findings; High counts were 133 (backend), 39 (frontend), and 134 (reverse attempt). The embedded
+reverse Cargo evidence also reported zero Critical and High findings. The reverse runtime identity is
+manifest `sha256:518e9f2cd71e999ed5e719ccdf3d554f1505d97ce925830eff684ec8aeb322f8`, derived from the
+uncompressed OCI export. The compressed scan archive manifest
+`sha256:4977529c5c86a3ab01c1718732303f265056893196cc037495d938db182d1106` is scan evidence only,
+not the runtime identity. The qualified images are now deployed to the Docker-box test instance and
+public HTTPS endpoint `https://markweave.g1lom.xyz`. Backend `e7c53afc`, frontend `da476b26`, and
+reverse runtime manifest `518e9f2c` match the qualified candidate. Four services are healthy; the
+broker is active, schema 19 is present, and no job was active before cutover. A fresh independently
+verified host-copy backup is `69bd3ba43e9bc1ed77509f4d06f7d383058fe4591a41c9adb8f329478a0f4ed7`, and the old
+virtual environment/configuration remains available for rollback. An authenticated structured Slides
+smoke job `000fc13e-fda2-417e-b338-521e0a584324` succeeded with a 1,572-byte result and SHA-256
+`317f4e6c13f6c6bfec17af623bfa3670472d3b6c802f8138ac418eb556acf528`; it verified notes, images,
+and warnings. Both reverse READY metrics were 1, the session logged out, the final smoke helper exited
+0, and router/public readiness passed. The original cutover script exited 1 after backend/frontend
+update when fixture transfer failed at `docker cp`/tmpfs; it is retained as a failed receipt. After
+fixture staging through tar stdin, the approved final helper passed without changing the candidate. An
+earlier backup-creation UID failure stopped safely and restored the old healthy service before the
+independently approved default-image-user correction. This deployment is distinct from pending PR,
+`main` integration, and public-release decisions; T83 remains In Progress. See
+[final-image evidence](../docs/evidence/t83-structured-pptx-final-images.md).
+
 2026-09-22: A subsequent local validation snapshot at clean `984da696d0ad2c8b0810414037a19bd65f967bb4`
 merged the reviewed normal T73 result and was independently approved. Its only application
 delta from the prior `912926ec46b25f135c93377d0cae885d3cd29fe7` snapshot is the reviewed 12-line CLI deadline fix; PPTX behavior is unchanged, while the CLI correction changes backend image inputs. `uv sync --all-groups`, global Ruff and `ty`, 255 focused CLI/CI policy tests (18.14s),

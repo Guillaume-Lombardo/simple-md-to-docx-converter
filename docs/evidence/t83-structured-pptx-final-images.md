@@ -5,6 +5,56 @@ or completion. The retained operator bundle is identified as `t83-final-b186d3a-
 archives, SBOMs, scan reports, measurements, logs, and checksums are retained with the qualification
 evidence.
 
+## Qualified local candidate: `4888cd0`
+
+A later local candidate was built from clean source
+`4888cd067e848c59162d801c2399be99b7f81969`. It preserves the historical `e3fb99b`
+identities below rather than relabelling them. The candidate images are local tags, not registry
+publication receipts or deployment pins.
+
+| Image | Local candidate tag | Configuration ID | Image digest |
+| --- | --- | --- | --- |
+| Backend | `localhost/md-converter:t83-final-4888cd0` | `e7c53afc1d239e06bd2f907e7dd5b372b931cda2f06702fcaf4b53ad8c36861b` | `sha256:95e014381d856504a3bc6e4c6dca4cdd4e6abf30aefacd5fbc47d7a8b6c6cc6b` |
+| Frontend | `localhost/md-converter-web:t83-final-4888cd0` | `da476b2628a89c92c935fa877b028f1fdf83696f177976f9702a4bb5135f9e95` | `sha256:f788da013c5290f110175cb6c05e4078b74cdb52628a13a4a164571fdfccbafc` |
+| Reverse attempt | `localhost/md-converter-reverse-attempt:t83-final-4888cd0` | `4d1b9bd322ed8b058e6c3d1778224a81475f447e1aebe36416b252c90b646ee5` | `sha256:518e9f2cd71e999ed5e719ccdf3d554f1505d97ce925830eff684ec8aeb322f8` |
+
+Preflight and 13 focused boundary tests passed, followed by the 28-mutant campaign, the
+three-image build, and an uncompressed OCI export of the reverse runtime. An initial run stopped
+when Podman could not unpack a layer after the host filesystem filled (`ENOSPC`); its rollback/pull
+failure remains retained diagnostic evidence. The corrected attempt changed only the verified disk
+prerequisite and artifact offload, leaving runner and source guards unchanged. It completed both
+standalone and distributed workflows, 21 resource measurements, and all three CI-mode supply-chain
+scans. Independent ASTRA review approved the source/runner guards and recorded checksums.
+
+The scans recorded zero Critical findings. High counts were 133 for the backend, 39 for the frontend,
+and 134 for the reverse attempt. Embedded reverse Cargo evidence recorded zero Critical and High
+findings. The reverse runtime manifest above is derived from the uncompressed OCI export. The
+compressed scan archive manifest
+`sha256:4977529c5c86a3ab01c1718732303f265056893196cc037495d938db182d1106` is evidence for that
+scan archive and is not a runtime identity.
+
+## Docker-box deployment
+
+The qualified candidate is now deployed to the Docker-box test instance and its public HTTPS endpoint
+`https://markweave.g1lom.xyz`. The active backend configuration ID is `e7c53afc`, frontend
+configuration ID is `da476b26`, and reverse runtime manifest is `sha256:518e9f2cd71e999ed5e719ccdf3d554f1505d97ce925830eff684ec8aeb322f8`, matching the qualified candidate. Four services are
+healthy, the broker is active, schema 19 is present, and no job was active before cutover.
+
+Backup `69bd3ba43e9bc1ed77509f4d06f7d383058fe4591a41c9adb8f329478a0f4ed7` was independently verified
+from a host copy; the previous virtual environment and configuration remain available for rollback.
+An authenticated structured Slides smoke job `000fc13e-fda2-417e-b338-521e0a584324` succeeded with a
+1,572-byte result, SHA-256
+`317f4e6c13f6c6bfec17af623bfa3670472d3b6c802f8138ac418eb556acf528`, and validation of notes,
+images, and warnings. Both reverse READY metrics were 1, the smoke session logged out, the final
+smoke helper exited 0, and router/public readiness passed.
+
+The original cutover script exited 1 after backend/frontend update because fixture transfer failed at
+`docker cp`/tmpfs. That receipt remains failed; it is not relabelled as successful. After fixture staging through tar stdin, the independently approved final smoke helper passed
+without changing the candidate.
+An earlier backup-creation host-UID failure stopped safely and reopened the old healthy service before
+the independently approved default-image-user correction. This is a test deployment, not a public
+release, `main` integration, or T83 completion.
+
 ## Identity and execution
 
 The three final candidate images were built from application source `e3fb99be5763bb8fc6f100be43140e61e221f82d`.
