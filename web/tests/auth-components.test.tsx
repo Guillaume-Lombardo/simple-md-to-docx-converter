@@ -90,7 +90,7 @@ test("login pending is announced, disabled, and duplicate clicks send one reques
   );
 });
 
-test("renewal provides labelled fields, logout, duration, and fresh-login navigation", async () => {
+test("renewal provides labelled fields, logout, and fresh-login navigation", async () => {
   const restricted = {
     ...regular,
     effective_idle_minutes: 17,
@@ -104,7 +104,7 @@ test("renewal provides labelled fields, logout, duration, and fresh-login naviga
   expect(
     await screen.findByRole("heading", { name: "Change your password" }),
   ).toBeVisible();
-  expect(screen.getByText(/17 minutes of inactivity/)).toBeVisible();
+  expect(screen.queryByText(/minutes of inactivity/)).toBeNull();
   expect(screen.queryByRole("link", { name: "templates" })).toBeNull();
   expect(screen.getByText("templates")).toHaveAttribute(
     "aria-disabled",

@@ -38,6 +38,10 @@ only a presentation aid.
 
 ## Administrator users tab
 
+Open **Users** (`/users`) for account management and the collapsible **Session policy** section.
+The policy section starts collapsed and supports keyboard activation. The former `/session-policy`
+address redirects here. The shared page header no longer repeats an inactivity reminder.
+
 Only an administrator sees the local-accounts section, and every underlying endpoint independently
 requires the administrator role. It lists and filters accounts by username and supports account
 creation, deactivation, reactivation, and password reset. Account status changes and password
@@ -60,9 +64,8 @@ precondition returns `428`, and a stale or malformed validator returns `412` wit
 or audit. Standard-user access is forbidden. The accepted inclusive ranges are 5–300 minutes for
 standard users and 5–60 minutes for administrators.
 
-This backend ticket intentionally adds no control to the legacy page or the Next.js application.
-T63 owns the Next.js administration control. Any future control must treat the FastAPI response,
-authorization decision, revision, and session enforcement as authoritative.
+The **Session policy** section displays the effective values, bounds, absolute ceiling, and
+revision. Updates preserve FastAPI authorization, concurrency checks, and session enforcement.
 
 ## Errors and accessibility
 

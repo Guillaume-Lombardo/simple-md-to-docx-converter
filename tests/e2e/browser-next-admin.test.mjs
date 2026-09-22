@@ -201,9 +201,21 @@ test(
       assert.equal(originalPolicy.body.revision, checkpointRevision);
 
       await adminPage
-        .getByRole("link", { name: "Session policy", exact: true })
+        .getByRole("link", { name: "Users", exact: true })
         .click();
-      await adminPage.waitForURL("**/session-policy");
+      await adminPage.waitForURL("**/users");
+      const policySection = adminPage.locator("details").filter({
+        has: adminPage.locator("summary", { hasText: "Session policy" }),
+      });
+      assert.equal(await policySection.getAttribute("open"), null);
+      const policyToggle = policySection.locator("summary");
+      await policyToggle.focus();
+      await adminPage.keyboard.press("Enter");
+      assert.equal(await policySection.getAttribute("open"), "");
+      await adminPage.keyboard.press("Enter");
+      assert.equal(await policySection.getAttribute("open"), null);
+      await policyToggle.click();
+      assert.equal(await adminPage.getByText(/minutes of inactivity/).count(), 0);
       await adminPage
         .getByRole("heading", { name: "Session policy", exact: true })
         .waitFor();
@@ -482,6 +494,7 @@ test(
       await alicePage.goto(`${baseURL}/session-policy`, {
         waitUntil: "networkidle",
       });
+      await alicePage.waitForURL("**/users");
       await alicePage.getByText("Administrator access is required.").waitFor();
       assert.equal(forbiddenPolicyGets, 0);
       assert.equal(

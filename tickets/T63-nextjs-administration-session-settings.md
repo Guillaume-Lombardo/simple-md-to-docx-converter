@@ -2,7 +2,7 @@
 ticket: T63
 linear_id: G1L-527
 linear_url: https://linear.app/g1lom/issue/G1L-527/t63-migrate-administration-and-session-settings-to-nextjs
-status: Done
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -73,3 +73,9 @@ Migrate template, user, and session-policy administration to the Next.js fronten
 ## Synchronization
 
 Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria, implementation boundaries, or progress changes.
+
+## UI follow-up — 2026-09-22
+
+User-authorized scope: combine Users and Session policy under the Users navigation tab, retain the old policy URL, and remove the repeated inactivity reminder from every page. Preserve backend enforcement. Add component and both-profile final-image browser regressions and update the administration guide. Acceptance: one administration tab, accessible collapsible policy section, unchanged account/policy operations and authorization, no shared inactivity reminder.
+
+Implemented the unified Users tab with a native collapsed policy section and a compatibility redirect from `/session-policy`. Removed the reminder from the shared shell. Added page/component and both-profile final-image browser regressions, including keyboard toggling and the old URL authorization path. Local frontend check passes (236 tests, 90.18% branches), native browser-helper coverage, production build and five production tests pass; Ruff formatting/lint, ty, Node syntax and diff checks pass. The canonical engine-excluding Python suite is running. Final-image E2E and independent review remain required before merge; the full local engine suite is unavailable because native Mermaid and LibreOffice are absent.

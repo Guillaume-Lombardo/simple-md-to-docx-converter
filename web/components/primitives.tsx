@@ -25,7 +25,6 @@ export function AppShell({
     | "Convert"
     | "Password"
     | "Revert"
-    | "Session policy"
     | "Templates"
     | "Users";
   onLogout?: () => void;
@@ -116,22 +115,13 @@ export function AppShell({
             </span>
           )}
           {user?.role === "admin" && !user.password_change_required && (
-            <>
-              <Link
-                aria-current={current === "Users" ? "page" : undefined}
-                className="text-accent underline-offset-4 hover:underline"
-                href="/users"
-              >
-                Users
-              </Link>
-              <Link
-                aria-current={current === "Session policy" ? "page" : undefined}
-                className="text-accent underline-offset-4 hover:underline"
-                href="/session-policy"
-              >
-                Session policy
-              </Link>
-            </>
+            <Link
+              aria-current={current === "Users" ? "page" : undefined}
+              className="text-accent underline-offset-4 hover:underline"
+              href="/users"
+            >
+              Users
+            </Link>
           )}
           {user && (
             <div className="ml-auto flex flex-wrap items-center gap-3">
@@ -147,12 +137,6 @@ export function AppShell({
         </nav>
       </header>
       <main className="mx-auto max-w-5xl space-y-6 p-6" id="main">
-        {user && (
-          <p className="text-sm text-muted">
-            You will be asked to sign in again after{" "}
-            {user.effective_idle_minutes} minutes of inactivity.
-          </p>
-        )}
         {children}
       </main>
     </>
