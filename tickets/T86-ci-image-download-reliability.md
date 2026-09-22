@@ -33,6 +33,14 @@ Own bounded transient acquisition retries for immutable CI/container images, che
 
 ## Progress
 
+* 2026-09-22: Main `582` rerun `35669415349` attempt 2 succeeded. PR #248 exact head
+  `dda91c267f875e54a04ff63b7697d6d26257534a` passed all checks, received independent review, and
+  merged as `cd229f7e8c5779b0d56f2721ba585b5ec3be0210`; its local and remote branches were removed
+  after verification. PR #248 contains the reviewed Hatchling, Boto3, and Ty dependency updates.
+  The CLI deadline correction is PR #257, already merged separately. New main CI
+  `35696095409` is still running, so current-main verification is not claimed. T86 remains In
+  Progress.
+
 * 2026-09-21: Created from user priority order 4. PR #248 at 8e8bdbde59c03a963e9b0f789120fc69d63c706f failed distributed E2E with unexpected EOF downloading a UBI9 Python 3.14 image blob from Quay (exit 125). Other matrix jobs passed; this observation does not yet establish dependency compatibility.
 * 2026-09-21: Linear moved to In Progress. The exact failing command was the unguarded `podman pull --quiet "$base_image"` in `scripts/e2e/run.sh`, after the distributed E2E workflow workload had completed. Podman exited 125 while reading Quay's `fbe94d...` UBI9 Python 3.14 layer from the upstream S3 URL with `unexpected EOF`; the other 15 CI jobs passed. This is an infrastructure transport failure, not a dependency or test regression.
 * 2026-09-21: Reviewed PR #248's only three updates: `boto3` 1.43.95 to 1.43.97, `hatchling` 1.32.0 to 1.32.3, and `ty` 0.0.81 to 0.0.82. `uv lock --check` passes and the complete PR matrix passed except for the isolated Quay transport failure. The locked Boto3 release supports Python 3.14; the Hatchling release is not yanked and has PyPI attestation; Ty publishes an immutable signed release with attestations. No other open dependency PR exists. Dependabot security alerts are disabled, so alert review could not be performed without administrative configuration.
