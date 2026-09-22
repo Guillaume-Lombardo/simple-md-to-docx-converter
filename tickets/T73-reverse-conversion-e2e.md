@@ -109,6 +109,14 @@ backend, frontend, and reverse-attempt images in both storage profiles.
 
 ## Progress
 
+* 2026-09-22: PR #258 passed every exact-head check in CI `35699385675` at
+  `9f9bcc77ea5f1bcbeef75ff9407515ac69be3087`, including both complete E2E profiles,
+  document engines, coverage, and the actual 28-mutant campaign. The independently reviewed
+  qualification was squash-merged as `31f19243ebe25345dec2c3bde843a5caf261d53a`, and its exact
+  source branch was removed locally and remotely. Main CI `35702469912` is running. T73 remains
+  In Progress while exact-main verification and the separately authorized public-image publication
+  criterion remain pending; no product release was triggered.
+
 * 2026-09-22: The clean canonical run at `27eba5082bb299f343ab3ab49420dbea65e7d9e3` passed 4,525
   tests, with 56 engine-marked tests deselected and 11 warnings in 1,662.28 seconds. Coverage was
   94.97% overall, 91.23% branches (6,408/7,024), and 100% of changed lines (15/15) from base
