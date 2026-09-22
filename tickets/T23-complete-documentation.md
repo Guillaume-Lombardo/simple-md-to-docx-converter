@@ -188,6 +188,8 @@ Complete English user, template, administrator, API, operations, storage, queue,
 
 - 2026-09-22: The user invoked yolo, authorizing publication of docs/T23-capabilities-and-history to main, squash merge after required checks and independent review, and exact source-branch cleanup. Local validation was repeated before publication. No version transition or release publication is included.
 
+- 2026-09-22: PR #264 at cd8da219489b332001d19dc28220dc8dcf89b910 hit one Python-shard failure: tests/test_package.py still asserted the previous exact keyword list (2,312 tests passed in that shard). The user renewed yolo authorization to fix and resume. Updated the existing metadata assertion to include powerpoint, pptx and document-to-markdown. Ruff formatting/lint, ty and the expanded package/documentation/version/real-release integration selection pass (18 tests). No runtime code changed.
+
 ## Synchronization
 
 Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria, or progress changes.
