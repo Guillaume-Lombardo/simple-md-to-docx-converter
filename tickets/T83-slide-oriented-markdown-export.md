@@ -128,3 +128,25 @@ checks, and T73 stacked integration remain separate boundaries.
   its 45-test evidence and negative control. Seven guides now distinguish historical qualified
   candidates from the pending new-source qualification and T87's authorized 0.7.2 publication;
   118 documentation/policy tests passed. New exact-head and main verification remain required.
+* 2026-09-22: Head `078569c2ed534c3355a5671cad297bf6d6b267bb` passed every hosted check
+  in CI `35709082811`, including both complete E2E profiles. The actual changed-domain mutation
+  report selected and killed 14 mutants, with all failure statuses zero. The local canonical suite
+  reported 4,694 passed, two failed and 56 engine-marked deselected. Journals establish that the
+  host disk-cleanup service pruned the unused workspace fixture image at 09:14:49 UTC, before
+  both systemd workspace tests reported that exact image missing at CREATE. The user authorized
+  fixture-owned stopped retention containers and their exact cleanup, independent review and
+  resumed validation. No system cleanup policy change is authorized or needed. Completion and
+  publication remain pending successful validation of this harness correction.
+* 2026-09-22: The fixture correction protects base, process and workspace images with
+  never-started containers, without broker-managed labels, implicit pulls or anonymous volumes.
+  The focused process integration module passed all 31 cases using the retained external reverse
+  image; all temporary retainers were removed and that external image was preserved. The initial
+  fixture assertion used Podman's internal `configured` name rather than its actual inspect value
+  `created`; that setup failure and the corrected passing run are retained separately. Independent
+  review requested a narrow cleanup improvement for partial creation or malformed command output
+  before final validation. No application code or system policy changed in this correction.
+* 2026-09-22: Final fixture validation passed all 33 process integration cases, including real
+  container creation followed by injected malformed output or timeout. Both regressions verify
+  removal of the exact generated retainer and preservation of the external image. No retainers
+  remained after the run; source and test-diff guards passed. Global Ruff/ty and documentation
+  checks pass. The corrected canonical suite and new exact-head CI remain required before merge.

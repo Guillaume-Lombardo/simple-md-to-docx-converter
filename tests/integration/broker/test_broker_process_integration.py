@@ -11,6 +11,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -100,6 +101,116 @@ def _podman(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[
     )
 
 
+@contextmanager
+def _retain_fixture_image(image: str, purpose: str) -> Iterator[None]:
+    """Keep one fixture image referenced by a never-started container."""
+
+    container_id: str | None = None
+    name = f"markweave-test-image-retainer-{purpose}-{uuid4().hex}"
+    try:
+        created = _podman(
+            "create",
+            "--pull=never",
+            "--network=none",
+            "--image-volume=ignore",
+            "--name",
+            name,
+            image,
+        )
+        candidate_id = created.stdout.strip()
+        if len(candidate_id) != 64 or any(
+            character not in "0123456789abcdef" for character in candidate_id
+        ):
+            raise AssertionError("fixture image retainer identity is invalid")
+        container_id = candidate_id
+        inspected = json.loads(
+            _podman("container", "inspect", container_id, "--format", "json").stdout
+        )[0]
+        state = inspected["State"]
+        if (
+            state["Status"] != "created"
+            or state["Running"] is not False
+            or state["StartedAt"] != "0001-01-01T00:00:00Z"
+        ):
+            raise AssertionError("fixture image retainer was started")
+        yield
+    finally:
+        if container_id is not None:
+            _podman("rm", "--force", "--", container_id)
+        else:
+            _podman("rm", "--force", "--", name, check=False)
+
+
+def test_retainer_removes_created_container_after_malformed_output(
+    process_base_image: str,
+    mocker: MockerFixture,
+) -> None:
+    real_podman = _podman
+    retainer_name: str | None = None
+
+    def malformed_create(
+        *arguments: str, check: bool = True
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal retainer_name
+        created = real_podman(*arguments, check=check)
+        if arguments[0] == "create":
+            retainer_name = arguments[arguments.index("--name") + 1]
+            return subprocess.CompletedProcess(created.args, 0, "malformed\n", "")
+        return created
+
+    mocker.patch(f"{__name__}._podman", side_effect=malformed_create)
+
+    with (
+        pytest.raises(
+            AssertionError, match="fixture image retainer identity is invalid"
+        ),
+        _retain_fixture_image(process_base_image, "malformed-output"),
+    ):
+        pytest.fail("malformed retainer output must not enter the fixture body")
+
+    assert retainer_name is not None
+    assert (
+        real_podman("container", "exists", retainer_name, check=False).returncode == 1
+    )
+    assert (
+        real_podman("image", "exists", process_base_image, check=False).returncode == 0
+    )
+
+
+def test_retainer_removes_created_container_after_create_timeout(
+    process_base_image: str,
+    mocker: MockerFixture,
+) -> None:
+    real_podman = _podman
+    retainer_name: str | None = None
+
+    def timed_out_create(
+        *arguments: str, check: bool = True
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal retainer_name
+        created = real_podman(*arguments, check=check)
+        if arguments[0] == "create":
+            retainer_name = arguments[arguments.index("--name") + 1]
+            raise subprocess.TimeoutExpired(created.args, 120)
+        return created
+
+    mocker.patch(f"{__name__}._podman", side_effect=timed_out_create)
+
+    with (
+        pytest.raises(subprocess.TimeoutExpired),
+        _retain_fixture_image(process_base_image, "create-timeout"),
+    ):
+        pytest.fail("timed-out retainer creation must not enter the fixture body")
+
+    assert retainer_name is not None
+    assert (
+        real_podman("container", "exists", retainer_name, check=False).returncode == 1
+    )
+    assert (
+        real_podman("image", "exists", process_base_image, check=False).returncode == 0
+    )
+
+
 def _release_workspace_attempt(unit_id: UUID) -> None:
     released = _podman(
         "exec",
@@ -114,17 +225,18 @@ def _release_workspace_attempt(unit_id: UUID) -> None:
 def process_base_image() -> Iterator[str]:
     base = os.environ.get("MARKWEAVE_T70_PODMAN_TEST_IMAGE", DEFAULT_BASE_IMAGE)
     built_base = base == DEFAULT_BASE_IMAGE
-    if built_base:
-        subprocess.run(
-            ("bash", "scripts/container/build-reverse-attempt.sh", base),
-            check=True,
-            cwd=ROOT,
-            timeout=600,
-        )
-    else:
-        _podman("image", "exists", base)
     try:
-        yield base
+        if built_base:
+            subprocess.run(
+                ("bash", "scripts/container/build-reverse-attempt.sh", base),
+                check=True,
+                cwd=ROOT,
+                timeout=600,
+            )
+        else:
+            _podman("image", "exists", base)
+        with _retain_fixture_image(base, "base"):
+            yield base
     finally:
         if built_base:
             _podman("image", "rm", "--force", base, check=False)
@@ -132,62 +244,70 @@ def process_base_image() -> Iterator[str]:
 
 @pytest.fixture(scope="module")
 def process_image(process_base_image: str) -> Iterator[tuple[str, str]]:
-    _podman(
-        "build",
-        "--format",
-        "oci",
-        "--tag",
-        PROCESS_IMAGE,
-        "--file",
-        str(ROOT / "tests/integration/broker/fixtures/Containerfile"),
-        "--build-arg",
-        f"BASE_IMAGE={process_base_image}",
-        str(ROOT / "tests/integration/broker/fixtures"),
-    )
-    inspected = json.loads(
-        _podman("image", "inspect", PROCESS_IMAGE, "--format", "json").stdout
-    )[0]
-    digest = inspected["Digest"]
-    assert isinstance(digest, str) and digest.startswith("sha256:")
     try:
-        yield PROCESS_IMAGE.rsplit(":", 1)[0], digest
+        _podman(
+            "build",
+            "--format",
+            "oci",
+            "--tag",
+            PROCESS_IMAGE,
+            "--file",
+            str(ROOT / "tests/integration/broker/fixtures/Containerfile"),
+            "--build-arg",
+            f"BASE_IMAGE={process_base_image}",
+            str(ROOT / "tests/integration/broker/fixtures"),
+        )
+        inspected = json.loads(
+            _podman("image", "inspect", PROCESS_IMAGE, "--format", "json").stdout
+        )[0]
+        digest = inspected["Digest"]
+        assert isinstance(digest, str) and digest.startswith("sha256:")
+        with _retain_fixture_image(PROCESS_IMAGE, "process"):
+            yield PROCESS_IMAGE.rsplit(":", 1)[0], digest
     finally:
         _podman("image", "rm", "--force", PROCESS_IMAGE, check=False)
 
 
 @pytest.fixture(scope="module")
 def process_workspace_image(process_base_image: str) -> Iterator[tuple[str, str]]:
-    _podman(
-        "build",
-        "--format",
-        "oci",
-        "--tag",
-        PROCESS_WORKSPACE_BASE_IMAGE,
-        "--file",
-        str(ROOT / "tests/integration/broker/fixtures/WorkspaceContainerfile"),
-        "--build-arg",
-        f"BASE_IMAGE={process_base_image}",
-        str(ROOT),
-    )
-    _podman(
-        "build",
-        "--format",
-        "oci",
-        "--tag",
-        PROCESS_WORKSPACE_IMAGE,
-        "--file",
-        str(ROOT / "tests/integration/broker/fixtures/DelayedWorkspaceContainerfile"),
-        "--build-arg",
-        f"BASE_IMAGE={PROCESS_WORKSPACE_BASE_IMAGE}",
-        str(ROOT / "tests/integration/broker/fixtures"),
-    )
-    inspected = json.loads(
-        _podman("image", "inspect", PROCESS_WORKSPACE_IMAGE, "--format", "json").stdout
-    )[0]
-    digest = inspected["Digest"]
-    assert isinstance(digest, str) and digest.startswith("sha256:")
     try:
-        yield PROCESS_WORKSPACE_IMAGE.rsplit(":", 1)[0], digest
+        _podman(
+            "build",
+            "--format",
+            "oci",
+            "--tag",
+            PROCESS_WORKSPACE_BASE_IMAGE,
+            "--file",
+            str(ROOT / "tests/integration/broker/fixtures/WorkspaceContainerfile"),
+            "--build-arg",
+            f"BASE_IMAGE={process_base_image}",
+            str(ROOT),
+        )
+        with _retain_fixture_image(PROCESS_WORKSPACE_BASE_IMAGE, "workspace-base"):
+            _podman(
+                "build",
+                "--format",
+                "oci",
+                "--tag",
+                PROCESS_WORKSPACE_IMAGE,
+                "--file",
+                str(
+                    ROOT
+                    / "tests/integration/broker/fixtures/DelayedWorkspaceContainerfile"
+                ),
+                "--build-arg",
+                f"BASE_IMAGE={PROCESS_WORKSPACE_BASE_IMAGE}",
+                str(ROOT / "tests/integration/broker/fixtures"),
+            )
+            inspected = json.loads(
+                _podman(
+                    "image", "inspect", PROCESS_WORKSPACE_IMAGE, "--format", "json"
+                ).stdout
+            )[0]
+            digest = inspected["Digest"]
+            assert isinstance(digest, str) and digest.startswith("sha256:")
+            with _retain_fixture_image(PROCESS_WORKSPACE_IMAGE, "workspace"):
+                yield PROCESS_WORKSPACE_IMAGE.rsplit(":", 1)[0], digest
     finally:
         _podman("image", "rm", "--force", PROCESS_WORKSPACE_IMAGE, check=False)
         _podman("image", "rm", "--force", PROCESS_WORKSPACE_BASE_IMAGE, check=False)
