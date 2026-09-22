@@ -166,5 +166,26 @@ schema-2 three-image set from that source. The verified public registry manifest
 
 Anonymous requests for both the `0.7.3` and `source-84e35fed521c61d34823d18767f47eb87253d4eb`
 tags returned these exact digests for all three repositories. This satisfies T73's public third-image
-publication criterion. T73 remains In Progress until the repository adopts the receipts and the
-docker-box deployment is updated and verified; the local candidate identities above remain historical.
+publication criterion. The local candidate identities above remain historical.
+
+## Adopted and deployed 0.7.3 release
+
+Adoption PR #262 CI `35755639720` passed all 12 jobs and merged as
+`96e3940de134ca3ccf3ed1d8749dc955472bc719`; its Git tree matches tested head
+`6b5a182864ccb4ceb43b01770113d23fa610edc1`, and live public alignment is `ALIGNED`.
+
+The docker-box deployment uses native package 0.7.3 and active broker policy
+`release-0.7.3-84e35fe` for the published reverse digest. Expected services, public readiness,
+OpenAPI, schema `20260921_19`, broker and reconciliation readiness, zero active jobs, and authenticated
+structured Slides smoke passed. Fresh complete backup
+`143abf0d299d38f271701d5c5439a4fbc8b9ef2a86703c20ba10fa0592b134d4` and the matched rollback set
+remain verified and retained.
+
+Candidate verification first synchronized an incident native environment to stale 0.6.2 through
+`uv` parent discovery; the reviewed repair restored exact non-editable 0.7.1 rollback state before
+cutover. A separate first pull attempt failed only because Podman omitted a canonical image-name tag;
+its never-started probe was cleaned, and the successful attempt retained strict repository, digest,
+config, and runtime-state checks. Neither incident changed published images or weakened identity
+verification. Cutover and final postchecks exited 0, and independent review approved the retained
+evidence. Automatic main CI `35759392518` was active when recorded and is monitored separately.
+This closes T73's public-image adoption and deployment gates.

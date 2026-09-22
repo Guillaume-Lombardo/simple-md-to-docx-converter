@@ -2,7 +2,7 @@
 ticket: T87
 linear_id: G1L-586
 linear_url: https://linear.app/g1lom/issue/G1L-586/t87-validate-documentation-and-publish-patch-release-072
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -127,9 +127,24 @@ passed. Docker, Podman, and insecure-Podman public quickstarts then passed from 
 receipts; the external reverse broker remains outside those ordinary quickstarts. The adoption merge
 and docker-box deployment verification are still pending. Deployment preparation stopped after
 `uv` parent-project discovery changed the host-native broker package from 0.7.1 to 0.6.2. The
-published image identities were unchanged, and the remote repair has not yet run. T87
-remains In Progress; no ticket is marked Done before adoption, repaired deployment, and verified
-main integration.
+published image identities were unchanged, and the remote repair had not yet run. At that stage,
+T87 remained In Progress pending adoption, repaired deployment, and verified main integration.
+
+Adoption PR #262 CI `35755639720` passed all 12 jobs and merged as
+`96e3940de134ca3ccf3ed1d8749dc955472bc719`; its Git tree matches tested head
+`6b5a182864ccb4ceb43b01770113d23fa610edc1`, and live public alignment is `ALIGNED`.
+Docker-box cutover and postchecks exited 0 with native package 0.7.3, the matched public images,
+broker policy `release-0.7.3-84e35fe`, healthy services, public and reverse readiness, migration 19,
+the authenticated structured Slides smoke, and zero active jobs. Fresh complete backup
+`143abf0d299d38f271701d5c5439a4fbc8b9ef2a86703c20ba10fa0592b134d4` and the matched rollback set
+remain verified and retained. Cleanup removed only owned temporary diagnostics while preserving
+backups, rollback and incident evidence, logs, receipts, active images, and the exact reverse
+retainer. `DEPLOYMENT.md` SHA-256
+`2185d082463434ce860280b0559264fcda2b1e35af0f131203af2f8dd7e6c83c` records independently
+reviewed deployment evidence. Automatic main CI `35759392518` was active when recorded and is
+monitored separately. The release, receipt adoption, deployment, cleanup, and repository closure
+evidence are complete, and the PR #262 source branch was removed locally and remotely; T87 is Done.
+Linear completion follows the retirement change's verified merge.
 
 2026-09-22: The user authorized retirement of the historical automatic `0.5.2` rollback
 rehearsal after the verified `0.7.3` image adoption. This is limited to removing the obsolete CI

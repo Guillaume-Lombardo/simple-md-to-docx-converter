@@ -2,7 +2,7 @@
 ticket: T73
 linear_id: G1L-541
 linear_url: https://linear.app/g1lom/issue/G1L-541/t73-verify-and-document-reverse-conversion-end-to-end
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -214,3 +214,12 @@ implementation boundaries, or progress changes.
   repaired and verified. Deployment preparation stopped after `uv` parent-project discovery changed
   the host-native broker package from 0.7.1 to 0.6.2; the published images were not changed, and the
   remote repair has not yet run.
+* 2026-09-22: Adoption PR #262 CI `35755639720` passed all 12 jobs and merged as
+  `96e3940de134ca3ccf3ed1d8749dc955472bc719`; its Git tree matches tested head
+  `6b5a182864ccb4ceb43b01770113d23fa610edc1`. Public release alignment is `ALIGNED`.
+  Docker-box deployment of the same schema-2 0.7.3 set completed with native package 0.7.3 and
+  broker policy `release-0.7.3-84e35fe`; service health, public readiness, broker and reconciliation
+  readiness, migration 19, authenticated structured Slides smoke, backup, rollback, logout, and
+  zero-active-job checks passed. The independently reviewed retained evidence closes the adoption
+  and deployed-verification gates. Automatic main CI `35759392518` was active when recorded and is
+  monitored separately; it is not a duplicate gate for this non-version adoption merge. T73 is Done.

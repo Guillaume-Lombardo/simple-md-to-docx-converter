@@ -221,5 +221,24 @@ schema-2 three-image set from that source. The verified public registry manifest
 
 Anonymous requests for both the `0.7.3` and `source-84e35fed521c61d34823d18767f47eb87253d4eb`
 tags returned these exact digests for all three repositories. These public receipts do not relabel
-the local candidate identities above. Repository pin adoption and the docker-box deployment update
-remain pending and require their own verification.
+the local candidate identities above.
+
+## Adopted and deployed 0.7.3 structured-PPTX release
+
+Adoption PR #262 CI `35755639720` passed all 12 jobs and merged as
+`96e3940de134ca3ccf3ed1d8749dc955472bc719`; its Git tree matches tested head
+`6b5a182864ccb4ceb43b01770113d23fa610edc1`. Live public alignment is `ALIGNED`.
+The docker-box deployment uses native package 0.7.3, the published three-image set above, and broker
+policy `release-0.7.3-84e35fe`. Expected services, public readiness, OpenAPI, schema
+`20260921_19`, reverse readiness, and zero-active-job checks passed.
+
+Authenticated structured Slides smoke job `0b56308d-abb1-4062-8311-5fcdd30466fa` succeeded. Its
+inspected 1,572-byte package has SHA-256
+`317f4e6c13f6c6bfec17af623bfa3670472d3b6c802f8138ac418eb556acf528`, and logout completed before
+ingress reopened. Fresh complete backup
+`143abf0d299d38f271701d5c5439a4fbc8b9ef2a86703c20ba10fa0592b134d4` and the matched rollback set
+remain verified and retained. The reviewed native-environment and Podman pull recoveries preserved
+strict image identity and their incident evidence. Cutover and final postchecks exited 0; independent
+review approved the retained deployment evidence. Automatic main CI `35759392518` was active when
+recorded and is monitored separately. These results close T83's final release-verification gates
+without relabeling the historical local candidates.

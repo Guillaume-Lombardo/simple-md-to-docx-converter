@@ -2,7 +2,7 @@
 ticket: T83
 linear_id: G1L-582
 linear_url: https://linear.app/g1lom/issue/G1L-582/t83-preserve-slide-structure-in-powerpoint-to-markdown-exports
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -159,3 +159,12 @@ checks, and T73 stacked integration remain separate boundaries.
   verification finish. Deployment preparation stopped when `uv` parent-project discovery changed
   the host-native broker package from 0.7.1 to 0.6.2; image identities were unchanged, and the remote
   repair has not yet run.
+* 2026-09-22: Adoption PR #262 CI `35755639720` passed all 12 jobs and merged as
+  `96e3940de134ca3ccf3ed1d8749dc955472bc719`; its Git tree matches tested head
+  `6b5a182864ccb4ceb43b01770113d23fa610edc1`. Docker-box deployment of the public 0.7.3 set and
+  native package completed. Authenticated structured Slides smoke job
+  `0b56308d-abb1-4062-8311-5fcdd30466fa` succeeded; its inspected 1,572-byte package has SHA-256
+  `317f4e6c13f6c6bfec17af623bfa3670472d3b6c802f8138ac418eb556acf528`. Public and reverse
+  readiness, migration 19, backup, rollback, logout, and zero-active-job checks passed. Automatic
+  main CI `35759392518` was active when recorded and is monitored separately. The feature, release,
+  adoption, and deployed structured-PPTX evidence satisfy the remaining gates; T83 is Done.
