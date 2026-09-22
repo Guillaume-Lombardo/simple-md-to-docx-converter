@@ -398,7 +398,7 @@ class _SqlReversionReconciliation(_SqlReversionStore):
         now: datetime,
         limit: int,
     ) -> tuple[ReconciliationTombstone, ...]:
-        """Return durable exact ACK intents before any new broker page is read."""
+        """Return one bounded batch of previously durable exact ACK intents."""
 
         if type(limit) is not int or limit <= 0:
             raise ValueError("Reconciliation ACK batch limit is invalid")

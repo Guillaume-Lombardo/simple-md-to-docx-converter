@@ -13,9 +13,19 @@ The host must provide all of the following before the broker is enabled:
 - rootless Podman using the systemd cgroup manager and local runtime authority;
 - subordinate UID and GID ranges assigned to the broker account;
 - lingering enabled for that account when the broker must start without an interactive login;
-- the reviewed reverse-attempt image already present under the configured repository and exact
-  immutable digest; and
+- the reverse-attempt image for the selected release already present under the configured
+  repository and exact immutable digest from that release's manifest; and
 - the `markweave-broker` executable installed exactly at `/usr/local/bin/markweave-broker`.
+
+For a schema-2 release, use the `images.reverse_attempt.registry_manifest_digest` and package entry
+from the verified `release-images.json`; the manifest binds it to the backend and frontend images by
+release version, source SHA, and frontend lock digest. Do not select the attempt image independently
+or substitute a local tag. A historical schema-1 manifest contains only backend and frontend and
+does not identify a reverse-attempt image. It cannot be used as evidence for a matched reverse
+release. Public deployment requires a published schema-2 manifest. An approved isolated candidate
+qualification may use the exact local image digest and matched source-build receipts without
+claiming public publication or release qualification. T73's final-image qualification and public
+reverse image are still pending.
 
 An administrator can enable lingering with `loginctl enable-linger <broker-account>`. Verify the
 effective rootless runtime as the broker account with `podman info`; do not configure a remote
@@ -80,6 +90,14 @@ the broker certificate, URI identity, and principal separately from its own clie
 principal. Never copy forward-conversion budgets into this group. See
 [configuration](configuration.md) for the complete variable set.
 
+Reconciliation ownership is exclusive to one reverse-worker runtime per principal. Do not give two
+independent workers the same broker principal: they will contend for its durable reconciliation
+lease. The broker also holds a per-EUID runtime-authority lock, so separate configuration files do
+not permit a second broker process under that account. The T73 distributed qualification topology
+uses one reverse-enabled worker and a second forward-only worker. It tests concurrent submissions,
+forward progress, and recovery under that topology; it does not qualify multi-host reverse-worker
+scaling.
+
 The unit restarts unexpected runtime failures and uses `KillMode=control-group`. Configuration exit
 status `2` is excluded from restart, so an invalid owner-only configuration cannot create a restart
 loop. `TimeoutStopSec=infinity` prevents an ambient systemd manager default from replacing the
@@ -96,3 +114,27 @@ After a broker crash, systemd starts the same process and the broker sweeps any 
 attempt before reopening its listener. If reconciliation or termination proof cannot be completed,
 the broker remains unavailable and fails closed. Never delete the inventory or managed Podman
 objects to force readiness.
+
+## Troubleshooting
+
+If the worker cannot obtain `READY`, first check the user unit and its content-free journal as the
+broker account:
+
+```text
+systemctl --user status markweave-broker.service
+journalctl --user -u markweave-broker.service
+```
+
+Confirm the broker configuration and mTLS files satisfy the owner and mode requirements above,
+rootless Podman is using the expected local account and cgroup manager, and the exact manifest-pinned
+image is available locally. For mTLS failures, compare the worker and broker principals, URI SANs,
+CA chain, endpoint, and configured certificate pin. Correct the mismatched configuration or
+certificate through the approved rotation procedure; do not disable peer verification or loosen
+the pin check.
+
+A broker that restarted after a crash may remain unavailable while it terminates and proves removal
+of inventoried attempts. Wait for reconciliation and inspect the broker's content-free service
+diagnostics. If proof cannot be completed, keep reverse admission closed and escalate using the
+broker identity and correlation information available to the operator. Do not remove inventory
+records, delete runtime objects manually, or restart workers around a failed sweep. The service
+journal and diagnostics must not be used to collect document names or content.

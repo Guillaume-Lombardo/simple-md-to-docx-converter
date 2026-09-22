@@ -134,6 +134,14 @@ reverse workflow; Markweave does not infer reverse values from forward-conversio
 and forward jobs share `MARKWEAVE_JOB_GLOBAL_QUEUE_CAPACITY` atomically, while their per-user and
 retention settings remain independent.
 
+The authenticated capabilities response is authoritative for the enabled upload maximum and the
+fixed supported-format and PDF policies. The web client derives its extension hint, file chooser,
+and preflight checks from that response; the server still scans and validates every upload. Missing
+capabilities or an unsupported schema version leaves browser submission unavailable. Configure
+the same admission contract in both storage profiles and verify the response against server-side
+admission before enabling the workflow. Reverse conversion has no OCR or hosted Firecrawl fallback;
+scanned or image-only PDF input fails with `needs_ocr`.
+
 Reverse execution is a second optional all-or-none configuration group. Supplying any execution
 field requires every common field and exactly one transport profile; no value is copied from the
 forward worker and no production default is provided.
@@ -161,6 +169,12 @@ absent. For `mtls`, set `MARKWEAVE_REVERSION_BROKER_ENDPOINT_HOST` to a canonica
 `MARKWEAVE_REVERSION_BROKER_SERVER_PRINCIPAL_ID`, and one or two exact
 `MARKWEAVE_REVERSION_BROKER_SERVER_LEAF_SHA256` pins; the Unix path must be
 absent. Pydantic settings encode the pin tuple as a JSON array in the environment.
+
+The broker is a host-native service with its own owner-only runtime configuration and mTLS material.
+See [broker deployment](reverse-broker-deployment.md) for its principal, certificate, readiness,
+and image requirements. Worker and broker policy, transport identity, and immutable attempt-image
+digest must agree; do not copy forward-conversion limits or use an unpublished image digest. The
+exact matched-image, two-profile qualification remains in progress.
 
 ## Jobs, workers, metrics, and retention
 

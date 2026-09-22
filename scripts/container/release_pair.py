@@ -1,8 +1,9 @@
-"""Create and verify the manifest binding a Markweave release image pair."""
+"""Create and verify the manifest binding a Markweave release image set."""
 
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 from pathlib import Path
@@ -19,13 +20,50 @@ PAIR_CHECKSUMS = "release-images.sha256"
 IMAGE_DIRECTORIES = {
     "backend": "ghcr.io/guillaume-lombardo/md-converter",
     "frontend": "ghcr.io/guillaume-lombardo/md-converter-web",
+    "reverse_attempt": "ghcr.io/guillaume-lombardo/md-converter-reverse-attempt",
 }
 SHA256 = re.compile(r"[0-9a-f]{64}")
+CURRENT_SCHEMA_VERSION = 2
 MAX_MANIFEST_BYTES = 1_048_576
 
 
 class ReleasePairError(ValueError):
     """The staged or retained release pair is invalid."""
+
+
+def source_schema(path: Path) -> int:
+    """Read the closed image map from source already authenticated by recovery."""
+    if (
+        path.is_symlink()
+        or not path.is_file()
+        or path.stat().st_size > MAX_MANIFEST_BYTES
+    ):
+        raise ReleasePairError("release source module is unsafe")
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        assignments = [
+            node.value
+            for node in tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "IMAGE_DIRECTORIES"
+                for target in node.targets
+            )
+        ]
+        if len(assignments) != 1:
+            raise ReleasePairError("release source image map is not unique")
+        images = ast.literal_eval(assignments[0])
+    except (SyntaxError, UnicodeError, ValueError) as error:
+        raise ReleasePairError("release source image map is invalid") from error
+    if images == IMAGE_DIRECTORIES:
+        return CURRENT_SCHEMA_VERSION
+    if images == {
+        role: package
+        for role, package in IMAGE_DIRECTORIES.items()
+        if role != "reverse_attempt"
+    }:
+        return 1
+    raise ReleasePairError("release source image map is unsupported")
 
 
 def _safe_object(path: Path) -> dict[str, Any]:
@@ -61,14 +99,14 @@ def _relative_files(root: Path) -> tuple[Path, ...]:
     )
 
 
-def _verify_tree(root: Path) -> None:
+def _verify_tree(root: Path, roles: set[str]) -> None:
     if root.is_symlink() or not root.is_dir():
         raise ReleasePairError("release-pair directory is unsafe")
     top_level = tuple(root.iterdir())
-    allowed = {*IMAGE_DIRECTORIES, PAIR_MANIFEST, PAIR_CHECKSUMS}
+    allowed = {*roles, PAIR_MANIFEST, PAIR_CHECKSUMS}
     if {path.name for path in top_level} - allowed:
         raise ReleasePairError("release-pair tree contains an unexpected entry")
-    for role in IMAGE_DIRECTORIES:
+    for role in roles:
         directory = root / role
         if directory.is_symlink() or not directory.is_dir():
             raise ReleasePairError(f"{role} evidence directory is unsafe")
@@ -80,21 +118,31 @@ def _verify_tree(root: Path) -> None:
         raise ReleasePairError("release-pair tree contains an unsafe entry")
     paths = _relative_files(root)
     if {path.relative_to(root).parts[0] for path in paths} - {
-        *IMAGE_DIRECTORIES,
+        *roles,
         PAIR_MANIFEST,
     }:
         raise ReleasePairError("release-pair tree contains an unexpected entry")
 
 
 def create_release_pair(
-    root: Path, *, version: str, source_sha: str, frontend_lock: Path
+    root: Path,
+    *,
+    version: str,
+    source_sha: str,
+    frontend_lock: Path,
+    recover_legacy_pair: bool = False,
 ) -> dict[str, Any]:
-    """Bind the two verified image receipts and frontend lock into one manifest."""
-    _verify_tree(root)
+    """Bind the three verified image receipts and frontend lock into one manifest."""
+    roles = {
+        role: package
+        for role, package in IMAGE_DIRECTORIES.items()
+        if not recover_legacy_pair or role != "reverse_attempt"
+    }
+    _verify_tree(root, set(roles))
     if not frontend_lock.is_file() or frontend_lock.is_symlink():
         raise ReleasePairError("frontend lockfile is unsafe")
     images: dict[str, Any] = {}
-    for role, package in IMAGE_DIRECTORIES.items():
+    for role, package in roles.items():
         receipt = _receipt(root / role)
         if (receipt.get("version"), receipt.get("source_sha")) != (
             version,
@@ -118,7 +166,7 @@ def create_release_pair(
     manifest = {
         "frontend_lock_sha256": sha256_file(frontend_lock),
         "images": images,
-        "schema_version": 1,
+        "schema_version": 1 if recover_legacy_pair else CURRENT_SCHEMA_VERSION,
         "source_sha": source_sha,
         "version": version,
     }
@@ -133,7 +181,7 @@ def create_release_pair(
     return manifest
 
 
-def verify_release_pair(  # noqa: PLR0913 - every release identity is explicit
+def verify_release_pair(  # noqa: PLR0912, PLR0913 - verify each explicit release binding
     root: Path,
     *,
     version: str,
@@ -142,9 +190,23 @@ def verify_release_pair(  # noqa: PLR0913 - every release identity is explicit
     frontend_lock_sha256: str,
     backend_registry_digest: str,
     frontend_registry_digest: str,
+    reverse_attempt_registry_digest: str | None = None,
 ) -> None:
-    """Verify exact retained bytes and both public publication identities."""
-    _verify_tree(root)
+    """Verify current three-image or historical two-image publication identities."""
+    manifest = _safe_object(root / PAIR_MANIFEST)
+    schema = manifest.get("schema_version")
+    if type(schema) is not int or schema not in (1, CURRENT_SCHEMA_VERSION):
+        raise ReleasePairError("release-pair manifest schema is invalid")
+    roles = set(IMAGE_DIRECTORIES)
+    if schema == 1:
+        roles.remove("reverse_attempt")
+        if reverse_attempt_registry_digest is not None:
+            raise ReleasePairError(
+                "historical pair cannot bind a reverse-attempt digest"
+            )
+    elif reverse_attempt_registry_digest is None:
+        raise ReleasePairError("release set requires a reverse-attempt digest")
+    _verify_tree(root, roles)
     checksums = root / PAIR_CHECKSUMS
     if checksums.is_symlink() or not checksums.is_file():
         raise ReleasePairError("release-pair checksum manifest is unsafe")
@@ -162,12 +224,13 @@ def verify_release_pair(  # noqa: PLR0913 - every release identity is explicit
         raise ReleasePairError(
             "release-pair checksum manifest does not match retained bytes"
         )
-    manifest = _safe_object(root / PAIR_MANIFEST)
     expected_digests = {
         "backend": backend_registry_digest,
         "frontend": frontend_registry_digest,
     }
-    if manifest.get("schema_version") != 1 or (
+    if schema == CURRENT_SCHEMA_VERSION:
+        expected_digests["reverse_attempt"] = str(reverse_attempt_registry_digest)
+    if (
         manifest.get("version"),
         manifest.get("source_sha"),
         manifest.get("frontend_lock_sha256"),
@@ -176,9 +239,10 @@ def verify_release_pair(  # noqa: PLR0913 - every release identity is explicit
             "release-pair manifest identity differs from the release"
         )
     images = manifest.get("images")
-    if not isinstance(images, dict) or set(images) != set(IMAGE_DIRECTORIES):
+    if not isinstance(images, dict) or set(images) != roles:
         raise ReleasePairError("release-pair manifest image set is invalid")
-    for role, package in IMAGE_DIRECTORIES.items():
+    for role in sorted(roles):
+        package = IMAGE_DIRECTORIES[role]
         image = images.get(role)
         if not isinstance(image, dict) or image != {
             "bundle_manifest_sha256": sha256_file(
@@ -196,6 +260,7 @@ def verify_release_pair(  # noqa: PLR0913 - every release identity is explicit
                 tag=tag,
                 source_sha=source_sha,
                 registry_digest=expected_digests[role],
+                profile="reverse-attempt" if role == "reverse_attempt" else "standard",
             )
         except RecoveryEvidenceError as error:
             raise ReleasePairError(f"{role}: {error}") from error
@@ -211,11 +276,15 @@ def _arguments() -> argparse.Namespace:
         child.add_argument("--source-sha", required=True)
     create = subparsers.choices["create"]
     create.add_argument("--frontend-lock", required=True, type=Path)
+    create.add_argument("--recover-legacy-pair", action="store_true")
+    source = subparsers.add_parser("source-schema")
+    source.add_argument("--source-module", required=True, type=Path)
     verify = subparsers.choices["verify"]
     verify.add_argument("--tag", required=True)
     verify.add_argument("--frontend-lock-sha256", required=True)
     verify.add_argument("--backend-registry-digest", required=True)
     verify.add_argument("--frontend-registry-digest", required=True)
+    verify.add_argument("--reverse-attempt-registry-digest")
     return parser.parse_args()
 
 
@@ -223,12 +292,15 @@ def main() -> int:
     """Create or verify the release-pair binding."""
     arguments = _arguments()
     try:
-        if arguments.command == "create":
+        if arguments.command == "source-schema":
+            print(source_schema(arguments.source_module))
+        elif arguments.command == "create":
             create_release_pair(
                 arguments.artifacts,
                 version=arguments.version,
                 source_sha=arguments.source_sha,
                 frontend_lock=arguments.frontend_lock,
+                recover_legacy_pair=arguments.recover_legacy_pair,
             )
         else:
             verify_release_pair(
@@ -239,6 +311,7 @@ def main() -> int:
                 frontend_lock_sha256=arguments.frontend_lock_sha256,
                 backend_registry_digest=arguments.backend_registry_digest,
                 frontend_registry_digest=arguments.frontend_registry_digest,
+                reverse_attempt_registry_digest=arguments.reverse_attempt_registry_digest,
             )
     except (OSError, ReleasePairError) as error:
         print(f"error: {error}")

@@ -100,7 +100,7 @@ def test_runtime_keeps_all_product_values_and_boundaries_injected(
     assert runtime.worker_id == "reverse-worker"
 
 
-def test_production_worker_requires_bound_ready_response_before_reconciliation(
+def test_production_worker_requires_bound_ready_response_after_reconciliation(
     mocker: MockerFixture,
 ) -> None:
     runtime = _runtime(
@@ -111,16 +111,75 @@ def test_production_worker_requires_bound_ready_response_before_reconciliation(
     )
     broker = cast(Any, runtime.broker)
     repository = cast(Any, runtime.repository)
-    broker.request.side_effect = lambda request: ReadyResponse(request.request_id, True)
+    events: list[str] = []
+    cast(Any, runtime.reconciler).reconcile.side_effect = lambda *_args, **_kwargs: (
+        events.append("reconcile")
+    )
+    broker.request.side_effect = lambda request: (
+        events.append("ready") or ReadyResponse(request.request_id, True)
+    )
     repository.claim.return_value = None
 
     assert not ReversionWorker(runtime).run_once()
+    assert events == ["reconcile", "ready"]
     assert isinstance(broker.request.call_args.args[0], ReadyRequest)
     cast(Any, runtime.reconciler).reconcile.assert_called_once()
 
     broker.request.side_effect = lambda request: ReadyResponse(uuid4(), True)
     with pytest.raises(BrokerError):
         ReversionWorker(runtime).run_once()
+
+
+@pytest.mark.parametrize(
+    "response",
+    (
+        object(),
+        ReadyResponse(UUID("10000000-0000-4000-8000-000000000002"), True),
+        None,
+    ),
+)
+def test_completed_reconciliation_never_claims_after_invalid_ready_response(
+    mocker: MockerFixture, response: object
+) -> None:
+    runtime = _runtime(
+        mocker,
+        require_ready=True,
+        shutdown_requested=lambda: False,
+        clock=lambda: datetime(2026, 9, 6, tzinfo=UTC),
+    )
+    broker = cast(Any, runtime.broker)
+    repository = cast(Any, runtime.repository)
+    broker.request.side_effect = (
+        (lambda request: ReadyResponse(request.request_id, False))
+        if response is None
+        else (lambda _request: response)
+    )
+
+    with pytest.raises(BrokerError):
+        ReversionWorker(runtime).run_once()
+
+    cast(Any, runtime.reconciler).reconcile.assert_called_once()
+    repository.claim.assert_not_called()
+
+
+def test_reconciliation_step_requires_ready_only_after_the_fixed_point(
+    mocker: MockerFixture,
+) -> None:
+    runtime = _runtime(
+        mocker,
+        require_ready=True,
+        clock=lambda: datetime(2026, 9, 6, tzinfo=UTC),
+    )
+    broker = cast(Any, runtime.broker)
+    reconciler = cast(Any, runtime.reconciler)
+    reconciler.reconcile_step.side_effect = (False, True)
+    broker.request.side_effect = lambda request: ReadyResponse(request.request_id, True)
+    worker = ReversionWorker(runtime)
+
+    assert not worker.reconcile_step()
+    broker.request.assert_not_called()
+    assert worker.reconcile_step()
+    assert isinstance(broker.request.call_args.args[0], ReadyRequest)
 
 
 @pytest.mark.parametrize(

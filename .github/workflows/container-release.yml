@@ -45,6 +45,7 @@ jobs:
     outputs:
       backend-digest: ${{ steps.push.outputs.backend-digest }}
       frontend-digest: ${{ steps.push.outputs.frontend-digest }}
+      reverse-attempt-digest: ${{ steps.push.outputs.reverse-attempt-digest }}
     steps:
       - name: Check out reviewed source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -112,16 +113,19 @@ jobs:
           set -euo pipefail
           backend_image="localhost/md-converter:$RELEASE_VERSION"
           frontend_image="localhost/md-converter-web:$RELEASE_VERSION"
+          reverse_attempt_image="localhost/md-converter-reverse-attempt:$RELEASE_VERSION"
           source_date_epoch="$(git show -s --format=%ct HEAD)"
           SOURCE_DATE_EPOCH="$source_date_epoch" bash scripts/container/build.sh "$backend_image"
           podman build --format oci --timestamp "$source_date_epoch" \
             --tag "$frontend_image" --file web/Containerfile .
+          SOURCE_DATE_EPOCH="$source_date_epoch" bash scripts/container/build-reverse-attempt.sh "$reverse_attempt_image"
+          bash scripts/container/smoke-reverse-attempt.sh "$reverse_attempt_image"
           bash scripts/container/smoke.sh "$backend_image"
           bash scripts/container/api-smoke.sh "$backend_image"
           bash scripts/container/distributed-api-smoke.sh "$backend_image"
           bash scripts/container/recovery-cli-smoke.sh "$backend_image"
           bash web/scripts/run-rootless-smoke.sh "$frontend_image" --existing
-      - name: Generate and verify release SBOM evidence for both images
+      - name: Generate and verify release SBOM evidence for all three images
         env:
           RELEASE_VERSION: ${{ inputs.version }}
         run: |
@@ -130,6 +134,8 @@ jobs:
             "localhost/md-converter:$RELEASE_VERSION" artifacts/container/backend release
           bash scripts/container/supply-chain.sh \
             "localhost/md-converter-web:$RELEASE_VERSION" artifacts/container/frontend release
+          bash scripts/container/supply-chain.sh \
+            "localhost/md-converter-reverse-attempt:$RELEASE_VERSION" artifacts/container/reverse_attempt release reverse-attempt
       - name: Test the exact staged image pair in both storage profiles
         env:
           RELEASE_VERSION: ${{ inputs.version }}
@@ -137,6 +143,7 @@ jobs:
           set -euo pipefail
           export MARKWEAVE_E2E_LOCAL_IMAGE="localhost/md-converter:$RELEASE_VERSION"
           export MARKWEAVE_E2E_LOCAL_FRONTEND_IMAGE="localhost/md-converter-web:$RELEASE_VERSION"
+          export MARKWEAVE_E2E_LOCAL_REVERSE_ATTEMPT_IMAGE="localhost/md-converter-reverse-attempt:$RELEASE_VERSION"
           bash scripts/e2e/run.sh standalone
           bash scripts/e2e/run.sh distributed
       - name: Retain staged pair before registry mutation
@@ -146,6 +153,7 @@ jobs:
           path: |
             artifacts/container/backend/
             artifacts/container/frontend/
+            artifacts/container/reverse_attempt/
           if-no-files-found: error
           retention-days: 90
       - name: Log in to GHCR
@@ -171,6 +179,7 @@ jobs:
           path: |
             artifacts/container/backend/
             artifacts/container/frontend/
+            artifacts/container/reverse_attempt/
             artifacts/container/release-images.json
             artifacts/container/release-images.sha256
           if-no-files-found: error
@@ -187,6 +196,7 @@ jobs:
     outputs:
       backend-digest: ${{ steps.push.outputs.backend-digest }}
       frontend-digest: ${{ steps.push.outputs.frontend-digest }}
+      reverse-attempt-digest: ${{ steps.push.outputs.reverse-attempt-digest }}
     steps:
       - name: Check out the trusted recovery implementation
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -289,25 +299,36 @@ jobs:
           else
             git show "$SOURCE_SHA:web/package-lock.json" > "$RUNNER_TEMP/release-frontend-lock.yaml"
           fi
+          git show "$SOURCE_SHA:scripts/container/release_pair.py" > "$RUNNER_TEMP/release-image-source.py"
+          schema="$(uv run python -m scripts.container.release_pair source-schema --source-module "$RUNNER_TEMP/release-image-source.py")"
+          recovery_options=()
+          if [[ "$schema" = 1 ]]; then recovery_options=(--recover-legacy-pair); fi
           bash scripts/container/publish-release-pair.sh \
             artifacts/container "$RELEASE_VERSION" "$SOURCE_SHA" \
-            "$RUNNER_TEMP/release-frontend-lock.yaml"
+            "$RUNNER_TEMP/release-frontend-lock.yaml" "${recovery_options[@]}"
       - name: Verify retained bundle integrity and release identity
         env:
           BACKEND_DIGEST: ${{ steps.push.outputs.backend-digest }}
           FRONTEND_DIGEST: ${{ steps.push.outputs.frontend-digest }}
+          REVERSE_ATTEMPT_DIGEST: ${{ steps.push.outputs.reverse-attempt-digest }}
           RELEASE_TAG: ${{ inputs.tag }}
           RELEASE_VERSION: ${{ inputs.version }}
           SOURCE_SHA: ${{ inputs.source-sha }}
-        run: >-
-          uv run python -m scripts.container.release_pair verify
-          --artifacts artifacts/container
-          --version "$RELEASE_VERSION"
-          --tag "$RELEASE_TAG"
-          --source-sha "$SOURCE_SHA"
-          --frontend-lock-sha256 "$(sha256sum "$RUNNER_TEMP/release-frontend-lock.yaml" | cut -d' ' -f1)"
-          --backend-registry-digest "$BACKEND_DIGEST"
-          --frontend-registry-digest "$FRONTEND_DIGEST"
+        run: |
+          set -euo pipefail
+          verify_options=()
+          if [[ -n "$REVERSE_ATTEMPT_DIGEST" ]]; then
+            verify_options=(--reverse-attempt-registry-digest "$REVERSE_ATTEMPT_DIGEST")
+          fi
+          uv run python -m scripts.container.release_pair verify \
+            --artifacts artifacts/container \
+            --version "$RELEASE_VERSION" \
+            --tag "$RELEASE_TAG" \
+            --source-sha "$SOURCE_SHA" \
+            --frontend-lock-sha256 "$(sha256sum "$RUNNER_TEMP/release-frontend-lock.yaml" | cut -d' ' -f1)" \
+            --backend-registry-digest "$BACKEND_DIGEST" \
+            --frontend-registry-digest "$FRONTEND_DIGEST" \
+            "${verify_options[@]}"
       - name: Transfer the exact verified evidence to this recovery run
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -315,6 +336,7 @@ jobs:
           path: |
             artifacts/container/backend/
             artifacts/container/frontend/
+            artifacts/container/reverse_attempt/
             artifacts/container/release-images.json
             artifacts/container/release-images.sha256
           if-no-files-found: error
@@ -350,6 +372,14 @@ jobs:
           subject-digest: ${{ needs.build-and-publish.outputs.frontend-digest || needs.recover-evidence.outputs.frontend-digest }}
           push-to-registry: true
 
+      - name: Attest the published reverse-attempt image identity
+        if: ${{ needs.build-and-publish.outputs.reverse-attempt-digest != '' || needs.recover-evidence.outputs.reverse-attempt-digest != '' }}
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/guillaume-lombardo/md-converter-reverse-attempt
+          subject-digest: ${{ needs.build-and-publish.outputs.reverse-attempt-digest || needs.recover-evidence.outputs.reverse-attempt-digest }}
+          push-to-registry: true
+
   release-evidence:
     needs: [build-and-publish, recover-evidence, attest]
     if: ${{ always() && github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.ref == 'refs/heads/main' && needs.attest.result == 'success' && ((github.event_name == 'push' && github.sha == inputs.source-sha && needs.build-and-publish.result == 'success') || (github.event_name == 'workflow_dispatch' && needs.recover-evidence.result == 'success')) }}
@@ -368,6 +398,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
           SOURCE_SHA: ${{ inputs.source-sha }}
+          REVERSE_ATTEMPT_DIGEST: ${{ needs.build-and-publish.outputs.reverse-attempt-digest || needs.recover-evidence.outputs.reverse-attempt-digest }}
         run: |
           set -euo pipefail
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha)" = "$SOURCE_SHA"
@@ -376,11 +407,18 @@ jobs:
             = "$RELEASE_TAG"$'\t'"$SOURCE_SHA"$'\tfalse\tfalse'
           release_assets="$RUNNER_TEMP/release-assets"
           mkdir "$release_assets"
-          for role in backend frontend; do
+          roles=(backend frontend)
+          if [[ -n "$REVERSE_ATTEMPT_DIGEST" ]]; then roles+=(reverse_attempt); fi
+          for role in "${roles[@]}"; do
             for name in sbom.cdx.json sbom.spdx.json vulnerabilities.json image-metadata.json registry-publication.json release-bundle.sha256; do
               cp -- "artifacts/container/$role/$name" "$release_assets/$role-$name"
             done
           done
+          if [[ -n "$REVERSE_ATTEMPT_DIGEST" ]]; then
+            for name in anydoc-cargo.cdx.json anydoc-cargo-vulnerabilities.json; do
+              cp -- "artifacts/container/reverse_attempt/$name" "$release_assets/reverse_attempt-$name"
+            done
+          fi
           gh release upload "$RELEASE_TAG" \
             "$release_assets"/* \
             artifacts/container/release-images.json \

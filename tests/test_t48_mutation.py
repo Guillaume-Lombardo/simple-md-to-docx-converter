@@ -38,11 +38,12 @@ def test_manifest_is_risk_ranked_exact_and_reviews_every_critical_domain() -> No
         "archive-svg",
         "job-integrity",
         "retention-storage",
+        "reverse-result-security",
     ]
-    assert [domain.priority for domain in manifest.domains] == [1, 2, 3, 4, 5]
-    assert sum(len(domain.mutants) for domain in manifest.domains) == 25
+    assert [domain.priority for domain in manifest.domains] == [1, 2, 3, 4, 5, 6]
+    assert sum(len(domain.mutants) for domain in manifest.domains) == 28
     assert (
-        len({mutant for domain in manifest.domains for mutant in domain.mutants}) == 25
+        len({mutant for domain in manifest.domains for mutant in domain.mutants}) == 28
     )
     assert all(domain.review_notes for domain in manifest.domains)
     assert manifest.failure_statuses == FAILURE_STATUSES
@@ -90,8 +91,27 @@ def test_observability_domain_preserves_the_preexisting_bounded_target() -> None
     )
     assert (
         "markweave.observability.x__normalize_method__mutmut_*"
-        in (observability.review_notes[0])
+        in observability.review_notes[0]
     )
+
+
+@pytest.mark.unit
+def test_reverse_result_domain_is_exact_and_risk_reviewed() -> None:
+    manifest = load_manifest(MANIFEST)
+    reverse = manifest.domains[-1]
+    assert reverse.name == "reverse-result-security"
+    assert reverse.priority == 6
+    assert reverse.paths == (
+        "src/markweave/reversion_jobs/service.py",
+        "tests/unit/reversions/test_reversion_service.py",
+    )
+    assert reverse.mutants == (
+        "markweave.reversion_jobs.service.xǁReversionServiceǁget__mutmut_3",
+        "markweave.reversion_jobs.service.xǁReversionServiceǁdownload__mutmut_33",
+        "markweave.reversion_jobs.service.xǁReversionServiceǁdownload__mutmut_36",
+    )
+    assert "owner scoping" in reverse.review_notes[0]
+    assert "same-size wrong content" in reverse.review_notes[0]
 
 
 @pytest.mark.unit
@@ -173,6 +193,12 @@ def test_changed_paths_select_only_affected_domains_and_global_files_select_all(
         changed_paths=("tests/unit/test_observability.py",),
     )
     assert [domain.name for domain in selected] == ["observability"]
+    selected = select_domains(
+        manifest,
+        mode="changed",
+        changed_paths=("tests/unit/reversions/test_reversion_service.py",),
+    )
+    assert [domain.name for domain in selected] == ["reverse-result-security"]
     assert (
         select_domains(manifest, mode="changed", changed_paths=("docs/unrelated.md",))
         == ()

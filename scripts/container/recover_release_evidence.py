@@ -12,13 +12,12 @@ from packaging.version import InvalidVersion, Version
 
 from scripts.container.integrity import IntegrityError, oci_identity, sha256_file
 from scripts.container.verify_supply_chain import (
-    EXPECTED_FILES,
+    EVIDENCE_PROFILES,
     SupplyChainVerificationError,
     verify_bundle,
 )
 
 PUBLICATION_RECEIPT = "registry-publication.json"
-RECOVERY_FILES = EXPECTED_FILES | {"release-bundle.sha256", PUBLICATION_RECEIPT}
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
 OCI_DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 MAX_RECEIPT_BYTES = 16_384
@@ -62,13 +61,14 @@ def _validate_version(version: str, tag: str) -> None:
         raise RecoveryEvidenceError("release tag does not match the version")
 
 
-def verify_recovery_evidence(
+def verify_recovery_evidence(  # noqa: PLR0913 - explicit release identity and evidence profile
     artifacts: Path,
     *,
     version: str,
     tag: str,
     source_sha: str,
     registry_digest: str,
+    profile: str = "standard",
 ) -> None:
     """Verify the exact retained bundle and its public-registry relationship."""
     _validate_version(version, tag)
@@ -78,8 +78,14 @@ def verify_recovery_evidence(
         raise RecoveryEvidenceError("public registry digest is invalid")
     if artifacts.is_symlink() or not artifacts.is_dir():
         raise RecoveryEvidenceError("recovery artifact directory is unsafe")
+    if profile not in EVIDENCE_PROFILES:
+        raise RecoveryEvidenceError("recovery evidence profile is invalid")
+    expected_files = EVIDENCE_PROFILES[profile]
     entries = tuple(artifacts.iterdir())
-    if {entry.name for entry in entries} != RECOVERY_FILES:
+    if {entry.name for entry in entries} != expected_files | {
+        "release-bundle.sha256",
+        PUBLICATION_RECEIPT,
+    }:
         raise RecoveryEvidenceError("recovery artifact file set is not exact")
     if any(entry.is_symlink() or not entry.is_file() for entry in entries):
         raise RecoveryEvidenceError("recovery artifact contains an unsafe entry")
@@ -92,6 +98,7 @@ def verify_recovery_evidence(
         verify_bundle(
             artifacts,
             expected_manifest_sha256=manifest_digest,
+            expected_files=expected_files,
             allowed_extra_files=frozenset({PUBLICATION_RECEIPT}),
         )
         archive_manifest, archive_config = oci_identity(artifacts / "image.oci.tar")
@@ -134,6 +141,9 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--tag", required=True)
     parser.add_argument("--source-sha", required=True)
     parser.add_argument("--registry-digest", required=True)
+    parser.add_argument(
+        "--profile", choices=tuple(EVIDENCE_PROFILES), default="standard"
+    )
     return parser.parse_args()
 
 
@@ -147,6 +157,7 @@ def main() -> int:
             tag=arguments.tag,
             source_sha=arguments.source_sha,
             registry_digest=arguments.registry_digest,
+            profile=arguments.profile,
         )
     except (OSError, RecoveryEvidenceError) as error:
         print(f"error: {error}")

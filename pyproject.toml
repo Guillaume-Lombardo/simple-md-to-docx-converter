@@ -202,6 +202,7 @@ only_mutate = [
     "src/markweave/observability.py",
     "src/markweave/persistence/jobs/claims.py",
     "src/markweave/retention.py",
+    "src/markweave/reversion_jobs/service.py",
     "src/markweave/storage.py",
 ]
 pytest_add_cli_args = [
@@ -214,6 +215,7 @@ pytest_add_cli_args = [
     "tests/unit/jobs/test_job_service.py",
     "tests/unit/jobs/test_job_worker.py",
     "tests/unit/test_retention.py",
+    "tests/unit/reversions/test_reversion_service.py",
     "tests/unit/test_storage_adapters.py",
     "tests/integration/sqlite/test_sqlite_jobs.py",
 ]

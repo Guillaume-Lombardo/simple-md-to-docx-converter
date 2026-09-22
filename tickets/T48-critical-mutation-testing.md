@@ -46,6 +46,12 @@ workflow, change branch protection, or declare T48 complete.
 
 ## Progress
 
+* 2026-09-22: PR #253 was squash-merged as
+  `6e46707ef47b5213fae7ae0f6bbb64174d66056b` after exact-head verification and
+  source-branch cleanup. Main CI run `35698832218` is active for that revision.
+  T48 remains In Progress until the merged mutation gate is verified on main; the
+  reviewed scope and T73's retained 28-target qualification campaign are unchanged.
+
 * 2026-09-22: The shared prerequisite PR #248 was squash-merged as
   `cd229f7e8c5779b0d56f2721ba585b5ec3be0210` after verification. Main CI run
   `35696095409` is active for that revision. T48's reviewed mutation scope and prior
