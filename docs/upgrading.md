@@ -24,9 +24,11 @@ the exact source, image, and configuration in an isolated environment that
 matches the selected storage profile before production use.
 
 The `0.7.2` Python package was published, but its container qualification failed before images
-were published or retained. It is not a complete container release. Existing container deployments
-must keep their verified `0.7.1` pins until the matched `0.7.3` images and release evidence are
-published and adopted; never invent `0.7.2` image digests or mix package and image versions.
+were published or retained. It is not a complete container release; never invent `0.7.2` image
+digests or mix package and image versions. The matched schema-2 `0.7.3` backend, frontend, and
+reverse-attempt images are published from one source and have verified public receipts. Existing
+deployments should keep their verified `0.7.1` configuration until they adopt the repository's
+exact `0.7.3` pins and complete deployment-specific verification.
 
 ## Upgrade procedure
 

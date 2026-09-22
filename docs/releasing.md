@@ -66,6 +66,16 @@ backend anonymous denial rejects the exception. The fallback still requires the 
 manifest response. Untrusted or unverifiable states fail closed. A successful `0.7.3` release must publish
 one fresh matched three-image set and adopt its actual public receipts before unrelated work.
 
+Protected release run `35747017469` completed that continuation from source
+`84e35fed521c61d34823d18767f47eb87253d4eb`. Its schema-2 manifest binds the published backend
+digest `sha256:c91f97d7c299ad84811876e52ae52350d1ad3b91bd190b4fffb801634729bc83`, frontend digest
+`sha256:edee507cf70d15681bae0fe7f9d0755b607d557725fd06e6bd43771350dba9ba`, and reverse-attempt digest
+`sha256:39f4a68358029977b6ec5ac6cb26fab88ac10e518016b42e8389abd54f517e61` to that source and version
+`0.7.3`. Anonymous requests for each role's version and source tags returned the matching digest,
+and public PyPI verification passed. The follow-up repository pin adoption change adopts the exact
+published receipts; deployment-specific verification remains a separate required step. The
+incomplete `0.7.2` history above is unchanged.
+
 The `0.6.2` patch followed that normal paired-release path. Protected release run `34648944379`
 published the Python artifacts and paired images from source
 `d7188c4fd3d9c7d4f1d82995850b3827f09e3a83`. The separate adoption change pins the exact retained

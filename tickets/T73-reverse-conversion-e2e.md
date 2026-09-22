@@ -204,3 +204,13 @@ implementation boundaries, or progress changes.
   fail when the snapshot is removed in a test-process-only negative control. Subsequent reads on
   the same reader also observe the newly committed state. Exact-head CI qualification remains
   pending; historical image receipts do not qualify this application-source change.
+* 2026-09-22: Main CI `35747016968` passed at release source
+  `84e35fed521c61d34823d18767f47eb87253d4eb`, and protected release run `35747017469`
+  completed successfully. Public schema-2 receipts and anonymous version/source-tag manifests bind
+  the backend, frontend, and reverse-attempt images to that source; independent verification of the
+  complete public artifact set passed. The public third-image criterion is now met. All three public
+  quickstart variants also passed from clean adoption source `aa35c96a9d05b56fee5cd683272b2ff2242469df`.
+  T73 remains In Progress until the adoption change merges and the docker-box deployment is
+  repaired and verified. Deployment preparation stopped after `uv` parent-project discovery changed
+  the host-native broker package from 0.7.1 to 0.6.2; the published images were not changed, and the
+  remote repair has not yet run.
