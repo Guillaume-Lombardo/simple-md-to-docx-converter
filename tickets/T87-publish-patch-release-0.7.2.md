@@ -98,3 +98,12 @@ changes do not change image inputs. Independent review approved the correction a
 77 passing tests; local profile qualification remains pending. A disk-capacity failure during the reverse-image build was resolved by explicitly
 authorized removal of the three obsolete local `e3fb99b` candidates after live verification of their
 archived OCI checksums on docker-box. The active `4888cd0` images and rollback evidence remain.
+
+Full local qualification at `d562aab` passed both profiles against the matched `6be1533` application
+images. Both runs verified worker and broker crash recovery, frontend outage, persisted termination
+evidence, structured PPTX API/CLI/browser workflows and recovered result downloads. The original
+distributed run failed before current-image testing because the historical 0.5.2 rollback fixture
+was locally mode 0700. An exact-image arbitrary-UID probe confirmed it was not executable. After
+explicitly authorized restoration of that single local file to 0755, the complete distributed rerun
+passed. File contents and Git state were unchanged; original failed evidence is retained. Both
+successful profiles retain the fake-ClamAV teardown warning rather than claiming a graceful stop.
