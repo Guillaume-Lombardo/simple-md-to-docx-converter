@@ -1,16 +1,15 @@
 # Architecture
 
-Version `0.6.4` retains the browser cutover: the backend composition root contains no HTML or
+The backend composition root contains no HTML or
 static-asset router. Next.js owns browser presentation, the same-origin router owns only transport
 routing and minimum response headers, and FastAPI remains the sole business and persistence
 authority.
 
 Markweave uses a separate Next.js browser interface with durable asynchronous conversion workers.
-The T58/T64 cutover replaced only browser presentation; FastAPI and the worker/storage architecture
-remain authoritative. See
-[the reviewed Next.js migration architecture](nextjs-migration-architecture.md) for the staged
-topology and parity contract. Markweave accepts Markdown, local resources, and validated DOCX
-reference templates; Pandoc creates DOCX, local Mermaid CLI and sandboxed Chromium render diagrams,
+FastAPI and the worker/storage architecture remain authoritative. The
+[reviewed Next.js design](nextjs-migration-architecture.md) records the T58/T64 migration and parity
+contract. Markweave accepts Markdown, local resources, and validated Word or PowerPoint reference
+templates; Pandoc creates DOCX or editable PPTX, local Mermaid CLI and sandboxed Chromium render diagrams,
 and headless LibreOffice creates PDF.
 
 The experimental reverse path accepts supported office documents through the same authenticated
@@ -35,7 +34,7 @@ exact images pass the dedicated physical-worker acceptance matrix.
   template version when selected or use Pandoc's default reference document, publish output
   atomically, and recover interrupted work deterministically.
 
-After T64, the Web presentation is a stateless rootless Next.js process behind the same public TLS
+The Web presentation is a stateless rootless Next.js process behind the same public TLS
 router as FastAPI. Literal path routing sends browser pages and `/_next/**` to that process and
 both exact `/api/v1` and `/api/v1/**`, plus every public operational route, directly to FastAPI.
 Browser JavaScript uses only relative same-origin API URLs. Regardless of method, the router strips

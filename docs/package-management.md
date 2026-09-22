@@ -50,38 +50,11 @@ npm ci --prefix toolchain/document-engines --omit=dev --ignore-scripts
 
 ## Rollback and benchmark evidence
 
-A T67 rollback reverses the complete, reviewed T67 candidate series from its exact npm parent. It
-must restore both npm locks,
-the `npm@11.17.0` frontend manager metadata, npm CI caches and commands, and the frontend's `web/`
-build context while removing every pnpm/Corepack workspace surface. Before merging a rollback,
-run the rehearsal with the exact candidate and the direct npm parent of its first T67 commit on
-Node.js `24.19.0` and npm `11.17.0`:
+The T67 npm-to-pnpm migration is complete. Its one-time rollback rehearsal, baseline lock digests,
+benchmark requirements and measured image sizes are retained in the
+[historical migration record](evidence/release-migration-history.md#t67-package-manager-migration).
+T80 removed the migration-specific CI steps; current installations use the reviewed bootstrap above.
 
-```bash
-scripts/javascript/rehearse-npm-rollback.sh '<T67-candidate>' '<T67-migration-commit>^'
-```
-
-The last pre-migration lock digests are root
-`7fc4db9135c474c8fe4f48dc60028a10df9904fb4d918f728f6fe3f19fca1061` and frontend
-`3dbff3f758ee4367dc5e7f70889d269798a4c87092c38dc418a200ae124285b1`. Historical release-evidence
-recovery selects `pnpm-lock.yaml` when present at the release source SHA and otherwise binds the
-old `web/package-lock.json`, so retained npm-era releases remain recoverable.
-
-Hosted benchmark evidence must record the `ubuntu-24.04` runner image, Node version, exact command,
-three cold and three warm samples, cache archive size, workspace `node_modules` and store disk use,
-frontend build time, and final frontend image size for both the npm parent and pnpm candidate.
-Keep raw step logs with the pull request. A material regression stops delivery until a reviewer
-explicitly approves it; this project does not invent a threshold after observing results.
-The completed T67 pull request's frontend job ran `scripts/javascript/benchmark-package-managers.sh` against
-the immutable npm baseline and reviewed pnpm candidate, then retained its environment, timing, disk,
-compressed-cache, image-size, manifest/lock digest, and raw command output for 30 days. T80 removes those branch-specific workflow steps and their manual input after the migration.
-The historical scripts and immutable baseline identifiers remain available for evidence review;
-they intentionally reference the old `spikes/toolchain` path at those historical commits.
-
-A local rootless Podman diagnostic (not a substitute for hosted evidence) built the npm baseline
-at `1,061,525,142` bytes and the target-platform pnpm candidate at `1,033,797,849` bytes. The
-candidate passed the arbitrary-UID/read-only-root smoke test, contained `next`, excluded TypeScript
-from its production graph, and contained neither Corepack nor pnpm. The first deliberately
-cross-platform deploy experiment was rejected because it produced a `2,705,797,855`-byte image;
-the final configuration keeps cross-platform integrity records in the lock while deploying only
-the builder's target-platform production graph.
+Historical release-evidence recovery selects `pnpm-lock.yaml` when present at the release source
+SHA and otherwise binds the old `web/package-lock.json`. Retained npm-era releases remain
+recoverable without changing the current workspace or rebuilding their images.

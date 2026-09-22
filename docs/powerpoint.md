@@ -44,8 +44,9 @@ are distinct types, and a replacement must preserve the template's type.
 The portable ZIP contains `presentation.pptx`, `generation.json`, a README and the
 original upload under `source/`. An original ZIP remains intact with its assets.
 This recovers the original source; changes subsequently made in PowerPoint are not
-written back into that source. Slide-specific Markdown/Marp extraction options in
-**2md** are separate follow-up work.
+written back into that source. To extract an edited PPTX, use the opt-in
+[slide-oriented Markdown or Marp workflow](user-guide.md#extract-an-edited-powerpoint-presentation)
+in experimental **2md**. It requires the external broker and does not promise full visual fidelity.
 
 The HTTP conversion endpoint accepts `output=pptx` or `pptx-bundle`,
 `presentation_dialect=auto|markdown|marp` and `slide_level=1..6`.
@@ -57,13 +58,8 @@ creation with `templates create --kind pptx`. See command help for required argu
 
 ## API compatibility in 0.7.0
 
-The user explicitly approved the 0.6.4 to 0.7.0 response enum expansion on
-2026-09-20. Conversion responses and history can now return `pptx` and
-`pptx-bundle` in `output`. Clients that exhaustively validate the former
-`docx|pdf|both` set must regenerate their bindings or accept these two values
-before upgrading. Existing document requests and output formats remain supported.
-
-The OpenAPI gate still classifies this as incompatible. A narrowly scoped
-exception accepts only these exact old/new versions and enum sets; unrelated
-changes and later transitions remain blocking. The exception is visible in CI
-output and is not a general permission to widen response enums.
+Conversion responses and history can return `pptx` and `pptx-bundle` in `output`. Clients that
+exhaustively validate the former `docx|pdf|both` set must regenerate their bindings or accept these
+two values before upgrading from a pre-0.7.0 release. Existing document requests remain supported.
+The approval and narrowly scoped OpenAPI-gate exception are retained in the
+[compatibility record](evidence/release-migration-history.md#powerpoint-070-api-exception).

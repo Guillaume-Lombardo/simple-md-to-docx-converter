@@ -172,8 +172,7 @@ network or used in production.
 
 ## Next.js migration boundary
 
-The approved frontend migration does not change this authentication contract. After T64, browser
-pages come from the same-origin Next.js process, but login, session inspection, logout, password
+Browser pages come from the same-origin Next.js process, but login, session inspection, logout, password
 renewal, expiry, revocation, authorization, cookies, CSRF validation, and Origin validation remain
 direct FastAPI operations. Next.js application code may neither read nor forward the HttpOnly
 session cookie. The public router enforces this boundary by removing the complete `Cookie` header

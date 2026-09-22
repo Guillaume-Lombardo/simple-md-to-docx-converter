@@ -2,7 +2,7 @@
 ticket: T23
 linear_id: G1L-333
 linear_url: https://linear.app/g1lom/issue/G1L-333/
-status: Done
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -39,11 +39,19 @@ Complete English user, template, administrator, API, operations, storage, queue,
 - After both quickstarts are verified on `main`, version `0.3.1` is published through the existing
   automatic release path and Compose is repinned to the immutable `0.3.1` image digest.
 
+## Documentation refresh acceptance (2026-09-22)
+
+- Expose shipped DOCX/PDF, PowerPoint and experimental reverse conversion through an input/output/limits/guide matrix, explicitly distinguishing ordinary quickstarts from external-broker deployments.
+- Update Python discovery metadata without changing package identity, version, dependencies or runtime behavior.
+- Move obsolete migration and release-incident instructions into linked historical evidence while retaining identifiers, immutable receipts and valid operating constraints.
+
 ## Dependencies
 
 - T22
 
 ## Progress
+
+- 2026-09-22: Reopened for the user-requested documentation and package-discovery refresh on `docs/T23-capabilities-and-history`. Related delivered scope: T38/T40/T54 (CLI/package), T58/T64 (frontend), T73/T82/T83/T87 (conversion and releases). No release or publication requested.
 
 - 2026-08-25: Started after T22 was verified `Done`. The documentation will lead with a
   casual-user quick start backed by a tested `compose.yaml`, then provide progressively deeper
@@ -175,6 +183,18 @@ Complete English user, template, administrator, API, operations, storage, queue,
   including the real Compose lifecycle and final gate, with the root quickstarts pinned to
   `ghcr.io/guillaume-lombardo/md-converter:0.3.1@sha256:3f50da7ef3664da6d73d4ad0cf0e9797f5a640f534114d179068cdc4c9f15a92`.
   All T23 acceptance criteria are verified on `main`; no limitation or exception remains.
+
+- 2026-09-22: Implemented the documentation refresh: capability matrix and Python discovery metadata now expose DOCX/PDF, editable PPTX and experimental document-to-Markdown/slide extraction, with explicit ordinary-quickstart versus external-broker requirements. Active guides describe the delivered CLI/frontend and extraction behavior. Historical release incidents, receipts, migration rollback instructions and T67 benchmarks are retained in docs/evidence/release-migration-history.md with links from the original guides; the Next.js design is explicitly identified as a historical migration record. No application behavior, dependency, version, image pin or release policy changed. Validation: uv sync --all-groups; Ruff formatting check and lint; ty; 12 documentation/version tests; the real release build, clean-install and tamper-rejection integration test; git diff --check. An initial broken documentation anchor was corrected and all documentation tests passed on rerun. Existing external URLs, source SHAs, image digests and run IDs were checked for preservation. Full canonical engine-excluded/full Python suites and container/browser E2E were not run for this documentation/metadata-only change; no runtime qualification is claimed. Changes remain local, unpublished and awaiting review/main verification.
+
+- 2026-09-22: The user invoked yolo, authorizing publication of docs/T23-capabilities-and-history to main, squash merge after required checks and independent review, and exact source-branch cleanup. Local validation was repeated before publication. No version transition or release publication is included.
+
+- 2026-09-22: PR #264 at cd8da219489b332001d19dc28220dc8dcf89b910 hit one Python-shard failure: tests/test_package.py still asserted the previous exact keyword list (2,312 tests passed in that shard). The user renewed yolo authorization to fix and resume. Updated the existing metadata assertion to include powerpoint, pptx and document-to-markdown. Ruff formatting/lint, ty and the expanded package/documentation/version/real-release integration selection pass (18 tests). No runtime code changed.
+
+- 2026-09-22: The user authorized iterative correction, publication and review until PR #264 merges. The container domain on a010948abcb825eb9737097c4fb6774afe0336e1 exposed a saturation-test race: the server correctly closed the excess socket before sendall, causing BrokenPipeError (137 integration tests passed). Extend this refresh's validation scope to correct that existing real Unix transport test without changing production code: hold the occupied handler beyond the close-assertion budget and assert immediate EOF/reset on the excess connection without sending a request.
+
+- 2026-09-22: Broker-test correction validated with 34 targeted real Unix transport/package/documentation tests, 10 consecutive isolated saturation-regression runs, Ruff formatting/lint, ty and git diff --check. The rejection still requires bounded EOF/reset and zero dispatch; production broker behavior is unchanged.
+
+- 2026-09-22: Independent CodeRabbit review of 74ec18993fd13f00c17c01d307ca15fa035a021a found one minor documentation issue and no other actionable findings. Clarified that the Migration 19 upgrade guidance applies only when the source database revision predates Migration 19; retained backup and verification requirements. All nine documentation tests and git diff --check pass.
 
 ## Synchronization
 

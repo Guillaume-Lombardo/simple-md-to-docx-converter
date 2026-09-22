@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "markweave"
 # A version change merged to main is the sole automatic publication trigger.
 version = "0.7.3"
-description = "Secure Markdown-to-DOCX and PDF conversion service and HTTP CLI"
+description = "Markdown to DOCX, PDF and PowerPoint, experimental document-to-Markdown conversion, and HTTP CLI"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
@@ -15,7 +15,7 @@ authors = [{ name = "Guillaume Lombardo", email = "lombardo.guillaume@gmail.com"
 maintainers = [
     { name = "Guillaume Lombardo", email = "lombardo.guillaume@gmail.com" },
 ]
-keywords = ["cli", "conversion", "docx", "markdown", "pdf"]
+keywords = ["cli", "conversion", "docx", "markdown", "pdf", "powerpoint", "pptx", "document-to-markdown"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -72,7 +72,7 @@ markweave-broker = "markweave.broker_process:main"
 markweave-kubernetes-attester = "markweave.kubernetes_attester_process:main"
 
 [project.urls]
-Documentation = "https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/blob/main/docs/python-distribution.md"
+Documentation = "https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/blob/main/docs/index.md"
 Issues = "https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/issues"
 Repository = "https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter"
 Source = "https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter"

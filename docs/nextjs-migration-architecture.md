@@ -1,5 +1,10 @@
 # Next.js migration architecture
 
+This is the historical T58–T64 design and acceptance record. The cutover is complete; staged
+instructions and legacy-renderer rollback gates below describe that migration. For current
+operations, use [architecture](architecture.md), [deployment](container-deployment.md), and
+[upgrades](upgrading.md). The recorded runtime and security contracts remain applicable.
+
 This document is the reviewed T58 contract for migrating Markweave's browser interface from
 FastAPI-rendered HTML and native JavaScript to Next.js, TypeScript, and Tailwind CSS. The
 [product specification](product-specification.md) remains normative. This guide makes its topology,

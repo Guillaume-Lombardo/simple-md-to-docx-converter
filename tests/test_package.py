@@ -84,7 +84,16 @@ def test_distribution_metadata_is_complete_for_public_pypi_artifacts() -> None:
     assert project["license"] == "Apache-2.0"
     assert project["license-files"] == ["LICENSE"]
     assert project["authors"] == project["maintainers"]
-    assert project["keywords"] == ["cli", "conversion", "docx", "markdown", "pdf"]
+    assert project["keywords"] == [
+        "cli",
+        "conversion",
+        "docx",
+        "markdown",
+        "pdf",
+        "powerpoint",
+        "pptx",
+        "document-to-markdown",
+    ]
     assert "Programming Language :: Python :: 3.14" in project["classifiers"]
     assert (
         "License :: OSI Approved :: Apache Software License" in project["classifiers"]
