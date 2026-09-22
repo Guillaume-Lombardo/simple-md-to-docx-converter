@@ -103,20 +103,12 @@ test("Next authentication shell uses FastAPI authority for three identities", as
       name: "Session policy",
       exact: true,
     });
-    assert.equal(await policyLink.getAttribute("href"), "/session-policy");
+    assert.equal(await policyLink.count(), 0);
     await adminPage.goto(`${baseURL}/convert`, { waitUntil: "networkidle" });
     const adminSession = await api(adminPage, "GET", "/api/v1/session");
     assert.equal(adminSession.status, 200);
     assert.ok(Number.isInteger(adminSession.body.effective_idle_minutes));
-    await assert.doesNotReject(() =>
-      adminPage
-        .getByText(
-          new RegExp(
-            `${adminSession.body.effective_idle_minutes} minutes of inactivity`,
-          ),
-        )
-        .waitFor(),
-    );
+    assert.equal(await adminPage.getByText(/minutes of inactivity/).count(), 0);
 
     for (const [identity, passwordChangeRequired] of [
       [alice, false],
@@ -133,15 +125,7 @@ test("Next authentication shell uses FastAPI authority for three identities", as
     await login(alicePage, alice.username, alice.password);
     const aliceSession = await api(alicePage, "GET", "/api/v1/session");
     assert.equal(aliceSession.status, 200);
-    await assert.doesNotReject(() =>
-      alicePage
-        .getByText(
-          new RegExp(
-            `${aliceSession.body.effective_idle_minutes} minutes of inactivity`,
-          ),
-        )
-        .waitFor(),
-    );
+    assert.equal(await alicePage.getByText(/minutes of inactivity/).count(), 0);
     assert.equal(
       await alicePage.getByText("Users", { exact: true }).count(),
       0,

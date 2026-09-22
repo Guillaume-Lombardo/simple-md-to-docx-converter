@@ -40,7 +40,7 @@ test("application shell exposes navigation and skip target", () => {
   expect(screen.getByRole("main")).toHaveAttribute("id", "main");
 });
 
-test("administrator shell shows identity, inactivity policy, users, and pending sign-out", () => {
+test("administrator shell shows identity, unified users navigation, and pending sign-out", () => {
   render(
     <AppShell
       current="Templates"
@@ -69,12 +69,9 @@ test("administrator shell shows identity, inactivity policy, users, and pending 
     "href",
     "/users",
   );
-  expect(screen.getByRole("link", { name: "Session policy" })).toHaveAttribute(
-    "href",
-    "/session-policy",
-  );
+  expect(screen.queryByRole("link", { name: "Session policy" })).toBeNull();
   expect(screen.getByText("Admin (Administrator)")).toBeVisible();
-  expect(screen.getByText(/15 minutes of inactivity/)).toBeVisible();
+  expect(screen.queryByText(/minutes of inactivity/)).toBeNull();
   expect(screen.getByRole("button", { name: "Sign out" })).toBeDisabled();
 });
 
