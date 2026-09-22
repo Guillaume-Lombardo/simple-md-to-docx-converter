@@ -10,6 +10,29 @@ Use the [upgrade guide](docs/upgrading.md) for supported transitions and rollbac
 [release process](docs/releasing.md) for artifact evidence, the [security policy](SECURITY.md) for
 private reporting, and the [support policy](SUPPORT.md) for help with a published release.
 
+<a id="release-0-7-2"></a>
+
+## [0.7.2] - 2026-09-22
+
+### Added
+
+- Experimental structured `.pptx` extraction can produce slide-oriented Markdown or the documented
+  Marp subset through the API, browser, and CLI. Presenter notes and normalized images default to
+  enabled for structured modes; meaningful unsupported presentation content receives warnings or
+  placeholders. Ordinary anydoc extraction remains the default.
+
+### Changed
+
+- Conversion history supports output-family filtering through the API and browser.
+- Reverse-job traceability persists structured extraction options in migration 19.
+
+### Fixed
+
+- CLI reverse waits preserve their deadline classification at the final HTTP poll.
+- Reverse reconciliation uses a consistent inventory snapshot during verification.
+- Reverse workers resume interrupted attempts only after durable termination acknowledgement is
+  ordered ahead of recovery.
+
 <a id="release-0-7-1"></a>
 
 ## [0.7.1] - 2026-09-20

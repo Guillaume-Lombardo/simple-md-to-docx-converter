@@ -93,12 +93,13 @@ SQLite 3.34. Real Unix/mTLS regressions cover anydoc, slides and Marp; populated
 preserve rows, defaults, foreign keys, indexes and checks. PostgreSQL tests use an isolated schema.
 Earlier failed runs remain diagnostic evidence and are not counted as passing validation.
 
-## Remaining qualification boundary
+## Release qualification
 
-HTTP/CLI/browser contracts and both database profiles have focused and integration coverage.
-The engine-excluded suite does not qualify the omitted external-engine cases. Final rootless
-technical qualification is complete for T73 on `main` `31f19243ebe25345dec2c3bde843a5caf261d53a`
-(CI `35702469912`), and the historical T83 candidate
-`4888cd067e848c59162d801c2399be99b7f81969` passed both profiles. Qualification of the new
-inventory-snapshot fix remains in progress. T87/G1L-586 authorizes 0.7.2 but it is not published;
-existing 0.7.1 pins remain and no public digest, release completion, or `main` adoption is implied.
+HTTP/CLI/browser contracts and both database profiles have focused and integration coverage. The
+release candidate passed its two-profile final-image qualification, and the historical T83 candidate
+`4888cd067e848c59162d801c2399be99b7f81969` also passed both profiles. See the
+[reverse qualification evidence](evidence/t73-reverse-conversion-qualification.md) for the retained
+CI, local-suite, and inventory-snapshot qualification boundaries.
+
+This evidence does not select a public digest or establish publication. Use only verified published
+release receipts for deployment.

@@ -108,9 +108,9 @@ The canonical engine-excluded run passed at exact source
 coverage. This is distinct from the final-image source and harness heads above. The 56 engine-marked
 tests still require the applicable CI/environment checks.
 
-T83 remains In Progress. Exact-head and exact-main checks, release/publication decisions, and any
-T73 stacked integration or deployment qualification remain separate. No public image, version,
-registry digest, or `main` completion is claimed here.
+At this historical qualification stage, exact-head and exact-main checks, release/publication
+decisions, and T73 integration remained separate. These candidate receipts do not establish public
+publication or main verification; subsequent results are recorded below.
 
 ## Subsequent local validation
 
@@ -170,3 +170,22 @@ and final-image qualification must pass before completion.
 The user authorized T87 to validate documentation, publish patch 0.7.2 through the existing protected
 workflow, and adopt the exact resulting public receipts. Publication has not occurred. The existing
 qualified docker-box deployment remains available while the correction is validated.
+
+## Verified PR and main integration
+
+PR #259 merged as `41329266140ce0a49a74cc8eab559e07a03df605` from reviewed head
+`01f8c3e68a940187638916709baaf6ca8167687e`. CI `35713604587` passed every check, including
+both complete E2E profiles and document engines. Its actual changed-domain mutation report selected
+and killed 14 mutants, with all six failure statuses zero.
+
+The final local canonical suite passed 4,698 tests, with 56 engine-marked tests deselected and
+11 warnings, in 1,964.42 seconds. Overall coverage was 94.98%; exact source guards passed before
+and after the run. The previous two local systemd failures were traced to the host disk-cleanup
+service deleting an unused test image. Fixture-owned never-started containers now protect the four
+required images until teardown. All 33 focused process integration tests passed, including real
+partial-creation cleanup regressions; no retainer remained and the external image was preserved.
+The failed run remains diagnostic evidence, not a successful qualification.
+
+Main CI `35716730560` is pending. T87 will qualify and publish the final versioned three-image set
+through the protected release workflow before adopting the actual registry receipts and updating
+the docker-box test deployment. The local candidate identities above remain historical.

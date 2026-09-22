@@ -106,16 +106,16 @@ repositories.
    Release only after verifying its exact SHA, tag, target, draft, and prerelease state. The PyPI
    job then rechecks that the version is still unpublished and uploads the verified files with
    PEP 740 attestations through OIDC.
-6. The reusable container workflow checks out the same SHA, derives both image tags from the
-   detected version, and runs the rootless final-image, paired E2E, and Critical-vulnerability
+6. The reusable container workflow checks out the same SHA, derives all three image tags from the
+   detected version, and runs the rootless final-image, two-profile E2E, and Critical-vulnerability
    gates. It serializes each image once into a private `dir:` transport and uploads the complete
-   backend/frontend staging artifact before any registry mutation. Authenticated preflight checks
-   every source and version tag for both roles before the first copy, accepting only an absent tag
+   backend/frontend/reverse-attempt staging artifact before any registry mutation. Authenticated preflight checks
+   every source and version tag for all roles before the first copy, accepting only an absent tag
    or the exact intended digest. Skopeo then copies those exact staged bytes and verifies every
-   remote digest. A later copy failure may leave a partial pair, but the retained staging artifact
+   remote digest. A later copy failure may leave a partial set, but the retained staging artifact
    is sufficient for the bounded recovery path below; neither normal publication nor recovery
-   rebuilds an image. The workflow then generates provenance and attaches both SBOM sets,
-   publication receipts, and paired evidence to the verified Release identity. Because job
+   rebuilds an image. The workflow then generates provenance and attaches all three SBOM sets,
+   publication receipts, and matched evidence to the verified Release identity. Because job
    credentials are isolated, the attestation job performs its own ephemeral GHCR login immediately
    before pushing provenance; it does not reuse or persist the publication job's credentials.
 
@@ -127,6 +127,14 @@ against GHCR, perform any release-owned public command migration, and run the do
 standalone and distributed quickstarts against that exact digest. The follow-up must restore full
 alignment before unrelated work is integrated. If publication fails, investigate or use the
 bounded recovery path below; never infer a digest or point Compose at an unpublished tag.
+
+For a schema-2 release, verify `release-images.json` binds backend, frontend and reverse-attempt
+receipts to the same version, source SHA and frontend lockfile. Adopt the backend/frontend digests
+in the existing quickstarts and the reverse-attempt digest in the applicable native-broker
+deployment configuration. Verify all three registry manifests anonymously. The ordinary quickstarts
+remain reverse-disabled until the documented external broker is explicitly configured; publication
+does not add a broker container or expose a runtime socket. See the
+[broker deployment guide](reverse-broker-deployment.md) for that boundary.
 
 If GitHub loses a run before creating any job, first prove that every external release surface is
 absent and attempt the normal, forced, and platform-advised cancellation or rerun paths. Record the
@@ -141,7 +149,7 @@ not depend on a Release event. Tags and Releases created with `GITHUB_TOKEN` the
 a duplicate publication run. Container evidence attachment verifies the tag and Release SHA before
 using `--clobber`, making a retry of that attachment idempotent. Any pre-existing tag, Release, or
 PyPI version blocks a fresh run rather than being silently reused. Investigate partial external
-state before authorizing any manual recovery. Recovery must not rebuild either container: registry
+state before authorizing any manual recovery. Recovery must not rebuild any container: registry
 serialization is not guaranteed to be byte-reproducible across hosted Podman versions. Run
 `container-release.yml` from `main` with the exact existing version, `v<version>` tag, reviewed
 source SHA, and the ID of a failed source run whose `build-and-publish` job successfully retained
@@ -153,10 +161,10 @@ current trusted `main` workflow SHA, reached the successful pre-mutation staging
 bounded non-expired artifact with matching repository/run metadata. It downloads by immutable
 artifact ID, not name alone. It then validates the exact regular-file set, closed checksum bundle,
 OCI archives and metadata relationships, publication receipts, release version/tag/source, and the
-state of both public GHCR digests. The recovery job has scoped `packages: write` permission because
-it may need to publish the missing role from the retained bytes; it preflights both roles before
+state of every public GHCR digest in the retained release set. The recovery job has scoped `packages: write` permission because
+it may need to publish a missing role from the retained bytes; it preflights every role before
 copying, accepts an already-correct role idempotently, and rejects any conflicting digest. Only
-after both exact digests are public does it transfer the unchanged evidence into the recovery run.
+after all exact digests are public does it transfer the unchanged evidence into the recovery run.
 Separate jobs attest those exact public digests and attach the evidence to the already verified
 Release. Recovery has no OIDC permission, never enters the PyPI environment, and cannot invoke
 either build or Python publication.
@@ -195,7 +203,8 @@ For released version `<version>`:
   and sdist, and attestations;
 - install the wheel into fresh Python 3.14 environments for the base package and every supported
   extra, then verify `from markweave import __version__`, the exact version, and the installed CLI;
-- verify GHCR tag `<version>` resolves to the workflow digest and is anonymously pullable;
+- verify GHCR tag `<version>` in each of the three repositories resolves to its receipt digest
+  and is anonymously pullable;
 - verify provenance identifies this repository and reviewed main SHA;
 - verify the GitHub tag `v<version>` targets that same SHA and every release evidence file is
   attached to its published GitHub Release.
@@ -203,7 +212,14 @@ For released version `<version>`:
 Preserve workflow URLs and immutable digests in the release record. Do not publish, replace, or
 delete external release state outside this protected automation without explicit approval.
 
+Historical schema-1 releases bind only backend and frontend. Their retained recovery evidence
+remains valid for that pair, but cannot identify a reverse-attempt image or qualify a matched
+reverse deployment. Current schema-2 releases require all three roles.
+
 ## Frontend publication after T64
+
+T64 established the two-image baseline described in this section. Schema-2 releases extend that
+baseline with the reverse-attempt image and require verification of all three roles as described above.
 
 The release workflow publishes the backend and frontend as one evidence-bound pair without
 replacing the established trust model. The frontend package identity is
