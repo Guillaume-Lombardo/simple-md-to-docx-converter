@@ -190,6 +190,10 @@ Complete English user, template, administrator, API, operations, storage, queue,
 
 - 2026-09-22: PR #264 at cd8da219489b332001d19dc28220dc8dcf89b910 hit one Python-shard failure: tests/test_package.py still asserted the previous exact keyword list (2,312 tests passed in that shard). The user renewed yolo authorization to fix and resume. Updated the existing metadata assertion to include powerpoint, pptx and document-to-markdown. Ruff formatting/lint, ty and the expanded package/documentation/version/real-release integration selection pass (18 tests). No runtime code changed.
 
+- 2026-09-22: The user authorized iterative correction, publication and review until PR #264 merges. The container domain on a010948abcb825eb9737097c4fb6774afe0336e1 exposed a saturation-test race: the server correctly closed the excess socket before sendall, causing BrokenPipeError (137 integration tests passed). Extend this refresh's validation scope to correct that existing real Unix transport test without changing production code: hold the occupied handler beyond the close-assertion budget and assert immediate EOF/reset on the excess connection without sending a request.
+
+- 2026-09-22: Broker-test correction validated with 34 targeted real Unix transport/package/documentation tests, 10 consecutive isolated saturation-regression runs, Ruff formatting/lint, ty and git diff --check. The rejection still requires bounded EOF/reset and zero dispatch; production broker behavior is unchanged.
+
 ## Synchronization
 
 Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria, or progress changes.

@@ -594,7 +594,10 @@ def test_real_unix_rejects_oversized_or_truncated_frame_before_dispatch(
 def test_real_unix_handler_saturation_rejects_excess_connection(
     tmp_path: Path, mocker: MockerFixture
 ) -> None:
-    path, server, dispatcher = _server(tmp_path, mocker)
+    # Keep the first handler occupied longer than the peer-close assertion budget.
+    path, server, dispatcher = _server(
+        tmp_path, mocker, limits=UnixTransportLimits(5, 1, 1, 1)
+    )
 
     with (
         server,
@@ -609,13 +612,8 @@ def test_real_unix_handler_saturation_rejects_excess_connection(
         assert server._connections
         excess.settimeout(1)
         excess.connect(str(path))
-        excess.sendall(encode_request(ReadyRequest(REQUEST_ID, 1)))
-        excess.shutdown(socket.SHUT_WR)
-        try:
-            rejected = excess.recv(1)
-        except ConnectionResetError:
-            rejected = b""
-        assert rejected == b""
+        # Saturation rejects the connection before reading a request.
+        _assert_peer_closed(excess)
 
     dispatcher.dispatch.assert_not_called()
 
