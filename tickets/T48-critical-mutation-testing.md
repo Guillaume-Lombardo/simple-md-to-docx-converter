@@ -46,6 +46,35 @@ workflow, change branch protection, or declare T48 complete.
 
 ## Progress
 
+* 2026-09-22: PR #253 was squash-merged as
+  `6e46707ef47b5213fae7ae0f6bbb64174d66056b` after exact-head verification and
+  source-branch cleanup. Main CI run `35698832218` is active for that revision.
+  T48 remains In Progress until the merged mutation gate is verified on main; the
+  reviewed scope and T73's retained 28-target qualification campaign are unchanged.
+
+* 2026-09-22: The shared prerequisite PR #248 was squash-merged as
+  `cd229f7e8c5779b0d56f2721ba585b5ec3be0210` after verification. Main CI run
+  `35696095409` is active for that revision. T48's reviewed mutation scope and prior
+  25/25 campaign evidence are unchanged; T48 remains In Progress until #253 is
+  published, verified, and merged after the prerequisite main evidence is green.
+
+* 2026-09-22: The user renewed the full publish, merge, and cleanup authorization for
+  the shared PR #248 and PR #253 sequence. The first main CI attempt for unchanged
+  PR #257 squash `582886e` failed only while GitHub retrieved an intermediary artifact;
+  its shards, final-image E2E jobs, and other completed jobs passed. The approved rerun
+  is queued against the same main revision and remains pending. T48 preserves the
+  previously verified 25/25 mutation evidence and remains In Progress pending that
+  prerequisite's main verification and the serial PR sequence.
+
+* 2026-09-22: The user renewed approval for the minimal reverse CLI deadline correction
+  shared with PR #248 and this T48 delivery. PR #257 was squash-merged as
+  `582886e`, and its exact-head CI passed. Main CI run `35669415349` remains pending
+  verification. The previously verified T48 campaign killed all 25 selected mutants;
+  no mutation scope, strict failure semantics, coverage threshold, or workflow policy
+  was changed while awaiting the prerequisite's main evidence. T48 remains In Progress.
+
+* 2026-09-21: Refreshed head `1bb4ca1b55588dc7b254d2a006b3d2df764a1056` passed mutation, container and Compose checks, but CI 35633664217 failed standalone E2E at the existing reverse CLI bounded-wait assertion, matching PR #248. The CLI and that E2E driver are unchanged by T48. Read-only diagnosis identifies a likely deadline-edge transport error racing the command's timeout response; exact CLI stderr was not retained. The merge cycle is paused pending user direction on the shared correction. No retry or assertion relaxation was applied.
+
 * 2026-09-21: The mutation job passed the old PR head, including all 25 selected mutants,
   but both final-image E2E jobs then failed on T86's stale six-package curl/OpenSSL RPM inventory.
   The T86 correction is merged into this branch; the final exact-head CI run remains pending.
