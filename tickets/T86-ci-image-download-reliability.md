@@ -2,7 +2,7 @@
 ticket: T86
 linear_id: G1L-585
 linear_url: https://linear.app/g1lom/issue/G1L-585/t86-improve-ci-image-downloads-and-verify-dependency-updates
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -32,6 +32,15 @@ Diagnose PR #248's network failure, verify its grouped dependency updates and ma
 Own bounded transient acquisition retries for immutable CI/container images, checksum-pinned Containerfile downloads, and read-only public-release alignment HTTP requests, with focused policy tests. Coordinate CI workflow ownership with independent T48 mutation integration and later T73 final-image work. The user also authorized the minimal reverse CLI deadline-race correction required by the failed final-image check in PRs #248 and #253. Do not change branch protection or publish a product release.
 
 ## Progress
+
+* 2026-09-22: Completed after main CI `35696095409` succeeded at exact squash
+  `cd229f7e8c5779b0d56f2721ba585b5ec3be0210`, including both full E2E profiles,
+  document engines, coverage, frontend, storage and the required gate. PR #255 delivered bounded
+  acquisition retries and integrity evidence; PR #257 delivered the CLI deadline correction;
+  PR #248 delivered the independently reviewed dependency updates. All three are merged and their
+  source branches cleaned. Integrity checks, coverage thresholds and branch protections remain
+  enforced. Dependency security alerts were unavailable as recorded below; no configuration was
+  changed to enable them. No product release was published.
 
 * 2026-09-22: Main `582` rerun `35669415349` attempt 2 succeeded. PR #248 exact head
   `dda91c267f875e54a04ff63b7697d6d26257534a` passed all checks, received independent review, and
