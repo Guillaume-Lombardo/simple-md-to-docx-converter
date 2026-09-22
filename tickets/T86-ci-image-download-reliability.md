@@ -2,7 +2,7 @@
 ticket: T86
 linear_id: G1L-585
 linear_url: https://linear.app/g1lom/issue/G1L-585/t86-improve-ci-image-downloads-and-verify-dependency-updates
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -32,6 +32,23 @@ Diagnose PR #248's network failure, verify its grouped dependency updates and ma
 Own bounded transient acquisition retries for immutable CI/container images, checksum-pinned Containerfile downloads, and read-only public-release alignment HTTP requests, with focused policy tests. Coordinate CI workflow ownership with independent T48 mutation integration and later T73 final-image work. The user also authorized the minimal reverse CLI deadline-race correction required by the failed final-image check in PRs #248 and #253. Do not change branch protection or publish a product release.
 
 ## Progress
+
+* 2026-09-22: Completed after main CI `35696095409` succeeded at exact squash
+  `cd229f7e8c5779b0d56f2721ba585b5ec3be0210`, including both full E2E profiles,
+  document engines, coverage, frontend, storage and the required gate. PR #255 delivered bounded
+  acquisition retries and integrity evidence; PR #257 delivered the CLI deadline correction;
+  PR #248 delivered the independently reviewed dependency updates. All three are merged and their
+  source branches cleaned. Integrity checks, coverage thresholds and branch protections remain
+  enforced. Dependency security alerts were unavailable as recorded below; no configuration was
+  changed to enable them. No product release was published.
+
+* 2026-09-22: Main `582` rerun `35669415349` attempt 2 succeeded. PR #248 exact head
+  `dda91c267f875e54a04ff63b7697d6d26257534a` passed all checks, received independent review, and
+  merged as `cd229f7e8c5779b0d56f2721ba585b5ec3be0210`; its local and remote branches were removed
+  after verification. PR #248 contains the reviewed Hatchling, Boto3, and Ty dependency updates.
+  The CLI deadline correction is PR #257, already merged separately. New main CI
+  `35696095409` is still running, so current-main verification is not claimed. T86 remains In
+  Progress.
 
 * 2026-09-21: Created from user priority order 4. PR #248 at 8e8bdbde59c03a963e9b0f789120fc69d63c706f failed distributed E2E with unexpected EOF downloading a UBI9 Python 3.14 image blob from Quay (exit 125). Other matrix jobs passed; this observation does not yet establish dependency compatibility.
 * 2026-09-21: Linear moved to In Progress. The exact failing command was the unguarded `podman pull --quiet "$base_image"` in `scripts/e2e/run.sh`, after the distributed E2E workflow workload had completed. Podman exited 125 while reading Quay's `fbe94d...` UBI9 Python 3.14 layer from the upstream S3 URL with `unexpected EOF`; the other 15 CI jobs passed. This is an infrastructure transport failure, not a dependency or test regression.
