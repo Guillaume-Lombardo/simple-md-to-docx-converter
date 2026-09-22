@@ -23,12 +23,10 @@ and the target release's published evidence before scheduling the change. Test
 the exact source, image, and configuration in an isolated environment that
 matches the selected storage profile before production use.
 
-The `0.7.2` Python package was published, but its container qualification failed before images
-were published or retained. It is not a complete container release; never invent `0.7.2` image
-digests or mix package and image versions. The matched schema-2 `0.7.3` backend, frontend, and
-reverse-attempt images are published from one source and have verified public receipts. Existing
-deployments should keep their verified `0.7.1` configuration until they adopt the repository's
-exact `0.7.3` pins and complete deployment-specific verification.
+Select a complete published release with verified receipts for every required image. Version `0.7.2`
+has no qualified published container set; see the [incident record](evidence/release-migration-history.md#incomplete-072-container-release).
+The repository quickstarts pin the matched published `0.7.3` backend/frontend images. Reverse-enabled
+deployments also require the matching reverse-attempt image and native broker.
 
 ## Upgrade procedure
 
@@ -73,8 +71,8 @@ checks succeed on the restored previous version.
 
 ### Reverse-conversion migration 19
 
-The target release that introduces migration 19 persists reverse-extraction options. Before starting
-it, create and verify the profile-consistent database and object backup required above, record the
+Migration 19 persists reverse-extraction options. When upgrading a database from an earlier revision,
+create and verify the profile-consistent database and object backup required above, record the
 running broker configuration and native-broker package/virtual environment, and drain reverse work.
 Keep the application, frontend, reverse-attempt images, and native-broker executable at the same
 target release version and bind the three images to one verified schema-2 `release-images.json`.
@@ -93,27 +91,11 @@ older application release.
 
 ### Next.js cutover releases
 
-A release containing the T64 cutover adds a separately published frontend
-image but remains one Markweave release. Before rollout, verify the exact
-matched backend and frontend registry digests, the pair-binding release
-receipt, the previous backend digest containing the legacy interface, and the
-reviewed previous and target routing manifests. Mixed frontend/backend versions
-are unsupported even when their HTTP schemas appear compatible.
-
-Cut over only after the previous profile-consistent backup and the complete
-two-profile evidence against the exact published final bytes is available. The
-final backend bytes are built only after parity and rollback rehearsal complete
-and the candidate source has removed the legacy renderer; they are not rebuilt
-after acceptance. If routing or the frontend
-fails before any persistent transition, stop admission and restore the previous
-routing manifest and previous backend release with its legacy pages. If a
-database migration or persistent data change has started, restore the matching
-pre-cutover database and object backup into isolated targets before switching
-traffic back. In either case, require frontend-route or legacy-page availability,
-FastAPI readiness, login, one authorized workflow, and representative stable
-object/download checks before declaring rollback complete. The detailed route
-and rehearsal contract is in
-[the Next.js migration architecture](nextjs-migration-architecture.md).
+Current releases use separate backend and frontend images. Upgrade and roll back the matched image
+set and routing manifest together; verify frontend routes, FastAPI readiness, login and an authorized
+workflow before restoring traffic. Restore the matching database and object backup if persistent
+state changed. The one-time legacy-renderer migration and its old rollback procedure are retained
+in [cutover history](evidence/release-migration-history.md#nextjs-cutover-and-legacy-rollback).
 
 ## Configuration compatibility
 

@@ -2,7 +2,7 @@
 ticket: T23
 linear_id: G1L-333
 linear_url: https://linear.app/g1lom/issue/G1L-333/
-status: Done
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -39,11 +39,19 @@ Complete English user, template, administrator, API, operations, storage, queue,
 - After both quickstarts are verified on `main`, version `0.3.1` is published through the existing
   automatic release path and Compose is repinned to the immutable `0.3.1` image digest.
 
+## Documentation refresh acceptance (2026-09-22)
+
+- Expose shipped DOCX/PDF, PowerPoint and experimental reverse conversion through an input/output/limits/guide matrix, explicitly distinguishing ordinary quickstarts from external-broker deployments.
+- Update Python discovery metadata without changing package identity, version, dependencies or runtime behavior.
+- Move obsolete migration and release-incident instructions into linked historical evidence while retaining identifiers, immutable receipts and valid operating constraints.
+
 ## Dependencies
 
 - T22
 
 ## Progress
+
+- 2026-09-22: Reopened for the user-requested documentation and package-discovery refresh on `docs/T23-capabilities-and-history`. Related delivered scope: T38/T40/T54 (CLI/package), T58/T64 (frontend), T73/T82/T83/T87 (conversion and releases). No release or publication requested.
 
 - 2026-08-25: Started after T22 was verified `Done`. The documentation will lead with a
   casual-user quick start backed by a tested `compose.yaml`, then provide progressively deeper
@@ -175,6 +183,10 @@ Complete English user, template, administrator, API, operations, storage, queue,
   including the real Compose lifecycle and final gate, with the root quickstarts pinned to
   `ghcr.io/guillaume-lombardo/md-converter:0.3.1@sha256:3f50da7ef3664da6d73d4ad0cf0e9797f5a640f534114d179068cdc4c9f15a92`.
   All T23 acceptance criteria are verified on `main`; no limitation or exception remains.
+
+- 2026-09-22: Implemented the documentation refresh: capability matrix and Python discovery metadata now expose DOCX/PDF, editable PPTX and experimental document-to-Markdown/slide extraction, with explicit ordinary-quickstart versus external-broker requirements. Active guides describe the delivered CLI/frontend and extraction behavior. Historical release incidents, receipts, migration rollback instructions and T67 benchmarks are retained in docs/evidence/release-migration-history.md with links from the original guides; the Next.js design is explicitly identified as a historical migration record. No application behavior, dependency, version, image pin or release policy changed. Validation: uv sync --all-groups; Ruff formatting check and lint; ty; 12 documentation/version tests; the real release build, clean-install and tamper-rejection integration test; git diff --check. An initial broken documentation anchor was corrected and all documentation tests passed on rerun. Existing external URLs, source SHAs, image digests and run IDs were checked for preservation. Full canonical engine-excluded/full Python suites and container/browser E2E were not run for this documentation/metadata-only change; no runtime qualification is claimed. Changes remain local, unpublished and awaiting review/main verification.
+
+- 2026-09-22: The user invoked yolo, authorizing publication of docs/T23-capabilities-and-history to main, squash merge after required checks and independent review, and exact source-branch cleanup. Local validation was repeated before publication. No version transition or release publication is included.
 
 ## Synchronization
 

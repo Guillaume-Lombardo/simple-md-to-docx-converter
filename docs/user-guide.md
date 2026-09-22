@@ -43,6 +43,9 @@ rendering](mermaid.md).
 
 ## Revert a document to Markdown
 
+Experimental **2md** requires a configured [external isolation broker](reverse-broker-deployment.md)
+and matched reverse-attempt image. The ordinary quickstarts do not enable this workflow.
+
 The **Revert** page converts a supported document to Markdown. It loads the accepted extensions
 and upload limit from the authenticated service before enabling file selection. The extensions
 are hints; the server scans the upload and checks its content before accepting it. Choose or drop

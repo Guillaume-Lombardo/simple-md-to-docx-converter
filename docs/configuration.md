@@ -1,6 +1,6 @@
 # Configuration reference
 
-The `0.6.4` application has separate backend, frontend, and public-router processes. Frontend and
+The application has separate backend, frontend, and public-router processes. Frontend and
 router origins, host allowlists, TLS key/certificate paths, request limits, and the positive bounded
 upstream inactivity timeout (`ROUTER_UPSTREAM_TIMEOUT_MS`) belong to
 their process configuration; they do not grant the frontend database, object-store, scanner, or
@@ -25,7 +25,7 @@ database URLs, S3 credentials, and other secret or opaque values must match exac
 Any incompatible pair, including an invalid alias spelling, prevents startup without displaying
 either value. This fail-closed behavior avoids silently selecting a configuration source.
 
-The public Compose quickstart uses a T39-capable image and supplies only `MARKWEAVE_*` variables.
+The public Compose quickstart supplies only `MARKWEAVE_*` variables.
 The deprecated aliases remain available only for operators migrating an older external deployment;
 do not define both prefixes in new deployments.
 

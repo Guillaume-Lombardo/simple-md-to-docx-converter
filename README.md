@@ -1,10 +1,15 @@
 <p align="center"><img src="web/public/markweave-logo.png" alt="Markweave" width="320"></p>
 
-# Markweave: Markdown to DOCX and PDF
+# Markweave: Markdown to DOCX, PDF and PowerPoint
 
 Markweave turns a Markdown file into DOCX, PDF, or an editable PowerPoint presentation from a small browser interface. It keeps
 your Word and PowerPoint templates and completed jobs on local persistent storage. It scans every upload with
 ClamAV by default and can explicitly delegate that boundary to a trusted upstream proxy.
+
+Experimental **2md** converts supported office documents and text PDFs back to Markdown, including
+slide-oriented Markdown or Marp from edited PPTX files. It requires a separately configured
+[external broker](docs/reverse-broker-deployment.md). See the
+[capability matrix](docs/index.md#conversion-capabilities) for inputs, outputs, limits and guides.
 
 The project is licensed under [Apache-2.0](LICENSE). The source package version is `0.7.3`.
 The default public quickstart pins the matched published `0.7.3` backend and Next.js frontend
@@ -30,6 +35,9 @@ Open <http://localhost:8080> and sign in as `admin` with the displayed password.
 In **2docx**, upload `examples/quickstart-source.md`, keep **Pandoc default**,
 choose DOCX, PDF, or both, and start the conversion. Download the result when ready.
 The first startup can take several minutes while ClamAV loads its signatures.
+
+For editable PowerPoint, open **2pptx** and follow the [PowerPoint guide](docs/powerpoint.md).
+The ordinary quickstart supports both forward workflows; **2md** requires the external broker.
 
 ```bash
 scripts/quickstart-simple.sh ps

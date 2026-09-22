@@ -175,11 +175,11 @@ recorded. This reduces unused attack surface without altering the vulnerability 
 ## Approved Next.js cutover topology
 
 The public default pins the verified `0.7.3` image pair published from source
-`84e35fed521c61d34823d18767f47eb87253d4eb`. T64 implements the separate frontend image and the
+`84e35fed521c61d34823d18767f47eb87253d4eb`. The deployment uses a separate frontend image and the
 literal one-origin routing, resource, probe, supply-chain, and rollback contract defined in
 [the reviewed Next.js migration architecture](nextjs-migration-architecture.md).
 
-The approved target uses a UBI 9 Node.js 24 builder and UBI 9 Node.js 24 minimal runtime pinned by
+The frontend uses a UBI 9 Node.js 24 builder and UBI 9 Node.js 24 minimal runtime pinned by
 the reviewed Linux/AMD64 digests. The process is stateless, arbitrary-UID, read-only-root, and
 capability-free, with only bounded memory-backed `/tmp`; it mounts neither `/data` nor `/work` and
 receives no backend service credentials. The standalone profile adds one frontend replica, while
@@ -225,8 +225,9 @@ candidate uses 30 seconds; production manifests require the operator to supply t
 
 At release, deploy only a matched backend/frontend version pair pinned by both verified registry
 manifest digests. A partial pair, mutable tag, mixed version, or frontend whose CSP/routing probes
-fail is not deployable. Preserve the prior backend digest containing the legacy UI and its route
-manifest until the cutover rollback window and rehearsal are complete.
+fail is not deployable. Preserve the complete previous image set and routing manifest for rollback,
+together with the profile-consistent backup. The [legacy cutover procedure](evidence/release-migration-history.md#nextjs-cutover-and-legacy-rollback)
+is retained as historical evidence.
 
 ## Related guidance
 

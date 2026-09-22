@@ -4,10 +4,8 @@ Each release identity is recorded in a schema-versioned `release-images.json` wi
 and retained image evidence. Schema 1 records the historical matched backend/frontend pair. Schema
 2 records the backend, frontend, and reverse-attempt images, all bound to the same release version
 and source SHA, plus the frontend lock digest. A schema-1 pair has no reverse-attempt identity and
-must not be treated as a qualified reverse release. The former `0.6.4` candidate and `0.6.1`
-rollback references document an earlier backend/frontend pair transition. Keep that record as
-historical release evidence; those versions do not select a current release or public digest for
-T73.
+must not be treated as a qualified reverse release. Historical candidate and rollback identities remain in
+[release history](evidence/release-migration-history.md#earlier-recovery-identities).
 
 Rollback restores the complete image set and its route manifest as one release-level operation;
 never combine images across releases or add a reverse-attempt image to a historical schema-1 pair.

@@ -1,7 +1,27 @@
 # Documentation
 
-Markweave converts Markdown to DOCX, PDF, or both through a browser interface or an asynchronous
-HTTP API. Start with the guide for your role:
+Markweave converts Markdown to DOCX, PDF, and editable PowerPoint, and converts supported
+documents back to Markdown through its experimental reverse workflow. Use the browser, HTTP API,
+or installed CLI.
+
+## Conversion capabilities
+
+| Input | Output | Availability and limits | Guide |
+| --- | --- | --- | --- |
+| Markdown, or ZIP with Markdown and local assets | DOCX, PDF, or ZIP containing both | Available in the ordinary quickstart (**2docx**). Optional Word template; PDF is rendered from DOCX. No remote resources or raw HTML. | [Document conversion](user-guide.md#convert-a-document) |
+| Markdown or the supported Marp subset, optionally with ZIP assets | Editable PPTX, or ZIP with PPTX and original source | Available in the ordinary quickstart (**2pptx**). Optional PowerPoint template. No arbitrary CSS/themes; check slides for overflow. Original-source recovery does not include later PowerPoint edits. | [PowerPoint and Marp](powerpoint.md) |
+| Word, PowerPoint, Excel, OpenDocument, RTF, EPUB, CSV, or text PDF | Markdown, or ZIP with Markdown, assets and manifest | Experimental **2md**; requires the external broker. Accepted extensions and upload limits come from the service. No OCR or hosted fallback; PDF is text-only, without images or layout. | [Document to Markdown](user-guide.md#revert-a-document-to-markdown) |
+| Edited PPTX | Slide-oriented Markdown or Marp, with optional notes and images | Experimental **2md** with the external broker. Opt-in extraction; no original-source recovery or full visual round trip. | [Edited PowerPoint extraction](user-guide.md#extract-an-edited-powerpoint-presentation) |
+
+The ordinary quickstarts do not configure reverse execution. To enable **2md**, an operator must
+configure the [external isolation broker](reverse-broker-deployment.md) and a matched immutable
+reverse-attempt image. Installing the Python package alone does not provide that deployment.
+All conversions use bounded uploads, asynchronous jobs, and expiring results; deployment-specific
+limits are documented in the [configuration reference](configuration.md).
+
+## Guides by role
+
+Start with the guide for your role:
 
 - [Quickstart operations](quickstart.md): local profiles, runtime selection, origins and recovery.
 - [User guide](user-guide.md): sign in, choose templates, submit conversions, cancel work, and

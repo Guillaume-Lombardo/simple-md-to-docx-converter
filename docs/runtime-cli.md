@@ -32,5 +32,9 @@ revision, and whether the schema changed. A mixed or incomplete profile fails
 before a database is selected. `--timeout SECONDS` bounds database acquisition
 and statements where the backend supports it.
 
-`python -m markweave.runtime` remains a package-internal compatibility path for
-existing container entrypoints until T38 migrates them to the supported CLI.
+Containers and local operations use the supported `markweave serve` and `markweave worker`
+commands. The completed entrypoint migration is recorded in
+[T38](../tickets/T38-container-cli-entrypoints.md) and
+[T54](../tickets/T54-publish-cli-entrypoint-release.md); the
+[old compatibility guidance](evidence/release-migration-history.md#retired-runtime-entrypoint-guidance)
+is historical.

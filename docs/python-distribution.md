@@ -1,5 +1,10 @@
 # Python distribution
 
+Markweave supports Markdown to DOCX, PDF and editable PowerPoint, plus experimental document-to-
+Markdown conversion. See the [capability matrix](index.md#conversion-capabilities) for formats,
+limits and deployment requirements. The remote CLI uses an existing service; reverse conversion
+requires that service's separately configured [external broker](reverse-broker-deployment.md).
+
 `markweave` is the PyPI package and public Python import. Its supported Python API is deliberately
 small:
 
