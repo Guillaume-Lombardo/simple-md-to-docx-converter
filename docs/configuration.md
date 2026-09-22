@@ -184,8 +184,12 @@ absent. Pydantic settings encode the pin tuple as a JSON array in the environmen
 The broker is a host-native service with its own owner-only runtime configuration and mTLS material.
 See [broker deployment](reverse-broker-deployment.md) for its principal, certificate, readiness,
 and image requirements. Worker and broker policy, transport identity, and immutable attempt-image
-digest must agree; do not copy forward-conversion limits or use an unpublished image digest. The
-exact matched-image, two-profile qualification remains in progress.
+digest must agree; do not copy forward-conversion limits or use an unpublished image digest. Technical
+matched-image qualification is complete for T73 on `main`
+`31f19243ebe25345dec2c3bde843a5caf261d53a` (CI `35702469912`) and the historical T83
+`4888cd067e848c59162d801c2399be99b7f81969` two-profile candidate. The new inventory-snapshot fix
+remains under qualification. T87/G1L-586
+authorizes, but has not published, 0.7.2; keep the existing 0.7.1 pins and do not infer a digest.
 
 ## Jobs, workers, metrics, and retention
 

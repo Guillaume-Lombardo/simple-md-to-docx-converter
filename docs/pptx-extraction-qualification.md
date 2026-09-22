@@ -96,8 +96,9 @@ Earlier failed runs remain diagnostic evidence and are not counted as passing va
 ## Remaining qualification boundary
 
 HTTP/CLI/browser contracts and both database profiles have focused and integration coverage.
-The engine-excluded suite does not qualify the omitted external-engine cases or the required final
-rootless image workflows. Final rootless two-profile T83 acceptance remains pending the T73 harness
-foundation, without an exception or waiver. The broader cross-format, three-image release
-qualification remains T73. No package version, public image pin, release workflow or deployment is
-changed by this evidence.
+The engine-excluded suite does not qualify the omitted external-engine cases. Final rootless
+technical qualification is complete for T73 on `main` `31f19243ebe25345dec2c3bde843a5caf261d53a`
+(CI `35702469912`), and the historical T83 candidate
+`4888cd067e848c59162d801c2399be99b7f81969` passed both profiles. Qualification of the new
+inventory-snapshot fix remains in progress. T87/G1L-586 authorizes 0.7.2 but it is not published;
+existing 0.7.1 pins remain and no public digest, release completion, or `main` adoption is implied.

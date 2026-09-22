@@ -120,3 +120,11 @@ checks, and T73 stacked integration remain separate boundaries.
 2026-09-21: The second standalone final-image run used unchanged `e3fb99b` images with the `f1316a3` harness. The real structured API, installed CLI and browser Marp workflows passed, including authoritative accepted options and the exact downloaded package. The complete run then failed in the older synthetic workspace presentation fixture, which omitted the now-required extraction capabilities and reverse-job options. The fixture is updated to the current contract, with an assertion that DOCX does not expose PowerPoint extraction controls. Both failed runs and their artifacts are retained; complete two-profile qualification is still pending. No application code or image changed.
 
 2026-09-22: Deployed the qualified candidate to the existing docker-box test instance after verifying a complete database/object backup. Backend/frontend/native broker and the exact reverse runtime digest are matched; migration 19, SQLite integrity, all four service health checks, public HTTPS readiness, authenticated structured Slides package validation and both reverse READY metrics pass. A Podman compressed-import identity mismatch was diagnosed and corrected without relaxing checks; its known-never-started creation was recovered through the existing adapter and normal reconciliation under independent review, without direct inventory/data edits. Both synthetic jobs ultimately succeeded. This remains a test candidate at package version 0.7.1, with no public release, PR merge, or Done claim.
+
+* 2026-09-22: The authorized capabilities smoke correction passed the container job in CI
+  35705172160. That run then failed standalone E2E and its dependent gate; every other job passed.
+  A separately authorized, independently reviewed inventory snapshot correction addresses a real
+  concurrent-read race without weakening manifest authentication or tamper rejection. T73 records
+  its 45-test evidence and negative control. Seven guides now distinguish historical qualified
+  candidates from the pending new-source qualification and T87's authorized 0.7.2 publication;
+  118 documentation/policy tests passed. New exact-head and main verification remain required.

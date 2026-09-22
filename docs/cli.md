@@ -96,8 +96,11 @@ each profile retains its own session credentials.
 The advertised extensions and upload limit come from the service. Submission checks the local file
 and then relies on server-side scanning and content detection. The workflow uses a local engine,
 without OCR or hosted Firecrawl fallback. PDF text is extracted without its images or layout;
-scanned or image-only PDFs fail with `needs_ocr`. Reverse conversion remains experimental while
-exact final-image qualification is in progress.
+scanned or image-only PDFs fail with `needs_ocr`. Technical final-image qualification is complete:
+T73 was verified on `main` `31f19243ebe25345dec2c3bde843a5caf261d53a` by CI run `35702469912`, and
+T83 candidate `4888cd067e848c59162d801c2399be99b7f81969` historically passed both profiles. The new
+inventory-snapshot fix remains under qualification. The authorized T87/G1L-586 0.7.2 release is not
+published; existing 0.7.1 pins remain authoritative and no current public digest is implied.
 
 ## Authentication profiles
 

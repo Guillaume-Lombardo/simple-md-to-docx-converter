@@ -151,3 +151,22 @@ independent review of exact identity, provenance, historical events and runtime 
 inventory row was edited and no digest check was relaxed. Operator receipts retain the complete
 failure and recovery sequence; this is not a general recovery procedure for unknown execution
 histories.
+
+## Inventory snapshot correction and forthcoming release
+
+On 2026-09-22, PR #259 CI `35705172160` passed the corrected capabilities smoke and all other
+jobs except standalone E2E and its dependent gate. Independent diagnosis identified a real
+inventory read race: autocommit could compare rows and their authenticated manifest from different
+committed states. The retained traceback matches that branch, but missing database artifacts do
+not prove the exact historical interleaving.
+
+The reviewed correction uses one explicit read transaction across verification and returned data,
+including constructor verification. All integrity checks and writer transactions are preserved.
+The 45 inventory and real-SQLite tests passed; an independent negative control made all three new
+concurrent-writer regressions fail without the snapshot. This changes application source: the
+historical image receipts above are not evidence for the corrected candidate. New exact-head CI
+and final-image qualification must pass before completion.
+
+The user authorized T87 to validate documentation, publish patch 0.7.2 through the existing protected
+workflow, and adopt the exact resulting public receipts. Publication has not occurred. The existing
+qualified docker-box deployment remains available while the correction is validated.

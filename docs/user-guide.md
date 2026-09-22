@@ -58,7 +58,11 @@ service advertises the supported format families and current upload limit.
 
 If the service cannot provide supported-format information, or the page does not recognize its
 capability schema, submission stays disabled. Ask the service operator if Revert remains unavailable.
-Reverse conversion is experimental; its exact final-image qualification is still in progress.
+Reverse conversion is experimental. Technical final-image qualification is complete for T73 on
+`main` `31f19243ebe25345dec2c3bde843a5caf261d53a` (CI `35702469912`) and for the historical T83
+`4888cd067e848c59162d801c2399be99b7f81969` two-profile candidate. Qualification of the new
+inventory-snapshot fix remains in progress. The authorized T87/G1L-586 0.7.2 release is not
+published, so existing 0.7.1 pins remain authoritative and no new public digest is implied.
 
 ## Extract an edited PowerPoint presentation
 

@@ -23,9 +23,13 @@ release version, source SHA, and frontend lock digest. Do not select the attempt
 or substitute a local tag. A historical schema-1 manifest contains only backend and frontend and
 does not identify a reverse-attempt image. It cannot be used as evidence for a matched reverse
 release. Public deployment requires a published schema-2 manifest. An approved isolated candidate
-qualification may use the exact local image digest and matched source-build receipts without
-claiming public publication or release qualification. T73's final-image qualification and public
-reverse image are still pending.
+qualification may use the exact local image digest and matched source-build receipts without claiming
+public publication. Technical final-image qualification is complete for T73 on `main`
+`31f19243ebe25345dec2c3bde843a5caf261d53a` (CI `35702469912`) and historically for the T83
+`4888cd067e848c59162d801c2399be99b7f81969` two-profile candidate. The new inventory-snapshot fix
+remains under qualification. The T87/G1L-586 0.7.2 release is authorized but not published; retain
+existing 0.7.1 pins and do not
+infer a public reverse-image digest.
 
 An administrator can enable lingering with `loginctl enable-linger <broker-account>`. Verify the
 effective rootless runtime as the broker account with `podman info`; do not configure a remote
