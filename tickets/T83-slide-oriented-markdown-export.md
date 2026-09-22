@@ -150,3 +150,12 @@ checks, and T73 stacked integration remain separate boundaries.
   removal of the exact generated retainer and preservation of the external image. No retainers
   remained after the run; source and test-diff guards passed. Global Ruff/ty and documentation
   checks pass. The corrected canonical suite and new exact-head CI remain required before merge.
+* 2026-09-22: Main CI `35747016968` and protected release run `35747017469` passed at source
+  `84e35fed521c61d34823d18767f47eb87253d4eb`. Public schema-2 receipts and anonymous manifests
+  verify the matched backend, frontend, and reverse-attempt images, including the structured-PPTX
+  release source. Independent full-artifact verification passed, followed by successful Docker,
+  Podman, and insecure-Podman public quickstarts from clean adoption source
+  `aa35c96a9d05b56fee5cd683272b2ff2242469df`. T83 remains In Progress until adoption and deployment
+  verification finish. Deployment preparation stopped when `uv` parent-project discovery changed
+  the host-native broker package from 0.7.1 to 0.6.2; image identities were unchanged, and the remote
+  repair has not yet run.

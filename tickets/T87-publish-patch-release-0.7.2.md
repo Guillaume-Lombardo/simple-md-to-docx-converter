@@ -107,3 +107,26 @@ was locally mode 0700. An exact-image arbitrary-UID probe confirmed it was not e
 explicitly authorized restoration of that single local file to 0755, the complete distributed rerun
 passed. File contents and Git state were unchanged; original failed evidence is retained. Both
 successful profiles retain the fake-ClamAV teardown warning rather than claiming a graceful stop.
+
+PR #261 merged as `84e35fed521c61d34823d18767f47eb87253d4eb` after CI `35742704086`
+passed all 18 jobs, independent review and CodeRabbit. Main CI `35747016968` and automatic
+release `35747017469` both completed successfully. Public PyPI 0.7.3 installation, import, version
+and CLI help passed independently under Python 3.14. The release qualified both full profiles before
+publishing the same backend, frontend and reverse-attempt image bytes with attestations.
+
+Schema-2 receipt checksums and anonymous version/source-tag manifests agree for all three roles.
+The adoption branch updates Compose and quickstart defaults to those exact published backend and
+frontend receipts; the reverse image is recorded for the separately configured external broker.
+Full archive verification, published quickstart checks, docker-box deployment and adoption merge
+remain required before completion. Historical 0.7.2 publication and failed qualification evidence
+are preserved. The exact PR #261 branch was deleted locally and remotely after verified merge.
+
+Independent verification of the complete public three-image artifact set and its schema-2 receipts
+passed. Docker, Podman, and insecure-Podman public quickstarts then passed from clean adoption source
+`aa35c96a9d05b56fee5cd683272b2ff2242469df`, using the exact published backend and frontend
+receipts; the external reverse broker remains outside those ordinary quickstarts. The adoption merge
+and docker-box deployment verification are still pending. Deployment preparation stopped after
+`uv` parent-project discovery changed the host-native broker package from 0.7.1 to 0.6.2. The
+published image identities were unchanged, and the remote repair has not yet run. T87
+remains In Progress; no ticket is marked Done before adoption, repaired deployment, and verified
+main integration.
