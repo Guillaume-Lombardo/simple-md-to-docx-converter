@@ -28,6 +28,16 @@ T82 forward PowerPoint baseline; T69-T72 reverse-conversion isolation and lifecy
 
 ## Progress
 
+2026-09-22: A subsequent local validation snapshot at clean `984da696d0ad2c8b0810414037a19bd65f967bb4`
+merged the reviewed normal T73 result and was independently approved. Its only application
+delta from the prior `912926ec46b25f135c93377d0cae885d3cd29fe7` snapshot is the reviewed 12-line CLI deadline fix; PPTX behavior is unchanged, while the CLI correction changes backend image inputs. `uv sync --all-groups`, global Ruff and `ty`, 255 focused CLI/CI policy tests (18.14s),
+and the clean release-install test (15.93s) passed. The actual 28-mutant campaign also killed all
+28 mutants with all six failure statuses zero in 55s, guarded by clean exact-head status before and
+after. Receipts are retained under operator bundle ID `t83-mutation-all-20260922T003120Z`, report
+SHA-256 `bbe887d9d520c0dd83f87bb9152bc5c7183173998e04657f38889d0d697103e0`. This was local
+validation only: no fresh image build, deployment, publication, or current-main claim. Exact PR
+and main CI remain pending; a full main `582886e5c87799b6de19a5fc3c0369916055f7a0` artifact rerun awaits authorization.
+
 2026-09-22: Terminal final-image attempt 3 completed both standalone and distributed profiles with
 exit 0 against one matched three-image candidate set. The application images were built from
 `e3fb99be5763bb8fc6f100be43140e61e221f82d`; the clean harness head was

@@ -62,6 +62,22 @@ T83 remains In Progress. Exact-head and exact-main checks, release/publication d
 T73 stacked integration or deployment qualification remain separate. No public image, version,
 registry digest, or `main` completion is claimed here.
 
+## Subsequent local validation
+
+At clean local snapshot `984da696d0ad2c8b0810414037a19bd65f967bb4`, the normal T73 merge was
+independently approved. The only application delta from the prior `912926ec46b25f135c93377d0cae885d3cd29fe7` snapshot was a reviewed
+12-line CLI deadline fix; PPTX behavior is unchanged, while the CLI correction changes backend image inputs. `uv sync --all-groups`, global Ruff
+and `ty`, 255 focused CLI/CI policy tests (18.14 seconds), and the clean release-install test
+(15.93 seconds) passed.
+
+The actual 28-mutant campaign killed all 28 selected mutants in 55 seconds, with all six failure
+statuses at zero and clean exact-head/status guards before and after. Its retained operator receipt
+is `t83-mutation-all-20260922T003120Z`; the report SHA-256 is
+`bbe887d9d520c0dd83f87bb9152bc5c7183173998e04657f38889d0d697103e0`. No fresh image was built from
+this snapshot, and these checks do not relabel the earlier `e3fb99b` images or establish deployment,
+publication, or current-main integration. Exact PR/main CI remains pending; the full main `582886e5c87799b6de19a5fc3c0369916055f7a0`
+artifact rerun awaits authorization.
+
 ## Isolated test deployment
 
 On 2026-09-22, the same candidate application and native broker source was deployed to the existing
