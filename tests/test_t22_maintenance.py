@@ -78,27 +78,23 @@ def test_mutation_workflow_is_isolated_bounded_and_read_only() -> None:
 
 
 @pytest.mark.unit
-def test_mutation_campaign_is_reproducible_nonempty_and_strict() -> None:
+def test_mutation_campaign_runs_the_reviewed_full_scope_and_retains_evidence() -> None:
     workflow = load_strings(MUTATION_WORKFLOW)
-    dispatch = workflow["on"]["workflow_dispatch"]["inputs"]["target"]
-    target = "markweave.observability.x__normalize_method__mutmut_*"
-    assert dispatch["type"] == "choice"
-    assert dispatch["default"] == target
-    assert dispatch["options"] == [target]
-    text = MUTATION_WORKFLOW.read_text(encoding="utf-8")
-    assert "rm -rf -- mutants" in text
-    assert 'uv run mutmut run "$MUTATION_TARGET"' in text
-    assert "uv run mutmut export-cicd-stats" in text
-    assert 'stats.get("killed", 0) <= 0' in text
-    for failure in (
-        "survived",
-        "no_tests",
-        "suspicious",
-        "timeout",
-        "check_was_interrupted_by_user",
-        "segfault",
-    ):
-        assert f'"{failure}"' in text
+    assert workflow["on"]["workflow_dispatch"] is None
+    job = workflow["jobs"]["mutation"]
+    assert job["name"] == "Mutation / full campaign"
+    run_step = next(
+        step
+        for step in job["steps"]
+        if step["name"] == "Run the reviewed full mutation campaign"
+    )
+    assert run_step["env"] == {"MUTATION_MODE": "all"}
+    assert 'scripts.ci.run_mutation_campaign --mode "$MUTATION_MODE"' in run_step["run"]
+    artifact_step = next(
+        step for step in job["steps"] if step["name"] == "Retain mutation evidence"
+    )
+    assert artifact_step["if"] == "${{ always() }}"
+    assert artifact_step["with"]["path"] == "mutation-results/report.json"
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
     assert '"mutmut==3.8.0"' in pyproject
