@@ -46,6 +46,12 @@ workflow, change branch protection, or declare T48 complete.
 
 ## Progress
 
+* 2026-09-22: The shared prerequisite PR #248 was squash-merged as
+  `cd229f7e8c5779b0d56f2721ba585b5ec3be0210` after verification. Main CI run
+  `35696095409` is active for that revision. T48's reviewed mutation scope and prior
+  25/25 campaign evidence are unchanged; T48 remains In Progress until #253 is
+  published, verified, and merged after the prerequisite main evidence is green.
+
 * 2026-09-22: The user renewed the full publish, merge, and cleanup authorization for
   the shared PR #248 and PR #253 sequence. The first main CI attempt for unchanged
   PR #257 squash `582886e` failed only while GitHub retrieved an intermediary artifact;
