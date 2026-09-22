@@ -36,10 +36,20 @@ claim. `deploy/distributed.yaml.example` separates `serve` API and `worker` depl
 PostgreSQL plus an AWS S3-compatible store. RustFS is the test implementation in
 `deploy/rustfs-ci.yaml`; there is no RustFS-specific application API.
 
-The repository's public Compose quickstart pins the matched `0.7.1` backend and Next.js frontend
+The repository's public Compose quickstart pins the matched `0.7.3` backend and Next.js frontend
 images by their verified registry digests. The backend starts its standalone role with
 `markweave serve`; the same-origin router exposes the browser and API routes. The deployment
 examples use `markweave serve` for API roles and `markweave worker` for distributed workers.
+
+Protected release run `35747017469` published the schema-2 `0.7.3` set from source
+`84e35fed521c61d34823d18767f47eb87253d4eb`. Its public registry manifest digests are:
+
+- backend: `sha256:c91f97d7c299ad84811876e52ae52350d1ad3b91bd190b4fffb801634729bc83`;
+- frontend: `sha256:edee507cf70d15681bae0fe7f9d0755b607d557725fd06e6bd43771350dba9ba`;
+- reverse attempt: `sha256:39f4a68358029977b6ec5ac6cb26fab88ac10e518016b42e8389abd54f517e61`.
+
+The ordinary quickstarts remain reverse-disabled. Configure the reverse-attempt digest only in the
+documented native-broker deployment; do not add the broker or its runtime socket to Compose.
 
 The examples are workload fragments, not complete production stacks. They deliberately contain
 `${...}` placeholders. Render them only after supplying every
@@ -164,9 +174,8 @@ recorded. This reduces unused attack surface without altering the vulnerability 
 
 ## Approved Next.js cutover topology
 
-The repository's `0.7.1` source contains no FastAPI browser pages. The public default pins the
-verified `0.7.1` image pair published from source
-`5dd3328a17d12279d1c7c11a8c96b68cb062ecb3`. T64 implements the separate frontend image and the
+The public default pins the verified `0.7.3` image pair published from source
+`84e35fed521c61d34823d18767f47eb87253d4eb`. T64 implements the separate frontend image and the
 literal one-origin routing, resource, probe, supply-chain, and rollback contract defined in
 [the reviewed Next.js migration architecture](nextjs-migration-architecture.md).
 

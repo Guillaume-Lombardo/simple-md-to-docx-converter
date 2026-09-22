@@ -151,3 +151,20 @@ recovery. These images are not a qualified public release. The user approved a t
 correction with regressions and independent review, followed by a narrowly verified `0.7.3`
 continuation. Existing public `0.7.1` pins and historical candidate identities remain unchanged
 until actual `0.7.3` publication, adoption and deployment are verified.
+
+## Successful 0.7.3 public image publication
+
+Main CI `35747016968` passed at source `84e35fed521c61d34823d18767f47eb87253d4eb`.
+Protected release run `35747017469` then completed successfully and published PyPI plus one matched
+schema-2 three-image set from that source. The verified public registry manifest digests are:
+
+| Role | Published `0.7.3` digest |
+| --- | --- |
+| Backend | `sha256:c91f97d7c299ad84811876e52ae52350d1ad3b91bd190b4fffb801634729bc83` |
+| Frontend | `sha256:edee507cf70d15681bae0fe7f9d0755b607d557725fd06e6bd43771350dba9ba` |
+| Reverse attempt | `sha256:39f4a68358029977b6ec5ac6cb26fab88ac10e518016b42e8389abd54f517e61` |
+
+Anonymous requests for both the `0.7.3` and `source-84e35fed521c61d34823d18767f47eb87253d4eb`
+tags returned these exact digests for all three repositories. This satisfies T73's public third-image
+publication criterion. T73 remains In Progress until the repository adopts the receipts and the
+docker-box deployment is updated and verified; the local candidate identities above remain historical.
