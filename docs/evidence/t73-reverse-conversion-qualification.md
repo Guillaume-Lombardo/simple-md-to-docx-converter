@@ -133,5 +133,5 @@ actual public receipts. T73 remains In Progress until that public-image criterio
 
 The later inventory snapshot correction and fixture-image retention fix merged through PR #259
 as `41329266140ce0a49a74cc8eab559e07a03df605`. Its exact-head CI `35713604587` passed all
-checks and both profiles; main CI `35716730560` is pending. These newer checks do not relabel the
+checks and both profiles; main CI `35716730560` also passed every check. These newer checks do not relabel the
 historical local images recorded above.

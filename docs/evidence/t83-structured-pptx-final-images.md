@@ -186,6 +186,7 @@ required images until teardown. All 33 focused process integration tests passed,
 partial-creation cleanup regressions; no retainer remained and the external image was preserved.
 The failed run remains diagnostic evidence, not a successful qualification.
 
-Main CI `35716730560` is pending. T87 will qualify and publish the final versioned three-image set
+Main CI `35716730560` passed every check at the exact merge commit, including both complete
+E2E profiles, both storage suites, frontend, functional and document-engine validation. T87 will qualify and publish the final versioned three-image set
 through the protected release workflow before adopting the actual registry receipts and updating
 the docker-box test deployment. The local candidate identities above remain historical.
