@@ -21,6 +21,7 @@ ADMISSION_FIXTURE = Path("tests/e2e/frontend-admission-fixture.mjs").resolve()
 RUNTIME_FAILURE_BROWSER = Path(
     "tests/e2e/browser-next-runtime-failures.test.mjs"
 ).resolve()
+BROWSER_RUNNER_SMOKE = Path("tests/e2e/browser-runner-smoke.mjs").resolve()
 
 
 @pytest.mark.unit
@@ -384,9 +385,20 @@ def test_browser_driver_has_its_own_bounded_cgroup_and_current_backend_network()
     assert "--memory=2g --cpus=2 --pids-limit=512 --shm-size=256m" in browser
     assert "timeout --signal=TERM --kill-after=15s 25m" in browser
     assert '--entrypoint /bin/sh "$image"' in browser
+    assert "umask 0077" in browser
+    assert 'for directory in "$HOME" "$TMPDIR" "$XDG_CACHE_HOME"' in browser
+    assert '"$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_RUNTIME_DIR"' in browser
+    assert 'mkdir -p -- "$directory"' in browser
+    assert 'chmod 0700 -- "$directory"' in browser
+    assert (
+        browser.index('chmod 0700 -- "$directory"')
+        < browser.index('memory_limit="$(cat /sys/fs/cgroup/memory.max)"')
+        < browser.index('node --test "$test_file"')
+    )
     assert "--read-only --cap-drop=all --security-opt=no-new-privileges" in browser
     assert '--security-opt="seccomp=$seccomp_profile"' in browser
     assert '"$test_file" =~ ^/e2e/browser-[a-z0-9-]+\\.test\\.mjs$' in browser
+    assert '"$test_file" == /e2e/browser-runner-smoke.mjs' in browser
     assert "runner_memory_max=%s" in browser
     assert "application_memory_max=%s" in browser
     assert "runner_memory_peak=%s" in browser
@@ -425,10 +437,56 @@ def test_browser_driver_has_its_own_bounded_cgroup_and_current_backend_network()
     assert '"$test_file" == /e2e/browser-next-composer-resilience.test.mjs' in browser
     assert browser.count("/run/composer-e2e-client.key:ro,z") == 1
     assert 'run_browser_test "$expiry_application_name"' in runner
-    assert runner.count('run_browser_test "$application_name"') == 28
+    assert runner.count('run_browser_test "$application_name"') == 29
     assert runner.count('run_browser_test "$expiry_application_name"') == 2
     assert runner.count("node --test") == 1
     assert "node --test /e2e/browser-" not in runner
+
+
+@pytest.mark.unit
+def test_opt_in_browser_runner_smoke_is_terminal_and_retains_exact_evidence() -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    fixture = BROWSER_RUNNER_SMOKE.read_text(encoding="utf-8")
+    assert (
+        'browser_runner_smoke_only="${MARKWEAVE_E2E_BROWSER_RUNNER_SMOKE_ONLY:-0}"'
+        in runner
+    )
+    assert (
+        '"$browser_runner_smoke_only" != 0 && "$browser_runner_smoke_only" != 1'
+        in runner
+    )
+    initial_ready = runner.index('wait_for_url "$base_url/health/ready"')
+    smoke = runner.index('if [[ "$browser_runner_smoke_only" == 1 ]]', initial_ready)
+    service = runner.index(
+        'bash "$repository/scripts/container/wait-for-fake-clamav.sh"', smoke
+    )
+    phase = runner[smoke:service]
+    assert (
+        phase.index("start_frontend")
+        < phase.index('start_production_router "$application_name"')
+        < phase.index(
+            'run_browser_test "$application_name" /e2e/browser-runner-smoke.mjs'
+        )
+    )
+    assert (
+        'test -s "$temporary_directory/browser-artifacts/browser-runner-smoke.png"'
+        in phase
+    )
+    assert (
+        'test -s "$temporary_directory/browser-artifacts/browser-runner-smoke-cgroup-001.txt"'
+        in phase
+    )
+    assert '"$artifact_directory/"' in phase
+    assert "browser_smoke_succeeded=true\n  succeeded=true" in phase
+    assert phase.rstrip().endswith("exit 0\nfi")
+    cleanup = runner.split("cleanup() {", 1)[1].split("\ntrap cleanup EXIT", 1)[0]
+    assert '"$succeeded" == true && "$browser_smoke_succeeded" != true' in cleanup
+    assert "await page.goto(`${baseURL}/login`" in fixture
+    assert "assert.equal(response?.status(), 200)" in fixture
+    assert 'assert.equal(await page.title(), "Markweave")' in fixture
+    assert '"content-security-policy"' in fixture
+    assert "await page.screenshot({ path: screenshot, fullPage: true })" in fixture
+    assert "assert.ok((await stat(screenshot)).size > 0)" in fixture
 
 
 @pytest.mark.unit
@@ -462,6 +520,48 @@ def test_repeated_browser_phases_reserve_distinct_cgroup_receipts(
         "/browser-artifacts/browser-next-reversion-cgroup-001.txt",
     ]
     assert len(list((tmp_path / "browser-artifacts").glob("*.reserved"))) == 3
+
+
+@pytest.mark.unit
+def test_smoke_receipt_stem_matches_the_branch_evidence_path(tmp_path: Path) -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    reservation = (
+        "reserve_browser_cgroup_receipt() {"
+        + runner.split("reserve_browser_cgroup_receipt() {", 1)[1].split(
+            "\nrun_browser_test() {", 1
+        )[0]
+    )
+    start = runner.index('  test_stem="${test_stem%.mjs}"')
+    end = runner.index("  if ! receipt_path=", start)
+    normalization = runner[start:end]
+    (tmp_path / "browser-artifacts").mkdir()
+    script = (
+        'temporary_directory="$1"\n'
+        + reservation
+        + "\ntest_file=/e2e/browser-runner-smoke.mjs\n"
+        + 'test_stem="${test_file##*/}"\n'
+        + normalization
+        + 'reserve_browser_cgroup_receipt "$test_stem"\n'
+        + "test_file=/e2e/browser-next-composer-real.test.mjs\n"
+        + 'test_stem="${test_file##*/}"\n'
+        + normalization
+        + 'reserve_browser_cgroup_receipt "$test_stem"\n'
+    )
+    result = subprocess.run(
+        ["bash", "-c", script, "browser-receipts", str(tmp_path)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    smoke_receipt, normal_receipt = result.stdout.splitlines()
+    assert smoke_receipt == "/browser-artifacts/browser-runner-smoke-cgroup-001.txt"
+    assert normal_receipt == (
+        "/browser-artifacts/browser-next-composer-real-cgroup-001.txt"
+    )
+    smoke_branch = runner.split('if [[ "$browser_runner_smoke_only" == 1 ]]', 1)[
+        1
+    ].split("\nfi", 1)[0]
+    assert f'test -s "$temporary_directory{smoke_receipt}"' in smoke_branch
 
 
 @pytest.mark.unit
@@ -551,15 +651,16 @@ def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
     assert "AbortSignal.timeout(1000)" in runner
     assert "--env PUBLIC_HOSTS=localhost:3100" in runner
     assert "--env ROUTER_UPSTREAM_TIMEOUT_MS=30000" in runner
-    assert runner.count('start_production_router "$application_name"') == 10
+    assert runner.count('start_production_router "$application_name"') == 11
     assert runner.count('restart_backend_and_router "$application_name"') == 1
     assert runner.count('kill_backend_and_reconnect_router "$application_name"') == 1
     assert runner.count('start_production_router "$expiry_application_name"') == 1
     provisioning = runner.index("/e2e/browser-provisioning-restart.test.mjs")
     provisioning_end = runner.index("/e2e/browser-recovery-checkpoint.test.mjs")
-    first_router = runner.index(
+    first_router = runner.rindex(
         'start_production_router "$application_name"',
         runner.index("application_mode=serve"),
+        provisioning,
     )
     assert first_router < provisioning
     assert (

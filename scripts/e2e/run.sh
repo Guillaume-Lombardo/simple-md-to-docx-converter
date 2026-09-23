@@ -14,6 +14,11 @@ readonly published_reverse_attempt_image="${MARKWEAVE_E2E_REVERSE_ATTEMPT_IMAGE:
 readonly local_reverse_attempt_image="${MARKWEAVE_E2E_LOCAL_REVERSE_ATTEMPT_IMAGE:-}"
 readonly local_image="${MARKWEAVE_E2E_LOCAL_IMAGE:-}"
 readonly local_frontend_image="${MARKWEAVE_E2E_LOCAL_FRONTEND_IMAGE:-}"
+readonly browser_runner_smoke_only="${MARKWEAVE_E2E_BROWSER_RUNNER_SMOKE_ONLY:-0}"
+if [[ "$browser_runner_smoke_only" != 0 && "$browser_runner_smoke_only" != 1 ]]; then
+  echo "MARKWEAVE_E2E_BROWSER_RUNNER_SMOKE_ONLY must be 0 or 1." >&2
+  exit 2
+fi
 if [[ -n "$published_image" ]] &&
   [[ ! "$published_image" =~ ^ghcr\.io/guillaume-lombardo/md-converter:[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]]; then
   echo "MARKWEAVE_E2E_IMAGE must be an immutable version-and-digest Markweave image." >&2
@@ -130,6 +135,7 @@ reverse_pause_pid=""
 reverse_diagnostics_pid=""
 created=()
 succeeded=false
+browser_smoke_succeeded=false
 
 # shellcheck source=scripts/e2e/runtime-settings.sh
 source "$repository/scripts/e2e/runtime-settings.sh"
@@ -300,7 +306,7 @@ cleanup() {
       broker_cleanup_proven=false
     fi
   fi
-  if [[ "$succeeded" == true ]]; then
+  if [[ "$succeeded" == true && "$browser_smoke_succeeded" != true ]]; then
     if ! remove_artifacts; then
       exit_code=1
     fi
@@ -473,7 +479,8 @@ run_browser_test() {
   local app_memory_limit app_cgroup_limit receipt_path
   local -a browser_credentials=()
   shift 2
-  [[ "$test_file" =~ ^/e2e/browser-[a-z0-9-]+\.test\.mjs$ ]] || {
+  [[ "$test_file" =~ ^/e2e/browser-[a-z0-9-]+\.test\.mjs$ || \
+    "$test_file" == /e2e/browser-runner-smoke.mjs ]] || {
     echo "Refusing an unexpected browser test path." >&2
     return 1
   }
@@ -488,7 +495,8 @@ run_browser_test() {
       --volume "$composer_provider_directory/server.crt:/run/composer-e2e-ca.crt:ro,z"
     )
   fi
-  test_stem="${test_stem%.test.mjs}"
+  test_stem="${test_stem%.mjs}"
+  test_stem="${test_stem%.test}"
   if ! receipt_path="$(reserve_browser_cgroup_receipt "$test_stem")"; then
     return 1
   fi
@@ -526,6 +534,24 @@ run_browser_test() {
     "$@" --entrypoint /bin/sh "$image" -c '
       evidence="$1"
       test_file="$2"
+      # The image entrypoint normally prepares these private browser paths.
+      # This driver deliberately skips that entrypoint, so prepare them here.
+      umask 0077
+      if [ "$HOME" != /work/home ] || [ "$TMPDIR" != /work/tmp ] || \
+        [ "$XDG_CACHE_HOME" != /work/xdg/cache ] || \
+        [ "$XDG_CONFIG_HOME" != /work/xdg/config ] || \
+        [ "$XDG_DATA_HOME" != /work/xdg/data ] || \
+        [ "$XDG_RUNTIME_DIR" != /work/xdg/runtime ]; then
+        echo "Browser runner environment directories differ from the image contract." >&2
+        exit 1
+      fi
+      for directory in "$HOME" "$TMPDIR" "$XDG_CACHE_HOME" \
+        "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_RUNTIME_DIR"; do
+        if ! mkdir -p -- "$directory" || ! chmod 0700 -- "$directory"; then
+          echo "Could not prepare a private browser runtime directory." >&2
+          exit 1
+        fi
+      done
       memory_limit="$(cat /sys/fs/cgroup/memory.max)"
       if ! printf "application_memory_max=%s\nrunner_memory_max=%s\n" \
         "$MARKWEAVE_E2E_APP_MEMORY_LIMIT" "$memory_limit" > "$evidence"; then
@@ -1251,6 +1277,28 @@ fi
 application_port="$(podman port "$application_name" 8080/tcp | sed 's/.*://')"
 base_url="http://127.0.0.1:$application_port"
 wait_for_url "$base_url/health/ready" "$application_name" '"status":"ready"'
+if [[ "$browser_runner_smoke_only" == 1 ]]; then
+  # This opt-in probe starts only the exact frontend/router pair and browser
+  # driver, then exits before service workflows and checkpoint mutations.
+  created=("$router_name" "$frontend_name" "${created[@]}")
+  start_frontend
+  start_production_router "$application_name"
+  run_browser_test "$application_name" /e2e/browser-runner-smoke.mjs \
+    --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100
+  podman unshare chown -R 0:0 -- "$temporary_directory/browser-artifacts"
+  test -s "$temporary_directory/browser-artifacts/browser-runner-smoke.png"
+  test -s "$temporary_directory/browser-artifacts/browser-runner-smoke-cgroup-001.txt"
+  mkdir -p -- "$artifact_directory"
+  cp -a -- "$temporary_directory/browser-artifacts/browser-runner-smoke.png" \
+    "$temporary_directory/browser-artifacts/browser-runner-smoke-cgroup-001.txt" \
+    "$artifact_directory/"
+  printf 'profile=%s\nresult=browser-runner-smoke-passed\n' "$profile" \
+    >"$artifact_directory/summary.txt"
+  browser_smoke_succeeded=true
+  succeeded=true
+  echo "Final-image $profile browser runner smoke passed; evidence: $artifact_directory."
+  exit 0
+fi
 bash "$repository/scripts/container/wait-for-fake-clamav.sh" \
   "$clamav_name" "$profile-mapped" "$application_name" e2e-clamav
 podman exec "$application_name" python \

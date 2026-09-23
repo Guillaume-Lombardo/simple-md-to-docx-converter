@@ -73,10 +73,11 @@ T89.
   Independent reviews cleared the backend, workspace, Admin, handoff, native preview, and narrow
   E2E fixture corrections. The fresh generated and served native-preview child bytes match the
   reviewed source build; real Office files, hostile inputs, long-document windowing, and in-bounds
-  grouped PPTX content passed the documented local browser probes. The 5.96 MiB image-heavy DOCX
-  reached 195.86 MiB sampled transient child heap, so broader device capacity remains unqualified
-  and is not advertised. The three exact candidate images build; the backend image runs SQLite
-  3.34.1 and passed T90 upgrade, T89 downgrade, and re-upgrade. Final-image E2E is still open:
+  grouped PPTX content passed the documented local browser probes. The 5,958,454-byte image-heavy
+  DOCX reached 195,858,421 bytes of sampled transient child heap, so broader device capacity
+  remains unqualified and is not advertised. The three exact candidate images build; the backend
+  image runs SQLite 3.34.1 and passed T90 upgrade, T89 downgrade, and re-upgrade. Final-image E2E
+  is still open:
   three stale browser fixture expectations were corrected, then the real Composer test hit a
   confirmed Chrome OOM because the E2E harness ran its browser inside the application's 768 MiB
   cgroup. A separate bounded browser runner is being corrected without changing the application
