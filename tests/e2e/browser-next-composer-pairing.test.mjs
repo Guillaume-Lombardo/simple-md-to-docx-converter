@@ -298,7 +298,7 @@ test(
       await toPdf.started;
       await assertDisplayed(page, draftId, pdf, docxB, "docx");
       toPdf.release();
-      await page.getByLabel("PDF page 1").waitFor();
+      await page.getByLabel("PDF page 1", { exact: true }).waitFor();
       await assertDisplayed(page, draftId, pdf, pdf, "pdf");
       await assertPairedDownload(page, draftId, pdf, "pdf");
       await toPdf.remove();

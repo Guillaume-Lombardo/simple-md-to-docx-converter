@@ -1337,10 +1337,17 @@ if [[ "$composer_scenario_only" == 1 ]]; then
   wait_for_url "http://127.0.0.1:$(podman port "$application_name" 8080/tcp | sed 's/.*://')/health/ready" \
     "$application_name" '"status":"ready"'
   start_production_router "$application_name"
+  run_browser_test "$application_name" /e2e/browser-next-composer-connections.test.mjs \
+    --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
+    --env MARKWEAVE_E2E_PROFILE="$profile"
   run_browser_test "$application_name" /e2e/browser-next-composer-real.test.mjs \
     --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
     --env MARKWEAVE_E2E_PROFILE="$profile" \
     --env "MARKWEAVE_E2E_COMPOSER_PROVIDER_ADDRESS=$composer_provider_address" \
+    --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json"
+  run_browser_test "$application_name" /e2e/browser-next-composer-pairing.test.mjs \
+    --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
+    --env MARKWEAVE_E2E_PROFILE="$profile" \
     --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json"
   if podman logs "$application_name" 2>&1 | grep -Fq 'composer-e2e-write-only-secret'; then
     echo "Composer credential appeared in application logs." >&2
@@ -1352,6 +1359,8 @@ if [[ "$composer_scenario_only" == 1 ]]; then
   fi
   podman unshare chown -R 0:0 -- "$temporary_directory/browser-artifacts"
   test -s "$temporary_directory/browser-artifacts/browser-next-composer-real-cgroup-001.txt"
+  test -s "$temporary_directory/browser-artifacts/browser-next-composer-connections-cgroup-001.txt"
+  test -s "$temporary_directory/browser-artifacts/browser-next-composer-pairing-cgroup-001.txt"
   test -s "$browser_session_directory/composer-$profile.json"
   podman unshare chown -R 0:0 -- "$browser_session_directory"
   mkdir -p -- "$artifact_directory"

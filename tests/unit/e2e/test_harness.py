@@ -437,7 +437,7 @@ def test_browser_driver_has_its_own_bounded_cgroup_and_current_backend_network()
     assert '"$test_file" == /e2e/browser-next-composer-resilience.test.mjs' in browser
     assert browser.count("/run/composer-e2e-client.key:ro,z") == 1
     assert 'run_browser_test "$expiry_application_name"' in runner
-    assert runner.count('run_browser_test "$application_name"') == 30
+    assert runner.count('run_browser_test "$application_name"') == 32
     assert runner.count('run_browser_test "$expiry_application_name"') == 2
     assert runner.count("node --test") == 1
     assert "node --test /e2e/browser-" not in runner
@@ -513,8 +513,17 @@ def test_composer_scenario_replays_real_browser_with_canonical_runtime() -> None
     assert phase.index('wait_for_url "http://127.0.0.1:$(podman port') < phase.index(
         'start_production_router "$application_name"'
     )
-    assert phase.index('start_production_router "$application_name"') < phase.index(
-        'run_browser_test "$application_name" /e2e/browser-next-composer-real.test.mjs'
+    assert (
+        phase.index('start_production_router "$application_name"')
+        < phase.index(
+            'run_browser_test "$application_name" /e2e/browser-next-composer-connections.test.mjs'
+        )
+        < phase.index(
+            'run_browser_test "$application_name" /e2e/browser-next-composer-real.test.mjs'
+        )
+        < phase.index(
+            'run_browser_test "$application_name" /e2e/browser-next-composer-pairing.test.mjs'
+        )
     )
     for environment in (
         "--env MARKWEAVE_E2E_BASE_URL=http://localhost:3100",
@@ -527,6 +536,11 @@ def test_composer_scenario_replays_real_browser_with_canonical_runtime() -> None
         'test -s "$temporary_directory/browser-artifacts/browser-next-composer-real-cgroup-001.txt"'
         in phase
     )
+    for browser in ("connections", "pairing"):
+        assert (
+            'test -s "$temporary_directory/browser-artifacts/browser-next-composer-'
+            f'{browser}-cgroup-001.txt"' in phase
+        )
     assert 'test -s "$browser_session_directory/composer-$profile.json"' in phase
     assert (
         'cp -a -- "$temporary_directory/browser-artifacts/." "$artifact_directory/"'
@@ -765,7 +779,7 @@ def test_composer_final_image_provider_and_restore_preserve_harness_guards() -> 
         < restore_call
         < restored_browser
     )
-    assert runner.count("/e2e/browser-next-composer-pairing.test.mjs") == 1
+    assert runner.count("/e2e/browser-next-composer-pairing.test.mjs") == 2
 
 
 @pytest.mark.unit
