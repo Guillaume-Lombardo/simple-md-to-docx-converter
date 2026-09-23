@@ -503,6 +503,31 @@ start_frontend() {
   return 1
 }
 
+probe_scanner_outage_routes() {
+  local frontend_origin
+  frontend_origin="$(admission_frontend_origin)"
+  podman exec --env "E2E_FRONTEND_ORIGIN=$frontend_origin" \
+    "$application_name" node --input-type=module -e '
+const targets = [
+  ["router_login", "http://localhost:3100/login"],
+  ["frontend_alias", "http://frontend:3000/login"],
+  ["frontend_numeric", `${process.env.E2E_FRONTEND_ORIGIN}/login`],
+  ["backend_ready", "http://127.0.0.1:8080/health/ready"],
+];
+const results = await Promise.all(targets.map(async ([name, url]) => {
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(2000) });
+    return [name, String(response.status)];
+  } catch (error) {
+    return [name, `error:${error.cause?.code ?? error.name}`];
+  }
+}));
+for (const [name, status] of results)
+  console.log(`scanner-outage route ${name} status=${status}`);
+if (results.some(([, status]) => status !== "200")) process.exitCode = 1;
+'
+}
+
 admission_frontend_origin() {
   local frontend_address octet
   local -a address_octets
@@ -799,12 +824,35 @@ fi
 
 podman network create "$network_name" >/dev/null
 created+=("network:$network_name")
+scanner_static_address="$(podman network inspect "$network_name" | uv run python -c '
+import ipaddress
+import json
+import sys
+
+networks = json.load(sys.stdin)
+if len(networks) != 1:
+    raise SystemExit("E2E network inspection must return one network")
+for subnet in networks[0].get("subnets", []):
+    try:
+        network = ipaddress.IPv4Network(subnet["subnet"])
+        gateway = ipaddress.IPv4Address(subnet["gateway"])
+    except (KeyError, ValueError, TypeError):
+        continue
+    address = gateway + 1
+    if gateway in network and address in network and address != network.broadcast_address:
+        print(address)
+        break
+else:
+    raise SystemExit("E2E network has no usable scanner IPv4 address")
+')"
+readonly scanner_static_address
 
 created=("$clamav_name" "${created[@]}")
 e2e_run_in_harness_directory \
   "$temporary_directory" "$temporary_directory_identity" \
   podman run --detach --name "$clamav_name" --network "$network_name" \
-  --network-alias e2e-clamav --read-only --cap-drop=all \
+  --network-alias e2e-clamav --ip "$scanner_static_address" \
+  --read-only --cap-drop=all \
   --env MARKWEAVE_TEST_CLAMAV_REJECT_EICAR=true \
   --security-opt=no-new-privileges --pids-limit=64 --memory=128m \
   --tmpfs /tmp:rw,nosuid,nodev,noexec,size=8m \
@@ -827,8 +875,8 @@ podman rm "$clamav_probe_name" >/dev/null
 
 clamav_address="$(podman inspect "$clamav_name" \
   --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')"
-if [[ -z "$clamav_address" ]]; then
-  echo "Fake ClamAV has no address on the E2E network." >&2
+if [[ "$clamav_address" != "$scanner_static_address" ]]; then
+  echo "Fake ClamAV did not receive its reserved E2E network address." >&2
   exit 1
 fi
 # The unmapped peer above proves the network alias. Application and worker
@@ -1345,13 +1393,23 @@ if [[ "$(grep -Fc '"operation": "chat", "status": 503' <<<"$provider_events")" -
   exit 1
 fi
 podman stop --time 5 "$clamav_name" >/dev/null
-podman exec \
+probe_scanner_outage_routes
+if ! podman exec \
   --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
   --env MARKWEAVE_E2E_COMPOSER_PHASE=scanner-unavailable \
   --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json" \
-  "$application_name" node --test /e2e/browser-next-composer-resilience.test.mjs
+  "$application_name" node --test /e2e/browser-next-composer-resilience.test.mjs; then
+  probe_scanner_outage_routes || true
+  exit 1
+fi
 podman start "$clamav_name" >/dev/null
+restarted_clamav_address="$(podman inspect "$clamav_name" \
+  --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')"
+if [[ "$restarted_clamav_address" != "$clamav_address" ]]; then
+  echo "Fake ClamAV changed its reserved E2E network address after restart." >&2
+  exit 1
+fi
 bash "$repository/scripts/container/wait-for-fake-clamav.sh" \
   "$clamav_name" "$profile-resumed" "$application_name" e2e-clamav
 wait_for_url "http://127.0.0.1:$(podman port "$application_name" 8080/tcp | sed 's/.*://')/health/ready" \

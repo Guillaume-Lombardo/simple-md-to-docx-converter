@@ -103,6 +103,23 @@ T88.
   Add form and verifies the grant in the request, creation response, and later listing while
   retaining Alice/Bob denials. A new hosted run, both complete final-image journeys, and matched
   docker-box deployment/rollback remain pending; T89 stays In Progress.
+- 2026-09-23: The fourth hosted
+  [CI run 35821247681](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/35821247681)
+  at exact PR head `8abc8be6a2b2585686d612bce328b2070a14b99a` passed both Python shards,
+  unconditional PostgreSQL/S3 coverage, and aggregate coverage at 90.30% application branches
+  (7,370/8,162) and 90.64% changed lines (3,670/4,049). Both rootless-image profiles passed the
+  connection browser test and full real Composer routing, TLS, draft, and revision journey. The
+  standalone profile then failed opening `/login` immediately after forcing the fake scanner
+  offline, before scanner-outage resilience assertions. The distributed profile passed those
+  outage assertions but failed the mapped scanner readiness probe after scanner restart. An
+  isolated existing-image Podman reproduction established that a dynamically allocated scanner
+  IP changes across stop/start while the harness pins the original IP in dependent containers.
+  A one-file harness correction now assigns a network-derived static scanner IP and adds bounded
+  status-only router/frontend/backend probes to diagnose the separate standalone `/login`
+  failure; it retains the real scanner stop/start, fail-closed upload, retained-read, and mapped
+  recovery checks. Local shell checks and 38 harness tests pass. Independent review, hosted
+  rerun, both complete final-image profiles, and docker-box deployment/rollback remain pending.
+  T89 stays In Progress.
 
 ## Synchronization
 
