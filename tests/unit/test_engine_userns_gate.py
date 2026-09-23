@@ -19,6 +19,7 @@ def test_preflight_confirms_same_identity_and_two_new_namespaces(
     mocker: MockerFixture,
 ) -> None:
     mocker.patch.object(gate, "_install_no_network_filter")
+    mocker.patch.object(gate, "_own_apparmor_label", return_value="unconfined")
     mocker.patch.object(gate.os, "unshare")
     mapping = mocker.patch.object(Path, "write_text")
     mocker.patch.object(gate.os, "geteuid", return_value=12345)
@@ -30,25 +31,121 @@ def test_preflight_confirms_same_identity_and_two_new_namespaces(
     assert mapping.call_count == 3
 
 
-@pytest.mark.parametrize(
-    ("stage", "expected"),
-    (
-        ("seccomp", 43),
-        ("unshare", 42),
-        ("mapping", 43),
-    ),
-)
-def test_preflight_only_identifies_unshare_eperm_as_runner_allowance_case(
-    mocker: MockerFixture, stage: str, expected: int
+@pytest.mark.parametrize("stage", ("seccomp", "unshare"))
+def test_preflight_never_allows_seccomp_or_unshare_failure(
+    mocker: MockerFixture, stage: str
 ) -> None:
     seccomp = mocker.patch.object(gate, "_install_no_network_filter")
     unshare = mocker.patch.object(gate.os, "unshare")
-    mapping = mocker.patch.object(Path, "write_text")
+    mocker.patch.object(gate, "_own_apparmor_label", return_value="unconfined")
     mocker.patch.object(gate.os, "readlink", side_effect=["user:old", "net:old"])
-    {"seccomp": seccomp, "unshare": unshare, "mapping": mapping}[
-        stage
-    ].side_effect = OSError(errno.EPERM, "denied")
-    assert gate._preflight() == expected
+    {"seccomp": seccomp, "unshare": unshare}[stage].side_effect = OSError(
+        errno.EPERM, "denied"
+    )
+    assert gate._preflight() == 43
+
+
+@pytest.mark.parametrize("stage_index", (0, 1, 2))
+def test_exact_mapping_stage_allows_verified_hosted_apparmor_denial(
+    mocker: MockerFixture, capsys: pytest.CaptureFixture[str], stage_index: int
+) -> None:
+    mocker.patch.object(gate, "_install_no_network_filter")
+    mocker.patch.object(gate.os, "unshare")
+    mocker.patch.object(gate.os, "readlink", side_effect=["user:old", "net:old"])
+    mocker.patch.object(
+        gate,
+        "_own_apparmor_label",
+        side_effect=["unconfined", "unprivileged_userns (enforce)"],
+    )
+    mocker.patch.object(gate, "_current_userns_restriction", return_value="1")
+    mocker.patch.object(gate, "_is_ephemeral_ubuntu_runner", return_value=True)
+    mocker.patch.object(gate, "_own_security_status", return_value=("1", "0000"))
+    mapping = mocker.patch.object(Path, "write_text")
+    mapping.side_effect = [None] * stage_index + [OSError(errno.EPERM, "denied")]
+    assert gate._preflight() == 42
+    diagnostic = capsys.readouterr().err
+    assert ("uid_map", "setgroups", "gid_map")[stage_index] in diagnostic
+    assert "apparmor_before='unconfined'" in diagnostic
+    assert "apparmor_after='unprivileged_userns (enforce)'" in diagnostic
+    assert "restriction=1 hosted_ubuntu24=1" in diagnostic
+    assert "no_new_privs=1 cap_eff=0000" in diagnostic
+    assert mapping.call_count == stage_index + 1
+
+
+@pytest.mark.parametrize(
+    ("after_label", "restriction", "hosted", "error_number"),
+    (
+        (None, "1", True, errno.EPERM),
+        ("other (enforce)", "1", True, errno.EPERM),
+        ("unprivileged_userns (complain)", "1", True, errno.EPERM),
+        ("unprivileged_userns (enforce)", None, True, errno.EPERM),
+        ("unprivileged_userns (enforce)", "0", True, errno.EPERM),
+        ("unprivileged_userns (enforce)", "1", False, errno.EPERM),
+        ("unprivileged_userns (enforce)", "1", True, errno.EACCES),
+    ),
+)
+def test_other_mapping_failures_cannot_toggle_apparmor(
+    mocker: MockerFixture,
+    after_label: str | None,
+    restriction: str | None,
+    hosted: bool,
+    error_number: int,
+) -> None:
+    mocker.patch.object(gate, "_install_no_network_filter")
+    mocker.patch.object(gate.os, "unshare")
+    mocker.patch.object(gate.os, "readlink", side_effect=["user:old", "net:old"])
+    mocker.patch.object(
+        gate, "_own_apparmor_label", side_effect=["unconfined", after_label]
+    )
+    mocker.patch.object(gate, "_current_userns_restriction", return_value=restriction)
+    mocker.patch.object(gate, "_is_ephemeral_ubuntu_runner", return_value=hosted)
+    mocker.patch.object(gate, "_own_security_status", return_value=("1", "0000"))
+    mocker.patch.object(Path, "write_text", side_effect=OSError(error_number, "denied"))
+    assert gate._preflight() == 43
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    (
+        (b"unprivileged_userns (enforce)\n", "unprivileged_userns (enforce)"),
+        (b"unconfined\n", "unconfined"),
+        (b"bad\x1b[31m\n", None),
+        (b"x" * 97, None),
+        (b"", None),
+    ),
+)
+def test_own_apparmor_label_is_bounded_and_printable(
+    mocker: MockerFixture, raw: bytes, expected: str | None
+) -> None:
+    mocker.patch.object(Path, "open", mocker.mock_open(read_data=raw))
+    assert gate._own_apparmor_label() == expected
+
+
+def test_unavailable_own_apparmor_label_fails_closed(mocker: MockerFixture) -> None:
+    mocker.patch.object(Path, "open", side_effect=OSError(errno.EACCES, "denied"))
+    assert gate._own_apparmor_label() is None
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    ((b"1\n", "1"), (b"0\n", "0"), (b"unexpected\n", None)),
+)
+def test_current_userns_restriction_accepts_only_kernel_boolean(
+    mocker: MockerFixture, raw: bytes, expected: str | None
+) -> None:
+    mocker.patch.object(Path, "open", mocker.mock_open(read_data=raw))
+    assert gate._current_userns_restriction() == expected
+
+
+def test_own_status_reports_only_bounded_security_fields(mocker: MockerFixture) -> None:
+    mocker.patch.object(
+        Path,
+        "open",
+        mocker.mock_open(
+            read_data=b"Name:\tpython\nNoNewPrivs:\t1\nCapEff:\t0000000000000000\n"
+        ),
+    )
+    assert gate._own_security_status() == ("1", "0000000000000000")
 
 
 def test_passing_preflight_runs_command_without_sysctl_change(
@@ -140,6 +237,14 @@ def test_catchable_runner_interrupt_restores_policy(mocker: MockerFixture) -> No
 def test_non_hosted_runner_cannot_change_sysctl(mocker: MockerFixture) -> None:
     mocker.patch.object(gate, "_run_preflight", return_value=42)
     mocker.patch.object(gate, "_is_ephemeral_ubuntu_runner", return_value=False)
+    set_policy = mocker.patch.object(gate, "_set_apparmor_userns_restriction")
+    assert gate.main(["--", "uv", "run", "pytest"]) == 1
+    set_policy.assert_not_called()
+
+
+def test_unverified_preflight_cannot_change_sysctl(mocker: MockerFixture) -> None:
+    mocker.patch.object(gate, "_run_preflight", return_value=43)
+    mocker.patch.object(gate, "_is_ephemeral_ubuntu_runner", return_value=True)
     set_policy = mocker.patch.object(gate, "_set_apparmor_userns_restriction")
     assert gate.main(["--", "uv", "run", "pytest"]) == 1
     set_policy.assert_not_called()

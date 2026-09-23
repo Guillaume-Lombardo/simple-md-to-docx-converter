@@ -23,9 +23,99 @@ if TYPE_CHECKING:
 
 _APPARMOR_USERNS_KEY = "kernel.apparmor_restrict_unprivileged_userns"
 _APPARMOR_USERNS_FILE = Path("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
-_USERNS_DENIED = 42
+_APPARMOR_LABEL_FILE = Path("/proc/self/attr/current")
+_APPARMOR_USERNS_LABEL = "unprivileged_userns (enforce)"
+_MAX_LABEL_BYTES = 96
+_ASCII_PRINTABLE_MIN = 32
+_ASCII_PRINTABLE_MAX = 126
+_MAX_CAPABILITY_HEX_DIGITS = 16
+_VERIFIED_APPARMOR_MAPPING_DENIED = 42
 _PREFLIGHT_FAILED = 43
 _PREFLIGHT_TIMEOUT_SECONDS = 15
+
+
+def _own_apparmor_label() -> str | None:
+    """Read a bounded, printable label from this process only."""
+    try:
+        with _APPARMOR_LABEL_FILE.open("rb") as label_file:
+            raw = label_file.read(_MAX_LABEL_BYTES + 1)
+    except OSError:
+        return None
+    if len(raw) > _MAX_LABEL_BYTES:
+        return None
+    raw = raw.removesuffix(b"\n")
+    if not raw or any(
+        character < _ASCII_PRINTABLE_MIN or character > _ASCII_PRINTABLE_MAX
+        for character in raw
+    ):
+        return None
+    return raw.decode("ascii")
+
+
+def _current_userns_restriction() -> str | None:
+    try:
+        with _APPARMOR_USERNS_FILE.open("rb") as setting_file:
+            raw = setting_file.read(4).strip()
+    except OSError:
+        return None
+    return raw.decode("ascii") if raw in {b"0", b"1"} else None
+
+
+def _own_security_status() -> tuple[str, str]:
+    """Return bounded no-new-privileges and effective-capability diagnostics."""
+    try:
+        with Path("/proc/self/status").open("rb") as status_file:
+            lines = status_file.read(16_384).splitlines()
+    except OSError:
+        return "unavailable", "unavailable"
+    values: dict[bytes, str] = {}
+    for line in lines:
+        key, separator, value = line.partition(b":")
+        if separator and key in {b"NoNewPrivs", b"CapEff"}:
+            candidate = value.strip()
+            valid_no_new_privs = key == b"NoNewPrivs" and candidate in {b"0", b"1"}
+            valid_capabilities = (
+                key == b"CapEff"
+                and bool(candidate)
+                and len(candidate) <= _MAX_CAPABILITY_HEX_DIGITS
+                and all(
+                    character in b"0123456789abcdefABCDEF" for character in candidate
+                )
+            )
+            if valid_no_new_privs or valid_capabilities:
+                values[key] = candidate.decode("ascii")
+    return values.get(b"NoNewPrivs", "unavailable"), values.get(
+        b"CapEff", "unavailable"
+    )
+
+
+def _mapping_error(
+    stage: str,
+    error: OSError,
+    before_label: str | None,
+    after_label: str | None,
+) -> int:
+    restriction = _current_userns_restriction()
+    hosted = _is_ephemeral_ubuntu_runner()
+    no_new_privs, capabilities = _own_security_status()
+    print(f"engine {stage} preflight: errno={error.errno}", file=sys.stderr)
+    print(
+        "engine namespace context: "
+        f"apparmor_before={before_label or 'unavailable'!r} "
+        f"apparmor_after={after_label or 'unavailable'!r} "
+        f"restriction={restriction or 'unavailable'} "
+        f"hosted_ubuntu24={int(hosted)} euid={os.geteuid()} egid={os.getegid()} "
+        f"no_new_privs={no_new_privs} cap_eff={capabilities}",
+        file=sys.stderr,
+    )
+    if (
+        error.errno == errno.EPERM
+        and after_label == _APPARMOR_USERNS_LABEL
+        and restriction == "1"
+        and hosted
+    ):
+        return _VERIFIED_APPARMOR_MAPPING_DENIED
+    return _PREFLIGHT_FAILED
 
 
 def _preflight() -> int:
@@ -39,24 +129,24 @@ def _preflight() -> int:
     except OSError as error:
         print(f"engine seccomp preflight: errno={error.errno}", file=sys.stderr)
         return _PREFLIGHT_FAILED
+    before_label = _own_apparmor_label()
     try:
         os.unshare(os.CLONE_NEWUSER | os.CLONE_NEWNET)
     except OSError as error:
         print(f"engine unshare preflight: errno={error.errno}", file=sys.stderr)
-        if error.errno == errno.EPERM:
-            return _USERNS_DENIED
         return _PREFLIGHT_FAILED
-    # Mirror the production launcher's exact mapping sequence. Keep this probe
-    # separate so write-time EPERM cannot be mistaken for an unshare denial.
-    try:
-        Path("/proc/self/uid_map").write_text(f"{user_id} {user_id} 1\n")
-        Path("/proc/self/setgroups").write_text("deny\n")
-        Path("/proc/self/gid_map").write_text(f"{group_id} {group_id} 1\n")
-    except OSError as error:
-        print(
-            f"engine namespace mapping preflight: errno={error.errno}", file=sys.stderr
-        )
-        return _PREFLIGHT_FAILED
+    after_label = _own_apparmor_label()
+    # Mirror the production launcher's exact mapping order, while identifying
+    # the syscall stage so only a verified AppArmor denial can reach the gate.
+    for stage, path, mapping in (
+        ("uid_map", Path("/proc/self/uid_map"), f"{user_id} {user_id} 1\n"),
+        ("setgroups", Path("/proc/self/setgroups"), "deny\n"),
+        ("gid_map", Path("/proc/self/gid_map"), f"{group_id} {group_id} 1\n"),
+    ):
+        try:
+            path.write_text(mapping)
+        except OSError as error:
+            return _mapping_error(stage, error, before_label, after_label)
     if (
         os.geteuid() != user_id
         or os.getegid() != group_id
@@ -176,7 +266,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     result = _run_preflight()
     if result == 0:
         return _run_command(arguments)
-    if result != _USERNS_DENIED or not _is_ephemeral_ubuntu_runner():
+    if result != _VERIFIED_APPARMOR_MAPPING_DENIED or not _is_ephemeral_ubuntu_runner():
         return 1
     return _run_with_temporary_allowance(arguments)
 
