@@ -107,8 +107,7 @@ async function createConnection(
   name,
   scope,
   ca,
-  clientCertificate,
-  clientKey,
+  { allowedUserIds = [], clientCertificate, clientKey } = {},
 ) {
   await page.goto(`${baseURL}/composer/connections`, {
     waitUntil: "networkidle",
@@ -124,6 +123,10 @@ async function createConnection(
     .getByLabel("Endpoint URL")
     .fill(clientCertificate ? mutualTlsEndpoint : endpoint);
   await createForm.getByLabel("Permitted models (comma separated)").fill(model);
+  if (scope === "instance")
+    await createForm
+      .getByLabel("Allowed user IDs (comma separated)")
+      .fill(allowedUserIds.join(", "));
   if (clientCertificate) {
     await createForm
       .getByLabel("Client certificate (PEM)")
@@ -133,7 +136,7 @@ async function createConnection(
     await createForm.getByLabel("API key").fill(secret);
   }
   await createForm.getByLabel("Internal CA bundle (PEM)").fill(ca);
-  await Promise.all([
+  const [createdResponse] = await Promise.all([
     page.waitForResponse(
       (response) =>
         response.url().endsWith("/api/v1/composer/connections") &&
@@ -142,6 +145,14 @@ async function createConnection(
     ),
     createForm.getByRole("button", { name: "Create connection" }).click(),
   ]);
+  assert.deepEqual(
+    createdResponse.request().postDataJSON().allowed_user_ids,
+    allowedUserIds,
+  );
+  assert.deepEqual(
+    (await createdResponse.json()).allowed_user_ids,
+    allowedUserIds,
+  );
   await page.getByText(/Connection created disabled\./).waitFor();
   assert.equal(await createForm.getByLabel("API key").inputValue(), "");
   assert.equal(
@@ -191,6 +202,8 @@ async function createConnection(
   );
   assert.equal(connection.internal_ca_present, true);
   assert.equal(connection.selected_model, model);
+  if (scope === "instance")
+    assert.deepEqual(connection.allowed_user_ids, allowedUserIds);
   assert.equal(JSON.stringify(connection).includes(secret), false);
   assert.equal(JSON.stringify(connection).includes(ca), false);
   if (clientKey)
@@ -280,6 +293,10 @@ test("Composer uses real final-image routing, TLS egress and durable owner revis
   );
   try {
     await login(adminPage, "e2e-admin", "e2e-admin-password");
+    const adminIdentity = exactStatus(
+      await api(adminPage, "GET", "/api/v1/session"),
+      200,
+    );
     const alice = await createUser(adminPage, `composer-alice-${suffix}`);
     const bob = await createUser(adminPage, `composer-bob-${suffix}`);
     await login(alicePage, alice.username, alice.password);
@@ -308,9 +325,30 @@ test("Composer uses real final-image routing, TLS egress and durable owner revis
       `Composer admin ${suffix}`,
       "instance",
       ca,
+      { allowedUserIds: [adminIdentity.id] },
     );
     await alicePage.reload({ waitUntil: "networkidle" });
     await alicePage.getByText("Composer status: unauthorized").waitFor();
+    assert.equal(
+      (
+        await api(
+          alicePage,
+          "GET",
+          `/api/v1/composer/connections/${adminConnection.connection.id}`,
+        )
+      ).status,
+      404,
+    );
+    assert.equal(
+      (
+        await api(
+          bobPage,
+          "GET",
+          `/api/v1/composer/connections/${adminConnection.connection.id}`,
+        )
+      ).status,
+      404,
+    );
     await testConnection(
       adminPage,
       adminConnection.card,
@@ -466,8 +504,7 @@ test("Composer uses real final-image routing, TLS egress and durable owner revis
       `Composer Alice ${suffix}`,
       "personal",
       ca,
-      clientCertificate,
-      clientKey,
+      { clientCertificate, clientKey },
     );
     await testConnection(alicePage, personal.card, personal.connection.id, 200);
 
@@ -682,10 +719,6 @@ test("Composer uses real final-image routing, TLS egress and durable owner revis
     assert.equal((await adminPage.content()).includes(secret), false);
     assert.equal((await alicePage.content()).includes(secret), false);
     assert.equal((await alicePage.content()).includes(clientKey), false);
-    const adminIdentity = exactStatus(
-      await api(adminPage, "GET", "/api/v1/session"),
-      200,
-    );
     const backupConnection = exactStatus(
       await api(adminPage, "POST", "/api/v1/composer/connections", {
         json: {

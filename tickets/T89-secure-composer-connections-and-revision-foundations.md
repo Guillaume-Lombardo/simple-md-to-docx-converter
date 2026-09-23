@@ -90,6 +90,19 @@ T88.
   mocked browser tests. The mocked browser test and 13 Composer component tests pass locally;
   the real final-image journeys remain unverified after that assertion. The next corrective commit,
   hosted rerun, and docker-box deployment/rollback are pending; T89 remains In Progress.
+- 2026-09-23: The third hosted
+  [CI run 35819110981](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/35819110981)
+  at exact PR head `0b5ea7de80479fda2e0abf806356ab4fdccc4630` completed with all
+  substantive jobs passing except the two final-image E2E profiles. Both Python shards passed
+  within the 25-minute bound (22m01s and 18m20s), and the three-artifact hosted coverage gate
+  passed at 90.31% application branches (7,371/8,162) and 90.64% changed lines (3,670/4,049).
+  The aggregate gate failed because both E2E profiles stopped at the same test fixture assumption:
+  an administrator could manage and test a shared instance connection but had not been granted
+  permission to use it, so `unauthorized` correctly took precedence over the asserted `outage`.
+  The independently reviewed correction grants only that authenticated administrator through the
+  Add form and verifies the grant in the request, creation response, and later listing while
+  retaining Alice/Bob denials. A new hosted run, both complete final-image journeys, and matched
+  docker-box deployment/rollback remain pending; T89 stays In Progress.
 
 ## Synchronization
 
