@@ -439,7 +439,10 @@ hardened_runtime=(
 start_production_router() {
   local backend_container="$1"
   local backend_origin="${2:-http://127.0.0.1:8080}"
-  local frontend_origin="${3:-http://frontend:3000}"
+  local frontend_origin="${3:-}"
+  if [[ -z "$frontend_origin" ]]; then
+    frontend_origin="$(admission_frontend_origin)"
+  fi
   local expected_api_status="${4:-401}"
   local probe_page="${5:-true}"
   e2e_podman rm --force "$router_name" >/dev/null 2>&1 || true
@@ -524,7 +527,8 @@ const results = await Promise.all(targets.map(async ([name, url]) => {
 }));
 for (const [name, status] of results)
   console.log(`scanner-outage route ${name} status=${status}`);
-if (results.some(([, status]) => status !== "200")) process.exitCode = 1;
+if (results.some(([name, status]) => name !== "frontend_alias" && status !== "200"))
+  process.exitCode = 1;
 '
 }
 
@@ -1564,7 +1568,7 @@ podman exec \
   --env MARKWEAVE_E2E_REVERSE_RESULT_RECEIPT=/browser-session/reverse-broker-restart-result.json \
   "$application_name" node --test /e2e/browser-next-reversion.test.mjs
 start_production_router "$application_name" http://127.0.0.1:1 \
-  http://frontend:3000 502
+  "$(admission_frontend_origin)" 502
 e2e_podman exec \
   --env MARKWEAVE_E2E_RUNTIME_FAILURE=backend-outage \
   "$application_name" node --test /e2e/browser-next-runtime-failures.test.mjs

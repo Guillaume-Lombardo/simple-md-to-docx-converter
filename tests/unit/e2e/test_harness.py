@@ -426,7 +426,7 @@ def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
     assert 'podman image exists "$frontend_image"' in runner
     assert '"$frontend_image" node router.mjs' in runner
     assert 'local backend_origin="${2:-http://127.0.0.1:8080}"' in runner
-    assert 'local frontend_origin="${3:-http://frontend:3000}"' in runner
+    assert 'local frontend_origin="${3:-}"' in runner
     assert 'local expected_api_status="${4:-401}"' in runner
     assert 'local probe_page="${5:-true}"' in runner
     assert "AbortSignal.timeout(1000)" in runner
@@ -448,7 +448,7 @@ def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
     )
     assert (
         'start_production_router "$application_name" http://127.0.0.1:1 \\\n'
-        "  http://frontend:3000 502" in runner
+        '  "$(admission_frontend_origin)" 502' in runner
     )
     assert "MARKWEAVE_E2E_RUNTIME_FAILURE=frontend-outage" in runner
     assert "MARKWEAVE_E2E_RUNTIME_FAILURE=backend-outage" in runner
@@ -477,6 +477,32 @@ def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
     assert 'podman logs "$router_name" >&2 || true' in runner
     assert 'podman logs "$frontend_name" >&2 || true' in runner
     assert 'podman restart --time 15 "$application_name"' not in runner[first_router:]
+
+
+@pytest.mark.unit
+def test_router_uses_current_numeric_frontend_address_during_scanner_outage() -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    router = runner.split("start_production_router() {", 1)[1].split(
+        "\nstart_frontend() {", 1
+    )[0]
+    assert router.index('frontend_origin="$(admission_frontend_origin)"') < (
+        router.index('podman run --detach --name "$router_name"')
+    )
+    assert '--env "FRONTEND_ORIGIN=$frontend_origin"' in router
+    assert "http://frontend:3000" not in router
+    assert (
+        'start_production_router "$application_name" http://127.0.0.1:1 \\\n'
+        '  "$(admission_frontend_origin)" 502' in runner
+    )
+
+    outage_probe = runner.split("probe_scanner_outage_routes() {", 1)[1].split(
+        "\nadmission_frontend_origin() {", 1
+    )[0]
+    assert '["frontend_alias", "http://frontend:3000/login"]' in outage_probe
+    assert '["frontend_numeric", `${process.env.E2E_FRONTEND_ORIGIN}/login`]' in (
+        outage_probe
+    )
+    assert 'name !== "frontend_alias" && status !== "200"' in outage_probe
 
 
 @pytest.mark.unit

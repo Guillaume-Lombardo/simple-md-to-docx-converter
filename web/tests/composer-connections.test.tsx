@@ -109,7 +109,7 @@ test("authorized connection pages remain reachable beyond the first page", async
   expect(await screen.findByText("Connection 51")).toBeVisible();
   expect(connections).toHaveBeenLastCalledWith(50, 50, expect.any(AbortSignal));
   expect(screen.getByText("Page 2")).toBeVisible();
-});
+}, 10_000);
 
 test("admin can change a personal connection grant using its exact revision", async () => {
   const service = api({

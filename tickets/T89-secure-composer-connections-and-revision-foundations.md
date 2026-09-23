@@ -120,6 +120,23 @@ T88.
   recovery checks. Local shell checks and 38 harness tests pass. Independent review, hosted
   rerun, both complete final-image profiles, and docker-box deployment/rollback remain pending.
   T89 stays In Progress.
+- 2026-09-23: The fifth hosted
+  [CI run 35823925638](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/35823925638)
+  at exact PR head `ec28dcfcf0a6c8ff81cbd36ce9a8196bec6f6584` completed with the complete
+  distributed rootless-image E2E workflow passing, including real Composer connections,
+  TLS/model calls, durable revisions, scanner-offline fail-closed upload with retained owner
+  reads, resumed scanner, isolated backup/restore, and restart checks. The standalone image
+  again passed the full real Composer journey but stopped before scanner-outage assertions:
+  one-shot probes after scanner stop showed the production router `/login` and the `frontend`
+  network alias timing out, while the same frontend page at its inspected numeric address and
+  backend readiness both returned 200. The light job separately failed when the 50-card
+  pagination test exceeded Vitest's five-second default by 64 ms; 250 other web tests passed.
+  All other substantive jobs passed, so the aggregate gate failed only for light and standalone
+  E2E. Independently reviewed local corrections use the current validated numeric frontend
+  address inside the E2E production router and give only the 50-card test a ten-second bound;
+  they retain real browser-to-router routing and all scanner/revision assertions. The next hosted
+  run must pass both profiles and the light job; matched docker-box deployment/rollback remains
+  pending. T89 stays In Progress.
 
 ## Synchronization
 
