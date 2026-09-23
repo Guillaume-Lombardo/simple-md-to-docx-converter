@@ -7,6 +7,7 @@ import os
 import ssl
 import stat
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from http.client import IncompleteRead
 from pathlib import Path
@@ -213,7 +214,12 @@ class ConversionHttpClient:
             response.close()
 
     def download(
-        self, path: str, destination: Path, *, overwrite: bool
+        self,
+        path: str,
+        destination: Path,
+        *,
+        overwrite: bool,
+        validate_headers: Callable[[dict[str, str]], None] | None = None,
     ) -> ConversionHttpResponse:
         """Stream a successful response into one atomic owner-only destination."""
         directory_descriptor = _open_destination(destination, overwrite=overwrite)
@@ -226,6 +232,8 @@ class ConversionHttpClient:
                 return ConversionHttpResponse(
                     response.status, _decode_payload(content), headers
                 )
+            if validate_headers is not None:
+                validate_headers(headers)
             try:
                 written = _atomic_stream(
                     response,

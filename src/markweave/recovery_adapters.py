@@ -276,6 +276,34 @@ class StandaloneRecoveryAdapter:
             ) from None
 
 
+def _verify_empty_logical_restore_target(
+    connection: Connection, existing: set[str]
+) -> None:
+    """Allow only the migration-seeded singleton lock row in a fresh target."""
+
+    migrated = set(Base.metadata.tables) | {
+        "alembic_version",
+        "audit_cleanup_guards",
+    }
+    if existing and existing != migrated:
+        raise RecoveryError("Distributed database target is not empty")
+    if "composer_model_step_gate" in existing:
+        gate_ids = tuple(
+            row[0]
+            for row in connection.execute(
+                text("SELECT id FROM composer_model_step_gate ORDER BY id")
+            )
+        )
+        if gate_ids != (1,):
+            raise RecoveryError("Distributed database target is not empty")
+    for table_name in existing - {"alembic_version", "composer_model_step_gate"}:
+        count_statement = text(
+            f'SELECT count(*) FROM "{table_name}"'  # noqa: S608 - inspected fixed schema names
+        )
+        if connection.scalar(count_statement):
+            raise RecoveryError("Distributed database target is not empty")
+
+
 class PostgreSQLRecoveryAdapter:
     """Typed logical PostgreSQL snapshots without operator shell commands."""
 
@@ -378,18 +406,7 @@ class PostgreSQLRecoveryAdapter:
                 if target_identity == source_identity:
                     raise RecoveryError("Distributed restore target is not isolated")
                 existing = set(inspect(connection).get_table_names())
-                migrated = set(Base.metadata.tables) | {
-                    "alembic_version",
-                    "audit_cleanup_guards",
-                }
-                if existing and existing != migrated:
-                    raise RecoveryError("Distributed database target is not empty")
-                for table_name in existing - {"alembic_version"}:
-                    count_statement = text(
-                        f'SELECT count(*) FROM "{table_name}"'  # noqa: S608 - inspected fixed schema names
-                    )
-                    if connection.scalar(count_statement):
-                        raise RecoveryError("Distributed database target is not empty")
+                _verify_empty_logical_restore_target(connection, existing)
             if not existing:
                 upgrade_database(engine)
             with engine.begin() as connection:
@@ -409,6 +426,12 @@ class PostgreSQLRecoveryAdapter:
                         {key: _decode(value) for key, value in row.items()}
                         for row in item["rows"]
                     ]
+                    if table.name == "composer_model_step_gate":
+                        if rows != [{"id": 1}]:
+                            raise RecoveryError(
+                                "PostgreSQL backup schema is incompatible"
+                            )
+                        continue  # Migration has already seeded the singleton lock row.
                     if rows:
                         connection.execute(table.insert(), rows)
             return target_identity
@@ -768,6 +791,21 @@ def _referenced_keys_from_rows(tables: Mapping[str, Any]) -> frozenset[str]:
             keys.add(f"results/{owner}/{row['result_object_id']}")
         if row.get("result_manifest_object_id"):
             keys.add(f"result-manifests/{owner}/{row['result_manifest_object_id']}")
+    for row in tables.get("composer_sources", {}).get("rows", []):
+        if row.get("publication_state") == "published":
+            keys.add(f"composer-sources/{row['owner_id']}/{row['id']}")
+    drafts = {
+        row["id"]: row["owner_id"]
+        for row in tables.get("composer_drafts", {}).get("rows", [])
+    }
+    revisions = {
+        row["id"]: drafts[row["draft_id"]]
+        for row in tables.get("composer_revisions", {}).get("rows", [])
+        if row.get("publication_state") == "published" and row["draft_id"] in drafts
+    }
+    for row in tables.get("composer_artifacts", {}).get("rows", []):
+        if row["revision_id"] in revisions:
+            keys.add(f"composer-artifacts/{revisions[row['revision_id']]}/{row['id']}")
     for key in keys:
         _validate_object_key(key)
     return frozenset(keys)
@@ -809,6 +847,33 @@ def _verify_database_references(execute: Any, objects: Path) -> None:
                 ).fetchall()
             ]
         }
+        composer_tables = {
+            row[0]
+            for row in execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'composer_%'"
+            ).fetchall()
+        }
+        required = {
+            table_name
+            for table_name in Base.metadata.tables
+            if table_name.startswith("composer_")
+        }
+        if composer_tables and not required.issubset(composer_tables):
+            raise RecoveryError("Restored Composer schema is incomplete")
+        if required.issubset(composer_tables):
+            for table, columns in (
+                ("composer_sources", ("id", "owner_id", "publication_state")),
+                ("composer_drafts", ("id", "owner_id")),
+                ("composer_revisions", ("id", "draft_id", "publication_state")),
+                ("composer_artifacts", ("id", "revision_id")),
+            ):
+                query = f"SELECT {', '.join(columns)} FROM {table}"  # noqa: S608 - fixed internal table names
+                rows[table] = {
+                    "rows": [
+                        dict(zip(columns, row, strict=True))
+                        for row in execute(query).fetchall()
+                    ]
+                }
     except Exception:
         raise RecoveryError("Restored database schema is incomplete") from None
     for key in _referenced_keys_from_rows(rows):

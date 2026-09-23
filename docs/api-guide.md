@@ -89,6 +89,84 @@ without preserving images or layout; scanned or image-only input, or a page with
 fails with `needs_ocr`. The advertised capabilities response is the source for supported formats
 and current limits.
 
+## Composer foundations
+
+`GET /api/v1/composer/capabilities` reports `unconfigured`, `disabled`, `unauthorized`,
+`ready`, or `outage` for the signed-in user. Conversion readiness and downloads are independent
+of this status. Connection setup is available at `/composer/connections` and in the installed
+`markweave composer` CLI. The browser and CLI show only authorized connection metadata;
+submitted credentials are write-only. The same capability response advertises the authoritative
+`maximum_upload_bytes`, `maximum_credential_bytes`, `maximum_model_request_bytes`,
+and `maximum_output_tokens` for bounded client preflight,
+or `null` while Composer is disabled.
+
+`GET/POST /api/v1/composer/connections` list and create visible connections. `GET/PATCH/DELETE
+/api/v1/composer/connections/{id}` inspect, change, or revoke one. Mutations on an existing
+connection require its current `ETag` in `If-Match`. Instance connections require administrator
+rights; personal connections require an explicit per-user grant. Administrators manage those
+grants through `GET /api/v1/composer/personal-permissions` and conditional `PUT
+/api/v1/composer/personal-permissions/{user_id}`. Instance identity may be shared or individual.
+Permissions are checked again when calling the provider.
+An explicitly operator-configured per-connection grant limit bounds instance ACL payloads.
+
+`PUT /api/v1/composer/connections/{id}/credentials` accepts an API key and/or client
+certificate/private key, plus an optional internal CA. Submitted fields rotate those fields;
+omitted secret fields remain sealed. `{ "revoke": true }` clears credentials. The response
+contains only presence flags. `GET /api/v1/composer/connections/{id}/models` discovers permitted
+models and `POST /api/v1/composer/connections/{id}/test` uses the same server-side destination,
+TLS, credential, and request bounds as production calls. Operators configure destination and
+address allowlists; document text cannot supply an endpoint.
+
+`POST /api/v1/composer/drafts` accepts multipart `source` (`.md`, `.docx`, `.pptx`, or `.pdf`),
+optional `title`, and optional `content`. The backend scans the exact uploaded bytes before
+validation or persistence. `POST /api/v1/composer/drafts/from-conversion/{job_id}` copies an
+authorized conversion result through the scanner and retains its exact job/result/digest origin;
+the original job remains unchanged. `GET /api/v1/composer/drafts` and `GET/PUT
+/api/v1/composer/drafts/{id}` access owner drafts. Saving requires `If-Match`. Message and
+proposal subroutes retain owner conversation and proposal decisions; a decision may accept, edit,
+or reject but cannot silently overwrite a newer draft version. Message creation requires both
+`If-Match` and an `Idempotency-Key` for safe retries. Draft/history reads remain
+available during provider outage or connection disablement.
+
+`POST /api/v1/composer/drafts/{id}/model-steps` starts one durable, bounded provider call for
+explicitly approved text. The caller first inspects the authorized connection's endpoint and
+selected model, then supplies the same `approved_endpoint` and `approved_model` with the exact
+`content`, `connection_id`, and `max_output_tokens`. The request requires the current draft
+`If-Match` and an `Idempotency-Key`; retries with changed content or preconditions fail. The
+response contains a step ID and content-free state. `GET .../model-steps/{step_id}` reads its
+owner-scoped state from the shared database, including a pending proposal ID after completion.
+`DELETE .../model-steps/{step_id}` durably cancels an in-flight step from any replica. A cancelled,
+stale, unauthorized, or invalid result cannot create a proposal; a successful result creates only
+a pending proposal for human review. A pending proposal holds no execution slot while awaiting a
+decision. Running steps abandoned by a process restart expire safely without publishing output.
+When the configured global call capacity is full, model discovery, connection testing, and
+model-step admission return `503 COMPOSER_CAPACITY_EXHAUSTED` with the operator-configured
+`Retry-After` interval. Local saturation does not mark a healthy provider as unavailable.
+If another authorized test occupies the transport after a model step has already been admitted,
+the durable step ends as `failed` with safe `capacity_exhausted` and no proposal; retry with a new
+idempotency key when capacity returns. Operational metrics expose active local steps, bounded
+durations, failures, saturation, retries, and startup recovery without content labels.
+The T90 Composer chat will use this server foundation for interactive conversation and cancellation.
+
+`POST /api/v1/composer/drafts/{id}/revisions/from-source` captures the exact scanned source as
+download and preview artifacts. This source capture does not render later draft edits; its frozen
+values describe the original source bytes. It requires `If-Match` and an `Idempotency-Key`.
+`GET /api/v1/composer/drafts/{id}/revisions` lists immutable published revisions; `GET
+.../revisions/{revision_id}` reads one, and `GET
+.../revisions/{revision_id}/artifacts/{download|preview}` returns bytes from that exact revision.
+`POST .../revisions/{revision_id}/restore` with `If-Match` and `Idempotency-Key` makes a new
+copy-forward revision with matching artifacts and no provider call. These contracts provide the
+durable foundation for later generated revisions and native Office/PDF previews; deterministic
+renderer-based regeneration is delivered with typed templates in T91.
+
+All Composer responses with private data are non-cacheable. Unknown or other users' drafts and
+revisions return the same not-found behavior. Provider failures use sanitized errors and leave
+retained drafts, revisions, and existing exports available. Connection, personal-permission,
+draft, message, proposal, and revision lists accept `limit` (1–100, default 50) and `offset`
+(nonnegative) and return both in the response for bounded pagination.
+Draft and revision lists return compact metadata; fetch one ID to read complete draft text or
+frozen revision values.
+
 ## Templates
 
 `GET /api/v1/templates` supports visibility-aware pagination and filters for name, description,

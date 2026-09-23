@@ -2,7 +2,7 @@
 ticket: T89
 linear_id: G1L-588
 linear_url: https://linear.app/g1lom/issue/G1L-588/t89-implement-secure-composer-connections-and-durable-revision
-status: Backlog
+status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -44,6 +44,23 @@ T88.
 ## Progress
 
 - 2026-09-22: Created in Linear and mirrored before implementation. No delivery is claimed.
+- 2026-09-23: Started on `feat/T89-composer-foundations` after verified T88 merge.
+- 2026-09-23: Independently reviewed candidate includes connection security, browser setup, CLI
+  parity, durable drafts/revisions in both profiles, bounded shared-database model-step cancellation
+  and periodic restart recovery, transactional content-free audit, and exact artifact/restore
+  handling. Real HTTP-to-SQLite-to-private-HTTPS tests cover cancellation, no late proposal, and sole
+  execution-slot reuse; PostgreSQL/S3 integration tests also passed locally. The immutable-source
+  canonical Python run passed 5,006 tests, with 56 external-engine-marked deselected and 17 warnings
+  in 41m04s; total coverage is 94.24% and the repository branch-only gate passes at 90.35%
+  (7,374/8,162). Earlier moving-source baselines failed with seven, then two, test failures; the
+  related regressions are fixed and covered by the final passing run. Ruff, ty, OpenAPI, and web
+  checks pass; the official changed-line gate awaits the candidate commit. The unmocked final-image
+  harness covers private HTTPS, mTLS, permissions, outage, scanner failures, cancellation, exact
+  revisions, and post-Composer isolated backup/restore, but standalone and distributed images have
+  not run. Hosted PR CI will run both profiles after publication. Docker-box SSH agent signing still
+  times out, so remote capacity/rollback checks and matched deployment remain pending. Real LiteLLM
+  qualification belongs to T93. T89 remains In Progress; no image, deployment, or release acceptance
+  is claimed.
 
 ## Synchronization
 

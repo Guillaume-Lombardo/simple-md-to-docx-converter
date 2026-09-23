@@ -34,6 +34,7 @@ server = [
     "alembic>=1.16,<2",
     "argon2-cffi>=25.1,<26",
     "cairosvg>=2.8,<3",
+    "cryptography>=46,<47",
     "fastapi>=0.116,<1",
     "markdown-it-py>=4,<5",
     "mdit-py-plugins>=0.5,<0.7",

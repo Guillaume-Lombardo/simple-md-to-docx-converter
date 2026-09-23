@@ -21,6 +21,8 @@ class ObjectScope(StrEnum):
     REVERSION_UPLOAD = "reversion-uploads"
     REVERSION_RESULT = "reversion-results"
     TEMPLATE_VERSION = "template-versions"
+    COMPOSER_ARTIFACT = "composer-artifacts"
+    COMPOSER_SOURCE = "composer-sources"
 
 
 @dataclass(frozen=True, slots=True)

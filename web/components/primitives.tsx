@@ -22,6 +22,7 @@ export function AppShell({
   children: ReactNode;
   current:
     | "Presentations"
+    | "Composer"
     | "Convert"
     | "Password"
     | "Revert"
@@ -67,6 +68,19 @@ export function AppShell({
           >
             2docx
           </Link>
+          {user && !user.password_change_required ? (
+            <Link
+              aria-current={current === "Composer" ? "page" : undefined}
+              className="text-accent underline-offset-4 hover:underline"
+              href="/composer/connections"
+            >
+              Composer setup
+            </Link>
+          ) : user ? (
+            <span aria-disabled="true" className="text-muted">
+              Composer setup
+            </span>
+          ) : null}
           {user && !user.password_change_required ? (
             <Link
               href="/presentations"

@@ -560,6 +560,10 @@ def test_distributed_wiring_allows_aws_credential_provider_defaults(
     request: pytest.FixtureRequest,
 ) -> None:
     reclaim = mocker.patch("markweave.http.components.TemplateService.reclaim_pending")
+    recover_model_steps = mocker.patch(
+        "markweave.http.components.SqlComposerModelStepRepository.recover_stale_model_steps",
+        return_value=0,
+    )
     database_url = "postgresql+psycopg://database/app"
     settings = Settings(
         **template_settings(),
@@ -613,6 +617,10 @@ def test_distributed_wiring_allows_aws_credential_provider_defaults(
     observation_engine.connect.assert_not_called()
     normal_s3.head_bucket.assert_not_called()
     reclaim.assert_called_once_with()
+    recover_model_steps.assert_called_once_with(
+        stale_before=mocker.ANY,
+        limit=settings.worker_cleanup_batch_size,
+    )
     assert components.object_store is not None
     assert components.job_repository is not None
     assert components.retention is not None
@@ -627,6 +635,10 @@ def test_profile_wiring_covers_standalone_and_explicit_s3_options(
     request: pytest.FixtureRequest,
 ) -> None:
     reclaim = mocker.patch("markweave.http.components.TemplateService.reclaim_pending")
+    recover_model_steps = mocker.patch(
+        "markweave.http.components.SqlComposerModelStepRepository.recover_stale_model_steps",
+        return_value=0,
+    )
     engine = mocker.Mock()
     engine.dialect.name = "sqlite"
     mocker.patch(
@@ -677,6 +689,14 @@ def test_profile_wiring_covers_standalone_and_explicit_s3_options(
     distributed_components = build_components(distributed)
     request.addfinalizer(distributed_components.close)
     assert reclaim.call_count == 2
+    assert recover_model_steps.call_args_list == [
+        mocker.call(
+            stale_before=mocker.ANY, limit=standalone.worker_cleanup_batch_size
+        ),
+        mocker.call(
+            stale_before=mocker.ANY, limit=distributed.worker_cleanup_batch_size
+        ),
+    ]
     common = {
         "endpoint_url": "http://s3.test",
         "region_name": "test-region",

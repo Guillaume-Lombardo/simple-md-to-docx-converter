@@ -4,7 +4,7 @@ import logging
 from collections.abc import Callable
 from contextlib import ExitStack
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from importlib import import_module
 from threading import Event, Lock
 from time import monotonic
@@ -20,12 +20,15 @@ from markweave.auth.security import (
     SystemClock,
 )
 from markweave.auth.service import AuthenticationService, SecurityRuntime, SessionPolicy
+from markweave.composer.connections import ConnectionService
+from markweave.composer.runtime import build_connection_service
 from markweave.config import (
     ConfigurationError,
     MalwareScanningMode,
     Settings,
     StorageProfile,
 )
+from markweave.http.composer_step_runner import ComposerStepRunner
 from markweave.jobs.ports import JobRepository
 from markweave.jobs.runner import (
     EmbeddedWorker,
@@ -48,6 +51,12 @@ from markweave.observability import (
     OperationalMetrics,
     QueueObserver,
     log_event,
+)
+from markweave.persistence.composer import (
+    SqlComposerAuditRepository,
+    SqlComposerModelStepRepository,
+    SqlComposerRepository,
+    SqlConnectionRepository,
 )
 from markweave.persistence.jobs import SqlJobRepository
 from markweave.persistence.migrations import upgrade_database
@@ -112,6 +121,11 @@ class AppComponents:
     reversion_repository: SqlReversionJobRepository | None = None
     reversion_policies: ReversionExecutionPolicies | None = None
     reversion_broker: ReversionBrokerClient | None = None
+    composer_store: SqlComposerRepository | None = None
+    composer_connection_repository: SqlConnectionRepository | None = None
+    composer_connections: ConnectionService | None = None
+    composer_model_step_repository: SqlComposerModelStepRepository | None = None
+    composer_steps: ComposerStepRunner | None = None
     metrics: OperationalMetrics = field(default_factory=OperationalMetrics)
     queue_observer: QueueObserver | None = None
     audit_reader: AuditReader | None = None
@@ -350,6 +364,43 @@ def build_upload_scanner(settings: Settings) -> UploadScanner:
     )
 
 
+def _build_composer_step_runtime(
+    settings: Settings,
+    engine: Engine,
+    connections: ConnectionService | None,
+    metrics: OperationalMetrics,
+    recovery_limit: int,
+) -> tuple[SqlComposerModelStepRepository, ComposerStepRunner | None, tuple[Any, ...]]:
+    repository = SqlComposerModelStepRepository(
+        engine,
+        on_expiration=metrics.record_composer_model_step_expiration,
+        on_recovery=metrics.record_composer_model_step_recovery,
+    )
+    repository.recover_stale_model_steps(
+        stale_before=datetime.now(UTC), limit=recovery_limit
+    )
+    if (
+        connections is None
+        or settings.composer_maximum_concurrent_calls is None
+        or settings.composer_timeout_seconds is None
+        or settings.composer_pending_publication_stale_seconds is None
+    ):
+        return repository, None, ()
+    runner = ComposerStepRunner(
+        repository,
+        connections,
+        maximum_active=settings.composer_maximum_concurrent_calls,
+        metrics=metrics,
+        lease=timedelta(
+            seconds=(
+                settings.composer_timeout_seconds
+                + settings.composer_pending_publication_stale_seconds
+            )
+        ),
+    )
+    return repository, runner, (runner,)
+
+
 def build_components(  # noqa: PLR0915 - explicit resource ownership composition
     settings: Settings,
 ) -> AppComponents:
@@ -490,6 +541,31 @@ def build_components(  # noqa: PLR0915 - explicit resource ownership composition
             ),
         )
         templates.reclaim_pending()
+        composer_store = SqlComposerRepository(engine, object_store)
+        if settings.composer_pending_publication_stale_seconds is not None:
+            stale_before = datetime.now(UTC) - timedelta(
+                seconds=settings.composer_pending_publication_stale_seconds
+            )
+            composer_store.recover_stale_publications(stale_before=stale_before)
+            composer_store.recover_stale_sources(stale_before=stale_before)
+        composer_connection_repository = SqlConnectionRepository(
+            engine,
+            maximum_allowed_users=settings.composer_maximum_allowed_users,
+        )
+        composer_connections = build_connection_service(
+            settings, composer_connection_repository
+        )
+        metrics = OperationalMetrics()
+        composer_model_step_repository, composer_steps, step_resources = (
+            _build_composer_step_runtime(
+                settings,
+                engine,
+                composer_connections,
+                metrics,
+                job_policies.schedule.cleanup_limit,
+            )
+        )
+        owned_resources = (*owned_resources, *step_resources)
         retention = RetentionService(
             SqlRetentionRepository(engine),
             object_store,
@@ -498,9 +574,13 @@ def build_components(  # noqa: PLR0915 - explicit resource ownership composition
                 audit_seconds=settings.audit_retention_seconds,
                 minimum_template_versions=settings.template_min_retained_versions,
                 claim_lease_seconds=settings.worker_lease_seconds,
+                composer_draft_seconds=settings.composer_draft_retention_seconds,
             ),
+            composer=composer_store,
+            composer_content_audit=SqlComposerAuditRepository(engine),
+            composer_connection_audit=composer_connection_repository,
+            composer_model_steps=composer_model_step_repository,
         )
-        metrics = OperationalMetrics()
         components = AppComponents(
             authentication=authentication,
             readiness=ProfileReadinessProbe(
@@ -517,6 +597,11 @@ def build_components(  # noqa: PLR0915 - explicit resource ownership composition
             reversion_repository=reversion_repository,
             reversion_policies=reversion_policies,
             reversion_broker=reversion_broker,
+            composer_store=composer_store,
+            composer_connection_repository=composer_connection_repository,
+            composer_connections=composer_connections,
+            composer_model_step_repository=composer_model_step_repository,
+            composer_steps=composer_steps,
             metrics=metrics,
             queue_observer=SqlOperationalObserver(
                 observation_engine,

@@ -19,6 +19,10 @@ from markweave.persistence.schema import (
 )
 from markweave.persistence.sql import create_database_engine
 from markweave.retention import (
+    ComposerConnectionAuditRepository,
+    ComposerContentAuditRepository,
+    ComposerModelStepMaintenanceRepository,
+    ComposerRetentionRepository,
     DataRetentionPolicy,
     RetentionClaim,
     RetentionRepository,
@@ -26,6 +30,68 @@ from markweave.retention import (
 )
 from markweave.storage import ObjectStore, ObjectStoreError
 from markweave.templates.models import TemplateVersion
+
+
+@pytest.mark.unit
+def test_model_step_expiration_runs_without_composer_runtime(
+    mocker: MockerFixture,
+) -> None:
+    now = datetime(2026, 9, 23, tzinfo=UTC)
+    repository = mocker.Mock(spec=RetentionRepository)
+    repository.claim_template_versions.return_value = ()
+    repository.cleanup_audits.return_value = 0
+    model_steps = mocker.Mock(spec=ComposerModelStepMaintenanceRepository)
+    model_steps.recover_stale_model_steps.return_value = 2
+    service = RetentionService(
+        repository,
+        mocker.Mock(spec=ObjectStore),
+        DataRetentionPolicy(86_400, 86_400, 10, 30),
+        composer_model_steps=model_steps,
+        clock=lambda: now,
+    )
+
+    assert service.cleanup(limit=3) == 2
+    model_steps.recover_stale_model_steps.assert_called_once_with(
+        stale_before=now, limit=3
+    )
+
+
+@pytest.mark.unit
+def test_composer_retention_uses_configured_window_and_bounded_batch(
+    mocker: MockerFixture,
+) -> None:
+    now = datetime(2026, 9, 23, tzinfo=UTC)
+    repository = mocker.Mock(spec=RetentionRepository)
+    repository.claim_template_versions.return_value = ()
+    repository.cleanup_audits.return_value = 0
+    composer = mocker.Mock(spec=ComposerRetentionRepository)
+    composer.cleanup_expired_drafts.return_value = 2
+    composer.cleanup_orphan_sources.return_value = 1
+    content_audit = mocker.Mock(spec=ComposerContentAuditRepository)
+    content_audit.cleanup_content_audit.return_value = 2
+    composer_audit = mocker.Mock(spec=ComposerConnectionAuditRepository)
+    composer_audit.cleanup_connection_audit.return_value = 1
+    service = RetentionService(
+        repository,
+        mocker.Mock(spec=ObjectStore),
+        DataRetentionPolicy(365 * 86_400, 365 * 86_400, 10, 30, 7200),
+        composer=composer,
+        composer_content_audit=content_audit,
+        composer_connection_audit=composer_audit,
+        clock=lambda: now,
+    )
+
+    assert service.cleanup(limit=3) == 6
+    composer.cleanup_expired_drafts.assert_called_once_with(
+        cutoff_at=now - timedelta(seconds=7200), limit=3
+    )
+    composer.cleanup_orphan_sources.assert_called_once_with(limit=3)
+    content_audit.cleanup_content_audit.assert_called_once_with(
+        cutoff_at=now - timedelta(days=365), limit=3
+    )
+    composer_audit.cleanup_connection_audit.assert_called_once_with(
+        cutoff_at=now - timedelta(days=365), limit=3
+    )
 
 
 @pytest.mark.unit

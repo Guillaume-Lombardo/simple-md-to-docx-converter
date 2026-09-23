@@ -275,6 +275,80 @@ def test_metrics_are_low_cardinality_and_cover_required_operational_signals() ->
         metrics.record_reversion_retry("private-operation")
 
 
+def test_composer_model_step_metrics_are_bounded_and_content_free() -> None:
+    metrics = OperationalMetrics()
+    metrics.set_composer_active_model_steps(2)
+    metrics.record_composer_model_step_duration("running", 0.1)
+    metrics.record_composer_model_step_duration("completed", 1.25)
+    metrics.record_composer_model_step_duration("cancelled", 0.5)
+    metrics.record_composer_model_step_duration("failed", 0.75)
+    metrics.record_composer_model_step_failure("capacity_exhausted")
+    metrics.record_composer_model_step_saturation("admission")
+    metrics.record_composer_model_step_saturation("egress")
+    metrics.record_composer_model_step_retry()
+    metrics.record_composer_model_step_recovery(3)
+    metrics.record_composer_model_step_expiration(4)
+
+    rendered = metrics.render(QueueSnapshot(0, 0, 0))
+
+    assert "md_converter_composer_active_model_steps 2" in rendered
+    assert (
+        'md_converter_composer_model_step_duration_seconds_sum{outcome="completed"} 1.25'
+        in rendered
+    )
+    assert (
+        'md_converter_composer_model_step_duration_seconds_count{outcome="running"} 1'
+        in rendered
+    )
+    assert (
+        'md_converter_composer_model_step_failures_total{code="capacity_exhausted"} 1'
+        in rendered
+    )
+    assert (
+        'md_converter_composer_model_step_saturation_total{scope="admission"} 1'
+        in rendered
+    )
+    assert (
+        'md_converter_composer_model_step_saturation_total{scope="egress"} 1'
+        in rendered
+    )
+    assert "md_converter_composer_model_step_retries_total 1" in rendered
+    assert "md_converter_composer_model_step_recoveries_total 3" in rendered
+    assert "md_converter_composer_model_step_expirations_total 4" in rendered
+
+    for value in ("private-model-id", "document content", "secret-token"):
+        assert value not in rendered
+
+
+@pytest.mark.parametrize(
+    ("method", "value"),
+    [
+        ("set_composer_active_model_steps", -1),
+        ("set_composer_active_model_steps", True),
+        ("record_composer_model_step_duration", ("private-outcome", 1.0)),
+        ("record_composer_model_step_duration", ("completed", -0.1)),
+        ("record_composer_model_step_duration", ("completed", float("nan"))),
+        ("record_composer_model_step_duration", ("completed", 31_536_001)),
+        ("record_composer_model_step_failure", "private-secret-code"),
+        ("record_composer_model_step_saturation", "owner-identifier"),
+        ("record_composer_model_step_recovery", -1),
+        ("record_composer_model_step_recovery", True),
+        ("record_composer_model_step_expiration", -1),
+        ("record_composer_model_step_expiration", True),
+    ],
+)
+def test_composer_model_step_metrics_reject_unbounded_inputs(
+    method: str, value: object
+) -> None:
+    metrics = OperationalMetrics()
+
+    with pytest.raises(ValueError, match="Composer"):
+        if isinstance(value, tuple):
+            getattr(metrics, method)(*value)
+        else:
+            getattr(metrics, method)(value)
+
+
 @pytest.mark.parametrize(
     "snapshot",
     [

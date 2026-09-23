@@ -32,6 +32,9 @@ from markweave.observability import AuditRecord, QueueSnapshot
 from markweave.persistence.errors import PersistenceError
 from markweave.persistence.schema import (
     AuthenticationAuditRow,
+    ComposerConnectionAuditRow,
+    ComposerContentAuditRow,
+    ComposerPermissionAuditRow,
     ConversionJobRow,
     IdleSessionPolicyAuditRow,
     ReversionAttemptRow,
@@ -337,6 +340,92 @@ class SqlAuditReader:
                         IdleSessionPolicyAuditRow.new_admin_idle_minutes.label(
                             "new_admin_idle_minutes"
                         ),
+                    ),
+                    select(
+                        ComposerContentAuditRow.id.label("id"),
+                        ComposerContentAuditRow.actor_id.label("actor_id"),
+                        ComposerContentAuditRow.owner_id.label("owner_id"),
+                        ComposerContentAuditRow.operation.label("operation"),
+                        ComposerContentAuditRow.target_id.label("target_id"),
+                        ComposerContentAuditRow.target_kind.label("target_type"),
+                        cast(ComposerContentAuditRow.draft_version, String).label(
+                            "target_version"
+                        ),
+                        literal(None, type_=String).label("version_id"),
+                        case(
+                            (
+                                (
+                                    ComposerContentAuditRow.actor_id
+                                    != ComposerContentAuditRow.owner_id
+                                )
+                                & (
+                                    ComposerContentAuditRow.actor_id
+                                    != "00000000-0000-0000-0000-000000000000"
+                                ),
+                                True,
+                            ),
+                            else_=False,
+                        ).label("administrator_intervention"),
+                        ComposerContentAuditRow.created_at.label("created_at"),
+                        literal(None, type_=Integer).label("old_user_idle_minutes"),
+                        literal(None, type_=Integer).label("old_admin_idle_minutes"),
+                        literal(None, type_=Integer).label("new_user_idle_minutes"),
+                        literal(None, type_=Integer).label("new_admin_idle_minutes"),
+                    ),
+                    select(
+                        ComposerConnectionAuditRow.id.label("id"),
+                        ComposerConnectionAuditRow.actor_id.label("actor_id"),
+                        func.coalesce(
+                            ComposerConnectionAuditRow.owner_id,
+                            "00000000-0000-0000-0000-000000000000",
+                        ).label("owner_id"),
+                        ComposerConnectionAuditRow.operation.label("operation"),
+                        ComposerConnectionAuditRow.connection_id.label("target_id"),
+                        literal("composer_connection").label("target_type"),
+                        cast(ComposerConnectionAuditRow.version, String).label(
+                            "target_version"
+                        ),
+                        literal(None, type_=String).label("version_id"),
+                        case(
+                            (
+                                (ComposerConnectionAuditRow.scope == "instance")
+                                | (
+                                    ComposerConnectionAuditRow.actor_id
+                                    != ComposerConnectionAuditRow.owner_id
+                                ),
+                                True,
+                            ),
+                            else_=False,
+                        ).label("administrator_intervention"),
+                        ComposerConnectionAuditRow.created_at.label("created_at"),
+                        literal(None, type_=Integer).label("old_user_idle_minutes"),
+                        literal(None, type_=Integer).label("old_admin_idle_minutes"),
+                        literal(None, type_=Integer).label("new_user_idle_minutes"),
+                        literal(None, type_=Integer).label("new_admin_idle_minutes"),
+                    ),
+                    select(
+                        ComposerPermissionAuditRow.id.label("id"),
+                        ComposerPermissionAuditRow.actor_id.label("actor_id"),
+                        ComposerPermissionAuditRow.user_id.label("owner_id"),
+                        case(
+                            (
+                                ComposerPermissionAuditRow.enabled.is_(True),
+                                "personal_permission_grant",
+                            ),
+                            else_="personal_permission_revoke",
+                        ).label("operation"),
+                        ComposerPermissionAuditRow.user_id.label("target_id"),
+                        literal("composer_personal_permission").label("target_type"),
+                        cast(ComposerPermissionAuditRow.version, String).label(
+                            "target_version"
+                        ),
+                        literal(None, type_=String).label("version_id"),
+                        literal(True).label("administrator_intervention"),
+                        ComposerPermissionAuditRow.created_at.label("created_at"),
+                        literal(None, type_=Integer).label("old_user_idle_minutes"),
+                        literal(None, type_=Integer).label("old_admin_idle_minutes"),
+                        literal(None, type_=Integer).label("new_user_idle_minutes"),
+                        literal(None, type_=Integer).label("new_admin_idle_minutes"),
                     ),
                 ).subquery()
                 rows = database.execute(

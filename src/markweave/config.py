@@ -240,6 +240,28 @@ class Settings(BaseSettings):
     s3_region: str | None = Field(default=None, min_length=1)
     s3_access_key_id: SecretStr | None = None
     s3_secret_access_key: SecretStr | None = None
+    composer_enabled: bool = False
+    composer_allowed_destinations: tuple[str, ...] | None = None
+    composer_allowed_networks: tuple[str, ...] | None = None
+    composer_secret_key_path: Path | None = None
+    composer_upload_max_bytes: int | None = Field(default=None, gt=0)
+    composer_http_request_max_bytes: int | None = Field(default=None, gt=0)
+    composer_maximum_request_bytes: int | None = Field(default=None, gt=0)
+    composer_maximum_response_bytes: int | None = Field(default=None, gt=0)
+    composer_maximum_models: int | None = Field(default=None, gt=0)
+    composer_maximum_allowed_users: int | None = Field(default=None, gt=0)
+    composer_maximum_model_name_length: int | None = Field(default=None, gt=0)
+    composer_maximum_credential_bytes: int | None = Field(default=None, gt=0)
+    composer_maximum_output_tokens: int | None = Field(default=None, gt=0)
+    composer_maximum_concurrent_calls: int | None = Field(default=None, gt=0)
+    composer_retry_after_seconds: int | None = Field(default=None, gt=0)
+    composer_timeout_seconds: float | None = Field(
+        default=None, gt=0, allow_inf_nan=False
+    )
+    composer_pending_publication_stale_seconds: float | None = Field(
+        default=None, gt=0, allow_inf_nan=False
+    )
+    composer_draft_retention_seconds: int | None = Field(default=None, gt=0)
 
     @classmethod
     def _environment_values(cls) -> tuple[dict[str, str], dict[str, str], set[str]]:
@@ -298,6 +320,14 @@ class Settings(BaseSettings):
         """Decode environment JSON before validating the broker certificate pins."""
         return json.loads(value) if isinstance(value, str) else value
 
+    @field_validator(
+        "composer_allowed_destinations", "composer_allowed_networks", mode="before"
+    )
+    @classmethod
+    def parse_composer_allowlists(cls, value: Any) -> Any:
+        """Decode explicit JSON allowlists from operator configuration."""
+        return json.loads(value) if isinstance(value, str) else value
+
     @model_validator(mode="after")
     def validate_lifetimes(self) -> Self:
         """Validate cross-field security and resource invariants."""
@@ -318,6 +348,7 @@ class Settings(BaseSettings):
         if self.worker_heartbeat_seconds >= self.worker_lease_seconds:
             raise ValueError("worker heartbeat must be shorter than its lease")
         self._validate_reversion_execution()
+        self._validate_composer()
         if (
             self.conversion_mermaid_max_total_source_bytes
             < self.conversion_mermaid_max_source_bytes
@@ -339,6 +370,42 @@ class Settings(BaseSettings):
             )
         self._validate_storage_profile()
         return self
+
+    def _validate_composer(self) -> None:
+        """Keep optional model egress closed unless every policy input is explicit."""
+        if not self.composer_enabled:
+            return
+        required = (
+            self.composer_allowed_destinations,
+            self.composer_allowed_networks,
+            self.composer_secret_key_path,
+            self.composer_upload_max_bytes,
+            self.composer_http_request_max_bytes,
+            self.composer_maximum_request_bytes,
+            self.composer_maximum_response_bytes,
+            self.composer_maximum_models,
+            self.composer_maximum_allowed_users,
+            self.composer_maximum_model_name_length,
+            self.composer_maximum_credential_bytes,
+            self.composer_maximum_output_tokens,
+            self.composer_maximum_concurrent_calls,
+            self.composer_retry_after_seconds,
+            self.composer_timeout_seconds,
+            self.composer_pending_publication_stale_seconds,
+            self.composer_draft_retention_seconds,
+        )
+        if any(value is None for value in required):
+            raise ValueError("Composer connection policy must be complete")
+        if (
+            not self.composer_allowed_destinations
+            or not self.composer_allowed_networks
+            or self.composer_secret_key_path is None
+            or not self.composer_secret_key_path.is_absolute()
+            or self.composer_http_request_max_bytes is None
+            or self.composer_upload_max_bytes is None
+            or self.composer_http_request_max_bytes <= self.composer_upload_max_bytes
+        ):
+            raise ValueError("Composer connection policy is invalid")
 
     @property
     def reversion_execution_configured(self) -> bool:

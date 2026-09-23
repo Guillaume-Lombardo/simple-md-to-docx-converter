@@ -96,6 +96,7 @@ test("shell links target only delivered application routes", async () => {
   );
   assert.deepEqual(destinations, [
     "/convert",
+    "/composer/connections",
     "/presentations",
     "/revert",
     "/templates",
