@@ -44,6 +44,80 @@ def _step_response(*, status: str = "running") -> bytes:
 
 
 @contextmanager
+def _policy_service() -> Iterator[tuple[str, list[dict[str, Any]]]]:
+    requests: list[dict[str, Any]] = []
+    policy = {
+        "mode": "delegated",
+        "enabled": False,
+        "allowed_destinations": [],
+        "allowed_networks": [],
+        "editable_destinations": True,
+        "etag": '"1"',
+    }
+
+    class Handler(BaseHTTPRequestHandler):
+        def _send(self, status: int, value: dict[str, Any]) -> None:
+            content = json.dumps(value).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
+
+        def _body(self) -> dict[str, Any]:
+            length = int(self.headers["Content-Length"])
+            value = json.loads(self.rfile.read(length))
+            assert isinstance(value, dict)
+            requests.append(
+                {
+                    "method": self.command,
+                    "path": self.path,
+                    "body": value,
+                    "csrf": self.headers.get("X-CSRF-Token"),
+                    "cookie": self.headers.get("Cookie"),
+                    "if_match": self.headers.get("If-Match"),
+                }
+            )
+            return value
+
+        def do_GET(self) -> None:
+            requests.append({"method": "GET", "path": self.path})
+            self._send(200, policy)
+
+        def do_POST(self) -> None:
+            self._body()
+            self._send(
+                200,
+                {"destination": "https://llm.example:443", "addresses": ["192.0.2.1"]},
+            )
+
+        def do_PUT(self) -> None:
+            value = self._body()
+            if self.headers.get("If-Match") != policy["etag"]:
+                self._send(
+                    412,
+                    {"error": {"code": "STALE_VERSION", "message": "Policy changed."}},
+                )
+                return
+            policy.update(value)
+            policy["etag"] = '"2"'
+            self._send(200, policy)
+
+        def log_message(self, format: str, *args: object) -> None:
+            del format, args
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}", requests
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
+@contextmanager
 def _service(
     *,
     artifact_headers: dict[str, str] | None = None,
@@ -180,6 +254,67 @@ def _private_file(path: Path, value: str) -> None:
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
         stream.write(value)
+
+
+def test_installed_cli_admin_policy_uses_session_csrf_and_etag(tmp_path: Path) -> None:
+    with _policy_service() as (url, requests):
+        env = _profile(tmp_path, url)
+        shown = _run(env, "--json", "composer", "policy", "show")
+        resolved = _run(
+            env, "--json", "composer", "policy", "resolve", "https://llm.example/v1"
+        )
+        stale = _run(
+            env,
+            "--json",
+            "composer",
+            "policy",
+            "set",
+            "--enable",
+            "--allowed-destination",
+            "https://llm.example:443",
+            "--allowed-network",
+            "192.0.2.0/24",
+            "--if-match",
+            '"stale"',
+        )
+        updated = _run(
+            env,
+            "--json",
+            "composer",
+            "policy",
+            "set",
+            "--enable",
+            "--allowed-destination",
+            "https://llm.example:443",
+            "--allowed-network",
+            "192.0.2.0/24",
+            "--if-match",
+            '"1"',
+        )
+
+    assert shown.returncode == 0, shown.stderr
+    assert json.loads(shown.stdout)["policy"]["etag"] == '"1"'
+    assert resolved.returncode == 0, resolved.stderr
+    assert json.loads(resolved.stdout)["resolution"]["addresses"] == ["192.0.2.1"]
+    assert stale.returncode == 1
+    assert json.loads(stale.stderr)["error"]["code"] == "stale_version"
+    assert updated.returncode == 0, updated.stderr
+    assert json.loads(updated.stdout)["policy"]["etag"] == '"2"'
+    assert [request["method"] for request in requests] == ["GET", "POST", "PUT", "PUT"]
+    assert all(
+        request["path"].startswith("/api/v1/admin/composer-policy")
+        for request in requests
+    )
+    for request in requests[1:]:
+        assert request["csrf"] == "csrf-opaque"
+        assert request["cookie"] == "session=opaque"
+    assert requests[1]["body"] == {"endpoint": "https://llm.example/v1"}
+    assert requests[3]["if_match"] == '"1"'
+    assert requests[3]["body"] == {
+        "enabled": True,
+        "allowed_destinations": ["https://llm.example:443"],
+        "allowed_networks": ["192.0.2.0/24"],
+    }
 
 
 def _run(

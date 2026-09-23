@@ -126,6 +126,7 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     _profile(capabilities)
     _bind(capabilities, "capabilities", _capabilities)
 
+    _register_policy(commands)
     _register_connections(commands)
     _register_personal_permissions(commands)
     _register_drafts(commands)
@@ -289,6 +290,40 @@ def _register_revisions(
     _idempotency_key(restore)
     _profile(restore)
     _bind(restore, "revisions restore", _restore_revision)
+
+
+def _register_policy(
+    commands: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
+    policy = commands.add_parser("policy", help="Manage administrator Composer policy.")
+    actions = policy.add_subparsers(dest="policy_command", metavar="COMMAND")
+
+    show = actions.add_parser("show", help="Show the current Composer policy.")
+    _profile(show)
+    _bind(show, "policy show", _show_policy)
+
+    resolve = actions.add_parser(
+        "resolve", help="Resolve an endpoint for destination approval."
+    )
+    resolve.add_argument("endpoint", action=_Store, metavar="ENDPOINT")
+    _profile(resolve)
+    _bind(resolve, "policy resolve", _resolve_policy_destination)
+
+    update = actions.add_parser("set", help="Replace the complete Composer policy.")
+    enabled = update.add_mutually_exclusive_group(required=True)
+    enabled.add_argument("--enable", action=_Flag, help="Enable Composer egress.")
+    enabled.add_argument("--disable", action=_Flag, help="Disable Composer egress.")
+    update.add_argument("--allowed-destination", action=_Append, metavar="DESTINATION")
+    update.add_argument("--allowed-network", action=_Append, metavar="CIDR")
+    update.add_argument("--if-match", required=True, action=_Store, metavar="ETAG")
+    _profile(update)
+    _bind(
+        update,
+        "policy set",
+        _set_policy,
+        allowed_destination=[],
+        allowed_network=[],
+    )
 
 
 def _register_connections(  # noqa: PLR0915 - declarative argparse registry
@@ -587,6 +622,62 @@ def _capabilities(
         f"Composer status: {_human(payload.get('status'))}.",
         {"capabilities": payload},
     )
+
+
+def _show_policy(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    policy = _object(
+        _request(context, command, "GET", "/api/v1/admin/composer-policy"),
+        _OK,
+        "composer_policy_read_failed",
+    )
+    writer.success(_human_policy(policy), {"policy": policy})
+
+
+def _resolve_policy_destination(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    result = _object(
+        _request(
+            context,
+            command,
+            "POST",
+            "/api/v1/admin/composer-policy/resolve",
+            body={"endpoint": _required_string(command, "endpoint")},
+            csrf=True,
+        ),
+        _OK,
+        "composer_destination_resolve_failed",
+    )
+    addresses = _human_strings(result.get("addresses"))
+    writer.success(
+        f"{_human(result.get('destination'))}\t{', '.join(addresses)}",
+        {"resolution": result},
+    )
+
+
+def _set_policy(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    policy = _object(
+        _request(
+            context,
+            command,
+            "PUT",
+            "/api/v1/admin/composer-policy",
+            body={
+                "enabled": _flag(command, "enable"),
+                "allowed_destinations": command.values["allowed_destination"],
+                "allowed_networks": command.values["allowed_network"],
+            },
+            csrf=True,
+            etag=_required_string(command, "if_match"),
+        ),
+        _OK,
+        "composer_policy_update_failed",
+    )
+    writer.success(_human_policy(policy), {"policy": policy})
 
 
 def _list(context: CommandContext, writer: OutputWriter, command: _Command) -> None:
@@ -1795,6 +1886,31 @@ def _human(value: Any) -> str:
 def _human_connection(value: dict[str, Any]) -> str:
     required = ("id", "name", "scope", "status", "endpoint")
     return "\t".join(_human(value.get(key)) for key in required)
+
+
+def _human_strings(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        raise CliError("response_invalid", "The service returned an invalid response.")
+    return [_human(item) for item in value]
+
+
+def _human_policy(value: dict[str, Any]) -> str:
+    enabled = value.get("enabled")
+    editable = value.get("editable_destinations")
+    if not isinstance(enabled, bool) or not isinstance(editable, bool):
+        raise CliError("response_invalid", "The service returned an invalid response.")
+    destinations = _human_strings(value.get("allowed_destinations"))
+    networks = _human_strings(value.get("allowed_networks"))
+    return "\n".join(
+        (
+            f"Mode: {_human(value.get('mode'))}",
+            f"Enabled: {str(enabled).lower()}",
+            f"Editable destinations: {str(editable).lower()}",
+            f"Allowed destinations: {', '.join(destinations) or '(none)'}",
+            f"Allowed networks: {', '.join(networks) or '(none)'}",
+            f"ETag: {_human(value.get('etag'))}",
+        )
+    )
 
 
 def _human_permission(value: dict[str, Any]) -> str:

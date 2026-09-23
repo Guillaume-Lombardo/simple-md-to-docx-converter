@@ -16,6 +16,7 @@ DOMAIN_PATTERNS: Mapping[str, tuple[str, ...]] = {
         ".gitignore",
         "README.md",
         "compose.simple.yaml",
+        "compose.simple-composer.yaml",
         "compose.podman.yaml",
         "compose.nextjs-podman.yaml",
         "compose.nextjs-podman-trusted-upstream.yaml",

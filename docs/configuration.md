@@ -195,10 +195,13 @@ Composer model access is disabled by default. Setting `MARKWEAVE_COMPOSER_ENABLE
 every policy input below. The backend alone reads the credential key and contacts approved model
 destinations. Ordinary conversions and their readiness remain independent of this configuration.
 An unavailable model endpoint does not remove access to an owner's retained Composer data.
+Production operators still set the outer switch and exact destination/address ceiling. The
+administrator's durable policy can turn Composer off but cannot expand that ceiling.
 
 | Environment variable | Requirement when Composer is enabled | Handling |
 | --- | --- | --- |
 | `MARKWEAVE_COMPOSER_ENABLED` | `false` by default | Enables model connections only when the remaining policy is complete |
+| `MARKWEAVE_COMPOSER_ADMIN_POLICY_DELEGATED` | `false` by default; supported only by the standalone evaluation profile with empty operator destination and network lists | Explicitly delegates exact destination and address approval to the authenticated administrator; approval starts disabled and empty in the database |
 | `MARKWEAVE_COMPOSER_ALLOWED_DESTINATIONS` | Nonempty JSON array of exact `host:port` pairs | HTTPS destinations that operators explicitly approve |
 | `MARKWEAVE_COMPOSER_ALLOWED_NETWORKS` | Nonempty JSON array of CIDR networks | Every resolved address must also belong to an approved network |
 | `MARKWEAVE_COMPOSER_SECRET_KEY_PATH` | Absolute path | External operator-managed envelope key, absent from the image and database; regular, non-symlink file containing exactly 64 hexadecimal characters for 32 random bytes, with an optional final newline; owner-only `0600` is recommended, and group write/execute or any world permissions are rejected |
@@ -223,6 +226,15 @@ key identity in the backup and restore procedure; database and object backups al
 encrypted credentials. Rotate or revoke a connection's credential through Composer's authorized
 configuration flow. Never put model keys, private keys, document content, or private citations in
 these environment variables or logs.
+The Composer-capable standalone simple quickstart opt-in generates a private key once in its separate
+`markweave-composer-key` named volume and mounts it read-only. It never replaces a missing key over
+an existing key identity or encrypted credential. Preserve that volume with the SQLite/object
+backup. The database stores only a nonsecret fingerprint to reject a wrong key before writes;
+production and distributed profiles must provide the same original external key to each process.
+If the key is unavailable or mismatched, model and credential operations return an unavailable
+state while ordinary conversion and authorized retained-draft reads continue. Restore the original
+key from the operator's secret manager and restart the API and workers. No browser route returns or
+exports it.
 Content-free Composer connection audit events use the configured audit-retention window and
 bounded cleanup.
 

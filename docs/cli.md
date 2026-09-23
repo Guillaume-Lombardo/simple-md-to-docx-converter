@@ -12,7 +12,7 @@ markweave [--json] [--non-interactive] [--timeout SECONDS] COMMAND
 login | logout | whoami | password change
 convert | jobs {list,show,wait,cancel,download,manifest,reverse}
 templates {list,search,show,create,download,update,replace,archive,delete,versions,version-download,restore,preferred,fallback}
-composer {capabilities,connections,personal-permissions,drafts,messages,model-steps,proposals,revisions}
+composer {capabilities,policy,connections,personal-permissions,drafts,messages,model-steps,proposals,revisions}
 users {list,create,activate,deactivate,reset-password,require-password-change}
 audit | health {live,ready,metrics}
 serve | worker | doctor | migrate
@@ -36,6 +36,26 @@ PEM material. Revision downloads validate the revision identity and `nosniff`
 response headers before replacing a local file. See
 [Administration CLI](administration-cli.md#composer-connections) for the full command
 forms and security rules.
+
+Administrators can inspect and replace the Composer destination policy through the
+authenticated API:
+
+```text
+markweave composer policy show --profile admin
+markweave composer policy resolve https://llm.example/v1 --profile admin
+markweave composer policy set --enable --allowed-destination https://llm.example:443 \
+  --allowed-network 192.0.2.0/24 --if-match '"1"' --profile admin
+markweave composer policy set --disable --if-match '"2"' --profile admin
+```
+
+`show` returns the policy mode, current allowlists, editability, and ETag. `resolve`
+returns the exact destination and addresses proposed for approval. `set` sends a
+complete replacement: repeat `--allowed-destination` and `--allowed-network` for
+each value, or omit them for empty lists. It requires either `--enable` or
+`--disable` and the current ETag in `--if-match`; a concurrent change fails
+without overwriting it. In operator-managed mode, the service fixes the
+destination and network lists, so supply their current values when changing only
+the enabled state. All mutations use the stored session and CSRF value.
 
 | Exit status | Meaning |
 | --- | --- |

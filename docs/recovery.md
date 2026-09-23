@@ -45,6 +45,14 @@ Record the backup identifier, UTC creation time, profile, database checkpoint/sn
 object-store snapshot or version identity, application image digest, configuration revision, and
 encrypted key-management references. Never put credentials, document content, or restored output in
 the evidence report.
+For Composer, preserve the original external envelope key separately from this database/object
+set. In the simple quickstart it lives in the dedicated protected
+`<project>_markweave-composer-key` volume, which must be backed up and restored as a separate
+operator-controlled secret. Distributed API and worker processes must receive one matching
+secret-manager key. The database stores a nonsecret key fingerprint; startup rejects a missing or
+different key before any new credential write. Restore the original key first, then verify the
+isolated application can read an existing connection and perform an authorized test. Never create
+a new key to repair a restored database that has encrypted Composer credentials.
 
 ## Production commands
 
@@ -135,7 +143,11 @@ Before reopening ingress, verify readiness, schema compatibility, object retriev
 fallback, the role-specific idle-session policy and revision, authentication, queue state, and the
 exact restored image/configuration identity. A missing policy row intentionally resolves to the
 30-minute standard-user and 15-minute administrator defaults; a present row and all immutable
-policy audit evidence must survive restore unchanged. In
+policy audit evidence must survive restore unchanged. Restore the exact Composer envelope key
+matching the database key identity from the protected quickstart volume or the production secret
+manager. If it is missing or wrong, model and credential operations stay unavailable while
+authorized retained drafts and ordinary conversion remain available; restoring the original key
+and restarting API and workers restores those operations without resetting application data. In
 distributed mode, start API and workers in a controlled order and confirm worker-local metrics are
 being scraped. Preserve the exercise report without alteration, together with platform backup logs,
 according to the approved evidence-retention policy. Exercise each production profile at least

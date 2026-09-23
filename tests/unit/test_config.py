@@ -130,6 +130,22 @@ def test_composer_egress_requires_complete_explicit_operator_policy() -> None:
             }
         )
 
+    delegated = Settings.model_validate(
+        {
+            **configured.model_dump(),
+            "composer_admin_policy_delegated": True,
+            "composer_allowed_destinations": [],
+            "composer_allowed_networks": [],
+        }
+    )
+    assert delegated.composer_admin_policy_delegated
+    for override in (
+        {"composer_allowed_destinations": ["litellm.example.test:443"]},
+        {"storage_profile": "distributed"},
+    ):
+        with pytest.raises(ValidationError, match="Delegated Composer setup"):
+            Settings.model_validate({**delegated.model_dump(), **override})
+
 
 @pytest.mark.unit
 def test_reverse_lifecycle_limits_are_optional_but_strictly_positive() -> None:

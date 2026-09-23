@@ -38,6 +38,33 @@ Docker-compatible API. Podman's automatic Docker-API health metadata is not used
 ClamAV directly before starting Markweave, then polls Markweave's local readiness endpoint with a
 bounded timeout.
 
+The published 0.7.3 pair used by the default helper keeps Composer model setup disabled. A
+matched Composer-capable candidate backend/frontend pair can explicitly opt into
+`MARKWEAVE_SIMPLE_COMPOSER_SETUP=true`; the helper then includes
+`compose.simple-composer.yaml`. A candidate preview script can supply the pair and opt-in together,
+so the administrator does not need to edit model-policy environment settings.
+
+With that opt-in, the helper initializes one 32-byte Composer envelope key in the protected
+`<project>_markweave-composer-key` named volume. It mounts that key read-only in the application and
+reuses it across starts and upgrades. Before first creation over an existing data volume, it
+inspects the SQLite schema read-only and refuses to create a replacement when encrypted Composer
+credentials or a prior key identity exist. Preserve this separate volume alongside application
+data in a backup; a database/object backup cannot recover the key. A missing or wrong key leaves
+Composer model access unavailable until the original key is restored; ordinary conversions and
+authorized retained drafts continue to work. Neither the helper nor the browser prints the key.
+
+After sign-in, open **Administration → LLM settings**. The evaluation profile starts with model
+egress disabled. Preview the exact HTTPS destination and resolved addresses, approve them, then
+add the connection, enter its write-only credential or mTLS certificate and key, discover or select
+a model, test, enable and explicitly grant each user who may use it. The administrator must also
+grant themselves access to use the connection. **Administration → Templates** opens the existing
+style-reference template catalog. Document conversion works without any model connection.
+The Composer overlay gives the backend a separate outbound network for approved model calls in the
+ordinary Docker/Podman topology; trusted-upstream Podman uses its existing slirp4netns transport.
+Pandoc, LibreOffice, Mermaid and template subprocesses enter private user and network namespaces.
+Do not add an engine-accessible Unix proxy or descriptor-broker socket mount, which could hand an
+outbound socket to a subprocess. The current engine qualification is Linux/AMD64.
+
 For a temporary test on a remote server reached only through an SSH tunnel, use the explicit
 insecure mode on that server:
 

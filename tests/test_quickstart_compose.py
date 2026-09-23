@@ -23,6 +23,7 @@ pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[1]
 COMPOSE = ROOT / "compose.yaml"
 SIMPLE_OVERLAY = ROOT / "compose.simple.yaml"
+SIMPLE_COMPOSER_OVERLAY = ROOT / "compose.simple-composer.yaml"
 PODMAN_OVERLAY = ROOT / "compose.podman.yaml"
 TRUSTED_UPSTREAM_OVERLAY = ROOT / "compose.trusted-upstream.yaml"
 PODMAN_TRUSTED_UPSTREAM_OVERLAY = ROOT / "compose.podman-trusted-upstream.yaml"
@@ -356,6 +357,24 @@ def test_simple_quickstart_is_unprivileged_and_removes_only_exact_scratch() -> N
 
     assert "sudo" not in script
     assert "compose.simple.yaml" in script
+    assert (
+        'readonly composer_setup="${MARKWEAVE_SIMPLE_COMPOSER_SETUP:-false}"' in script
+    )
+    assert 'files+=(--file "$repository/compose.simple-composer.yaml")' in script
+    assert (
+        "The supplied backend image does not support secure Composer administrator setup."
+        in script
+    )
+    assert (
+        'if [[ "$composer_setup" == true && "$cutover_backend_supplied" != true ]]'
+        in script
+    )
+    assert "MARKWEAVE_COMPOSER_ENABLED" not in SIMPLE_OVERLAY.read_text(
+        encoding="utf-8"
+    )
+    assert "MARKWEAVE_COMPOSER_ENABLED" in SIMPLE_COMPOSER_OVERLAY.read_text(
+        encoding="utf-8"
+    )
     assert "compose.podman.yaml" in script
     assert "MARKWEAVE_WORK_DEVICE=/dev/null" in script
     assert 'readonly requested_runtime="${MARKWEAVE_SIMPLE_RUNTIME:-auto}"' in script

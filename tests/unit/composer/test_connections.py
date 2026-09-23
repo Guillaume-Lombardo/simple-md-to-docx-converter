@@ -343,6 +343,75 @@ def test_personal_connection_is_owner_only_and_write_only(
     assert service.availability(other).state is ConnectionState.UNAUTHORIZED
 
 
+def test_disabled_policy_does_not_reveal_ungranted_connection(
+    policy: ConnectionPolicy,
+    actors: tuple[ConnectionActor, ConnectionActor, ConnectionActor],
+) -> None:
+    admin, granted, stranger = actors
+    repository = MemoryConnections()
+    service = _service(repository, policy, FakeEgress())
+    service.save(
+        admin,
+        _record(None, frozenset({granted.id})),
+        expected_version=None,
+    )
+    disabled = ConnectionService(
+        repository,
+        SecretCipher(b"s" * 32),
+        FakeEgress(),
+        policy,
+        policy_state=lambda: (policy, False, 1),
+    )
+    assert disabled.availability(granted).state is ConnectionState.DISABLED
+    assert disabled.availability(stranger).state is ConnectionState.UNAUTHORIZED
+
+
+def test_policy_revocation_fences_in_flight_model_result(
+    policy: ConnectionPolicy,
+    actors: tuple[ConnectionActor, ConnectionActor, ConnectionActor],
+) -> None:
+    admin, granted, _ = actors
+    repository = MemoryConnections()
+    egress = FakeEgress()
+    enabled = [True]
+    version = [1]
+    service = ConnectionService(
+        repository,
+        SecretCipher(b"s" * 32),
+        egress,
+        policy,
+        policy_state=lambda: (policy, enabled[0], version[0]),
+    )
+    saved = service.save(
+        admin,
+        _record(None, frozenset({granted.id})),
+        expected_version=None,
+        credentials=PlainCredentials(api_key=b"private"),
+    )
+
+    def revoke_policy() -> None:
+        enabled[0] = False
+        version[0] = 2
+
+    egress.before_return = revoke_policy
+    with pytest.raises(ConnectionConflictError, match="model call"):
+        service.chat(
+            granted,
+            saved.id,
+            [{"role": "user", "content": "Hello"}],
+            max_output_tokens=1,
+        )
+    assert egress.calls == 1
+    with pytest.raises(ConnectionConfigurationError, match="model access is disabled"):
+        service.chat(
+            granted,
+            saved.id,
+            [{"role": "user", "content": "Hello"}],
+            max_output_tokens=1,
+        )
+    assert egress.calls == 1
+
+
 def test_instance_grants_and_individual_credentials(
     policy: ConnectionPolicy,
     actors: tuple[ConnectionActor, ConnectionActor, ConnectionActor],

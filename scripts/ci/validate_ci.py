@@ -369,7 +369,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
             ): "${{ always() && matrix.domain == 'container' }}",
             ("mutation", "Retain mutation evidence"): "${{ always() }}",
         },
-        canonical_digest="1ed133ffec42c08e9d4c3fe68158177554f3451eb8feb1d0849fcb3789d84614",
+        canonical_digest="b89ffafa32dfd2be0e39bd9b2930e5b528f90e4fc1ae8c40502f3247920446c4",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -973,6 +973,7 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
 
     required_commands = {
         ("python-tests", "Run a complementary light test shard"): (
+            "uv run python -m scripts.ci.engine_userns_gate -- "
             'uv run pytest -m "unit or light_coverage" '
             "-p no:scripts.ci.pytest_branch_coverage "
             "-p scripts.ci.light_sharding --light-shard-count=2 "
@@ -1031,6 +1032,15 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
         ("heavy", "Install the locked E2E browser driver"): (
             "pnpm install --frozen-lockfile --ignore-scripts "
             "--filter md-converter-web-tests"
+        ),
+        ("heavy", "Run selected domain suite without a shell"): (
+            'if [[ "$CI_DOMAIN" == "document-engines" || '
+            '"$CI_DOMAIN" == "functional" ]]; then\n'
+            "  uv run python -m scripts.ci.engine_userns_gate -- \\\n"
+            '    uv run python -m scripts.ci.run_domain "$CI_DOMAIN"\n'
+            "else\n"
+            '  uv run python -m scripts.ci.run_domain "$CI_DOMAIN"\n'
+            "fi\n"
         ),
         ("gate", "Require every implemented CI stage"): (
             'set -euo pipefail\n[[ "$DETECT_RESULT" == "success" ]]\n'

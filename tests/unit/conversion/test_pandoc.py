@@ -11,6 +11,10 @@ import pytest
 from PIL import Image
 
 from markweave.conversion.archive import ApprovedResource
+from markweave.conversion.engine_launcher import (
+    ENGINE_UNAVAILABLE_EXIT_STATUS,
+    isolated_engine_command,
+)
 from markweave.conversion.errors import ConversionError, ConversionErrorCode
 from markweave.conversion.images import ImageLimits, normalize_image
 from markweave.conversion.pandoc import PandocConfig, PandocDocxConverter
@@ -53,17 +57,20 @@ def test_adapter_uses_fixed_arguments_isolated_workspace_and_allowlisted_environ
         workspace = options["cwd"]
         assert isinstance(workspace, Path)
         (workspace / "output.docx").write_bytes(reference)
-        assert arguments == [
-            "pandoc",
-            f"--from={PANDOC_READER}",
-            "--to=docx",
-            f"--reference-doc={workspace / 'reference.docx'}",
-            f"--resource-path={workspace / 'package'}",
-            f"--output={workspace / 'output.docx'}",
-            str(workspace / "package/input.md"),
-        ]
+        assert arguments == isolated_engine_command(
+            [
+                "pandoc",
+                f"--from={PANDOC_READER}",
+                "--to=docx",
+                f"--reference-doc={workspace / 'reference.docx'}",
+                f"--resource-path={workspace / 'package'}",
+                f"--output={workspace / 'output.docx'}",
+                str(workspace / "package/input.md"),
+            ]
+        )
         assert options["shell"] is False
         assert options["start_new_session"] is True
+        assert options["close_fds"] is True
         assert options["stdin"] is subprocess.DEVNULL
         assert options["stdout"] is subprocess.DEVNULL
         assert options["stderr"] is subprocess.DEVNULL
@@ -155,8 +162,8 @@ def test_adapter_materializes_only_approved_package_resources(
             "![safe](../assets/image.svg)"
         )
         assert (workspace / "package/assets/image.svg").read_bytes() == png
-        assert arguments[4] == f"--resource-path={workspace / 'package/docs'}"
-        assert arguments[6] == str(workspace / "package/docs/readme.md")
+        assert arguments[8] == f"--resource-path={workspace / 'package/docs'}"
+        assert arguments[10] == str(workspace / "package/docs/readme.md")
         (workspace / "output.docx").write_bytes(reference)
         return process
 
@@ -214,6 +221,23 @@ def test_unavailable_pandoc_has_stable_content_free_error(
         converter(tmp_path).convert(ApprovedMarkdown("secret document"), minimal_docx())
     assert captured.value.code is ConversionErrorCode.PANDOC_UNAVAILABLE
     assert str(captured.value) == "Pandoc is unavailable."
+
+
+@pytest.mark.unit
+def test_launcher_missing_pandoc_exit_is_unavailable_and_content_free(
+    tmp_path: Path, mocker
+) -> None:
+    process = mocker.Mock()
+    process.wait.return_value = ENGINE_UNAVAILABLE_EXIT_STATUS
+    mocker.patch("markweave.conversion.pandoc.subprocess.Popen", return_value=process)
+
+    with pytest.raises(ConversionError) as captured:
+        converter(tmp_path).convert(ApprovedMarkdown("secret document"), minimal_docx())
+
+    assert captured.value.code is ConversionErrorCode.PANDOC_UNAVAILABLE
+    assert str(captured.value) == "Pandoc is unavailable."
+    assert "secret document" not in str(captured.value)
+    process.wait.assert_called_once()
 
 
 @pytest.mark.unit

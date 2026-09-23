@@ -26,6 +26,10 @@ from mdit_py_plugins.front_matter import front_matter_plugin
 from PIL import Image, UnidentifiedImageError
 
 from markweave.conversion.archive import ApprovedDocument, ApprovedResource
+from markweave.conversion.engine_launcher import (
+    ENGINE_UNAVAILABLE_EXIT_STATUS,
+    isolated_engine_command,
+)
 from markweave.conversion.errors import (
     ConversionError,
     ConversionErrorCode,
@@ -486,6 +490,7 @@ class MermaidCliRenderer:
                     {
                         "executablePath": self._config.chromium_executable,
                         "headless": "shell",
+                        "pipe": True,
                     },
                     sort_keys=True,
                     separators=(",", ":"),
@@ -566,7 +571,7 @@ class MermaidCliRenderer:
     def _start(self, arguments: list[str], workspace: Path) -> subprocess.Popen[bytes]:
         try:
             return subprocess.Popen(  # noqa: S603 - fixed arguments and no shell
-                arguments,
+                isolated_engine_command(arguments),
                 cwd=workspace,
                 env=self._environment(workspace),
                 stdin=subprocess.DEVNULL,
@@ -574,6 +579,7 @@ class MermaidCliRenderer:
                 stderr=subprocess.DEVNULL,
                 shell=False,
                 start_new_session=True,
+                close_fds=True,
             )
         except OSError:
             raise ConversionError(
@@ -628,6 +634,12 @@ class MermaidCliRenderer:
                     break
                 except subprocess.TimeoutExpired:
                     continue
+        if return_code == ENGINE_UNAVAILABLE_EXIT_STATUS:
+            self._terminate_survivors(process.pid)
+            raise ConversionError(
+                ConversionErrorCode.MERMAID_UNAVAILABLE,
+                "Mermaid rendering is unavailable.",
+            )
         if return_code != 0:
             self._terminate_survivors(process.pid)
             raise ConversionError(

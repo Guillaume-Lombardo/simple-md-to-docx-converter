@@ -16,6 +16,10 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from markweave.conversion.archive import ApprovedDocument
+from markweave.conversion.engine_launcher import (
+    ENGINE_UNAVAILABLE_EXIT_STATUS,
+    isolated_engine_command,
+)
 from markweave.conversion.errors import ConversionError, ConversionErrorCode
 from markweave.conversion.validation import (
     PANDOC_READER,
@@ -227,7 +231,7 @@ class PandocDocxConverter:
     def _start(self, arguments: list[str], workspace: Path) -> subprocess.Popen[bytes]:
         try:
             return subprocess.Popen(  # noqa: S603 - fixed arguments and no shell
-                arguments,
+                isolated_engine_command(arguments),
                 cwd=workspace,
                 env=self._environment(workspace),
                 stdin=subprocess.DEVNULL,
@@ -235,6 +239,7 @@ class PandocDocxConverter:
                 stderr=subprocess.DEVNULL,
                 shell=False,
                 start_new_session=True,
+                close_fds=True,
             )
         except OSError:
             raise ConversionError(
@@ -289,6 +294,11 @@ class PandocDocxConverter:
                     break
                 except subprocess.TimeoutExpired:
                     continue
+        if return_code == ENGINE_UNAVAILABLE_EXIT_STATUS:
+            raise ConversionError(
+                ConversionErrorCode.PANDOC_UNAVAILABLE,
+                "Pandoc is unavailable.",
+            )
         if return_code != 0:
             raise ConversionError(
                 ConversionErrorCode.PANDOC_FAILURE,

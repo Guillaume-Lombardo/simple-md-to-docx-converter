@@ -29,6 +29,7 @@ def test_documentation_only_change_has_no_heavy_domain() -> None:
         ".gitignore",
         "README.md",
         "compose.simple.yaml",
+        "compose.simple-composer.yaml",
         "compose.podman.yaml",
         "compose.nextjs-podman.yaml",
         "compose.nextjs-podman-trusted-upstream.yaml",

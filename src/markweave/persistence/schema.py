@@ -768,6 +768,56 @@ Index(
 )
 
 
+class ComposerAdminPolicyRow(Base):
+    """Administrator-approved model egress within the deployment policy."""
+
+    __tablename__ = "composer_admin_policy"
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_composer_admin_policy_singleton"),
+        CheckConstraint("version > 0", name="ck_composer_admin_policy_version"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    destinations: Mapped[str] = mapped_column(String(), nullable=False)
+    networks: Mapped[str] = mapped_column(String(), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class ComposerKeyIdentityRow(Base):
+    """Nonsecret identity that prevents mixed-key credential writes after restore."""
+
+    __tablename__ = "composer_key_identity"
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_composer_key_identity_singleton"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class ComposerAdminPolicyAuditRow(Base):
+    """Content-free evidence of administrator model-egress policy changes."""
+
+    __tablename__ = "composer_admin_policy_audit"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    actor_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    old_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    new_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+Index(
+    "ix_composer_admin_policy_audit_retention",
+    ComposerAdminPolicyAuditRow.created_at,
+    ComposerAdminPolicyAuditRow.id,
+)
+
+
 class ComposerConnectionRow(Base):
     """Connection policy and public metadata; credential bytes live separately."""
 

@@ -16,7 +16,10 @@ readonly cutover_backend_supplied="${MARKWEAVE_CUTOVER_BACKEND_IMAGE+true}"
 readonly cutover_frontend_supplied="${MARKWEAVE_CUTOVER_FRONTEND_IMAGE+true}"
 readonly cutover_backend_image="${MARKWEAVE_CUTOVER_BACKEND_IMAGE:-ghcr.io/guillaume-lombardo/md-converter:0.7.3@sha256:c91f97d7c299ad84811876e52ae52350d1ad3b91bd190b4fffb801634729bc83}"
 readonly cutover_frontend_image="${MARKWEAVE_CUTOVER_FRONTEND_IMAGE:-ghcr.io/guillaume-lombardo/md-converter-web:0.7.3@sha256:edee507cf70d15681bae0fe7f9d0755b607d557725fd06e6bd43771350dba9ba}"
+readonly composer_setup="${MARKWEAVE_SIMPLE_COMPOSER_SETUP:-false}"
 readonly work_volume="${project}_markweave-work"
+readonly composer_key_volume="${project}_markweave-composer-key"
+readonly data_volume="${project}_markweave-data"
 readonly requested_runtime="${MARKWEAVE_SIMPLE_RUNTIME:-auto}"
 readonly -a original_arguments=("$@")
 runtime_name=""
@@ -46,6 +49,11 @@ validate_project_and_port() {
     fail "The public origin must be a single-line HTTP origin."
   if [[ "$cutover_backend_supplied" != "$cutover_frontend_supplied" ]]; then
     fail "The backend and frontend cutover images must be supplied together."
+  fi
+  [[ "$composer_setup" == true || "$composer_setup" == false ]] || \
+    fail "MARKWEAVE_SIMPLE_COMPOSER_SETUP must be true or false."
+  if [[ "$composer_setup" == true && "$cutover_backend_supplied" != true ]]; then
+    fail "Composer setup requires an explicit matched Composer-capable image pair."
   fi
   if { [[ "$cutover_backend_supplied" == true ]] && [[ -z "${MARKWEAVE_CUTOVER_BACKEND_IMAGE}" ]]; } ||
     { [[ "$cutover_frontend_supplied" == true ]] && [[ -z "${MARKWEAVE_CUTOVER_FRONTEND_IMAGE}" ]]; }; then
@@ -245,6 +253,9 @@ compose() {
     --file "$repository/compose.yaml"
     --file "$repository/compose.simple.yaml"
   )
+  if [[ "$composer_setup" == true ]]; then
+    files+=(--file "$repository/compose.simple-composer.yaml")
+  fi
   if [[ "$runtime_name" == podman ]]; then
     files+=(--file "$repository/compose.podman.yaml")
   fi
@@ -355,6 +366,46 @@ initialize_work_volume() {
     --volume "$work_volume:/work" --entrypoint /bin/sh "$application_image" -c \
     'chmod 0770 /work && chown 1001:0 /work'
   validate_work_volume
+}
+
+prepare_composer_key() {
+  local application_image
+  local data_path=-
+  local -a data_mount=()
+  application_image="$(compose config --images | awk \
+    '/^ghcr\.io\/guillaume-lombardo\/md-converter:/ && !found { print; found = 1 }')"
+  [[ -n "$application_image" ]] || fail "Could not resolve the pinned Markweave image."
+  "${runtime_command[@]}" run --rm --network none --read-only --user 1001:0 \
+    --cap-drop ALL --security-opt no-new-privileges \
+    --entrypoint python "$application_image" -c \
+    'from markweave.config import Settings; from markweave.conversion.engine_launcher import isolated_engine_command; assert "composer_admin_policy_delegated" in Settings.model_fields' || \
+    fail "The supplied backend image does not support secure Composer administrator setup."
+  if ! "${runtime_command[@]}" volume inspect "$composer_key_volume" >/dev/null 2>&1; then
+    "${runtime_command[@]}" volume create \
+      --label "com.docker.compose.project=$project" \
+      --label 'com.docker.compose.volume=markweave-composer-key' \
+      "$composer_key_volume" >/dev/null
+  fi
+  [[ "$("${runtime_command[@]}" volume inspect --format \
+    '{{ index .Labels "com.docker.compose.project" }}' "$composer_key_volume")" == "$project" && \
+    "$("${runtime_command[@]}" volume inspect --format \
+    '{{ index .Labels "com.docker.compose.volume" }}' "$composer_key_volume")" == markweave-composer-key ]] || \
+    fail "Refusing an unexpected Composer key volume."
+  if "${runtime_command[@]}" volume inspect "$data_volume" >/dev/null 2>&1; then
+    data_path=/data
+    data_mount=(--volume "$data_volume:/data:ro")
+  fi
+  if ! "${runtime_command[@]}" run --rm --network none --read-only --user 0:0 \
+    --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE \
+    --security-opt no-new-privileges \
+    --volume "$composer_key_volume:/key" \
+    --volume "$repository/scripts/quickstart-composer-key.py:/bootstrap.py:ro" \
+    "${data_mount[@]}" --entrypoint python "$application_image" \
+    /bootstrap.py /key "$data_path" 1001; then
+    printf '%s\n' \
+      'Composer model access is unavailable; recover the original key.' \
+      'Conversions and authorized drafts remain available.' >&2
+  fi
 }
 
 wait_for_podman_scanner() {
@@ -550,6 +601,9 @@ start() {
   prepare_template
   write_runtime_env
   compose config --quiet
+  if [[ "$composer_setup" == true ]]; then
+    prepare_composer_key
+  fi
   if application_is_running; then
     running=true
   fi

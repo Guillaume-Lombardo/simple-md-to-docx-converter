@@ -18,6 +18,7 @@ from pypdf.generic import DictionaryObject, NameObject, TextStringObject
 from pytest_mock import MockerFixture
 
 from markweave.conversion import libreoffice
+from markweave.conversion.engine_launcher import ENGINE_UNAVAILABLE_EXIT_STATUS
 from markweave.conversion.errors import ConversionError, ConversionErrorCode
 from markweave.conversion.libreoffice import (
     LibreOfficeConfig,
@@ -230,7 +231,7 @@ def test_success_uses_fixed_isolated_arguments_and_canonical_manifest(
     assert decoded["source_docx_sha256"] != decoded["output_pdf_sha256"]
     assert b"/tmp/" not in manifest.canonical_json()
     arguments = popen.call_args.args[0]
-    assert arguments[1:5] == [
+    assert arguments[5:9] == [
         "--headless",
         "--nologo",
         "--nodefault",
@@ -239,6 +240,7 @@ def test_success_uses_fixed_isolated_arguments_and_canonical_manifest(
     assert "pdf:writer_pdf_Export" in arguments
     assert popen.call_args.kwargs["shell"] is False
     assert popen.call_args.kwargs["start_new_session"] is True
+    assert popen.call_args.kwargs["close_fds"] is True
     assert not tuple(tmp_path.iterdir())
 
 
@@ -422,6 +424,24 @@ def test_unavailable_engine_is_content_free(
         _converter(tmp_path).convert(_docx(), TRACE)
     assert captured.value.code is ConversionErrorCode.LIBREOFFICE_UNAVAILABLE
     assert "path" not in str(captured.value)
+
+
+def test_launcher_missing_libreoffice_exit_is_unavailable_and_content_free(
+    mocker: MockerFixture, tmp_path: Path
+) -> None:
+    process = mocker.Mock(pid=321)
+    process.wait.return_value = ENGINE_UNAVAILABLE_EXIT_STATUS
+    mocker.patch.object(libreoffice.subprocess, "Popen", return_value=process)
+    terminate = mocker.patch.object(libreoffice, "_terminate_group")
+
+    with pytest.raises(ConversionError) as captured:
+        _converter(tmp_path).convert(_docx(), TRACE)
+
+    assert captured.value.code is ConversionErrorCode.LIBREOFFICE_UNAVAILABLE
+    assert str(captured.value) == "LibreOffice is unavailable."
+    assert "must-not-pass" not in str(captured.value)
+    process.wait.assert_called_once()
+    terminate.assert_called_once_with(process, 0.2)
 
 
 @pytest.mark.parametrize("mode", ("absent", "empty", "directory", "symlink"))

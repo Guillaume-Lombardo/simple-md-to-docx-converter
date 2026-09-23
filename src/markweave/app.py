@@ -13,6 +13,7 @@ from markweave.http.routers import (
     administration,
     audit_observability,
     authentication,
+    composer_admin_policy,
     composer_connections,
     composer_drafts,
     composer_model_steps,
@@ -106,6 +107,7 @@ def create_app(  # noqa: PLR0913 - explicit lifecycle composition inputs
     routers = (
         audit_observability.build_router(dependencies, embedded_worker),
         authentication.build_router(dependencies),
+        composer_admin_policy.build_router(dependencies),
         composer_connections.build_router(dependencies),
         composer_drafts.build_router(dependencies),
         composer_model_steps.build_router(dependencies),

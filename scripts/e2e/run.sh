@@ -617,6 +617,53 @@ restore_composer_snapshot() {
   start_production_router "$application_name"
 }
 
+prove_composer_key_loss_continuity() {
+  podman rm --force "$router_name" >/dev/null
+  podman stop --time 15 "$application_name" >/dev/null
+  if [[ "$profile" == distributed ]]; then
+    podman stop --time 15 "$worker_one_name" "$worker_two_name" >/dev/null
+  fi
+  podman unshare sh -c \
+    'chmod 0600 "$1"; openssl rand -hex 32 > "$1"; chmod 0400 "$1"' \
+    sh "$composer_key_file"
+  podman start "$application_name" >/dev/null
+  if [[ "$profile" == distributed ]]; then
+    podman start "$worker_one_name" "$worker_two_name" >/dev/null
+  fi
+  wait_for_url "http://127.0.0.1:$(podman port "$application_name" 8080/tcp | sed 's/.*://')/health/ready" \
+    "$application_name" '"status":"ready"'
+  start_production_router "$application_name"
+  podman exec \
+    --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
+    --env MARKWEAVE_E2E_PROFILE="$profile" \
+    --env MARKWEAVE_E2E_COMPOSER_PHASE=key-unavailable \
+    --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json" \
+    "$application_name" node --test /e2e/browser-next-composer-resilience.test.mjs
+  podman rm --force "$router_name" >/dev/null
+  podman stop --time 15 "$application_name" >/dev/null
+  if [[ "$profile" == distributed ]]; then
+    podman stop --time 15 "$worker_one_name" "$worker_two_name" >/dev/null
+  fi
+  podman unshare chmod 0600 "$composer_key_file"
+  podman unshare cp -a -- "$temporary_directory/composer-key-backup" \
+    "$composer_key_file"
+  podman unshare cmp -- "$temporary_directory/composer-key-backup" \
+    "$composer_key_file"
+  podman start "$application_name" >/dev/null
+  if [[ "$profile" == distributed ]]; then
+    podman start "$worker_one_name" "$worker_two_name" >/dev/null
+  fi
+  wait_for_url "http://127.0.0.1:$(podman port "$application_name" 8080/tcp | sed 's/.*://')/health/ready" \
+    "$application_name" '"status":"ready"'
+  start_production_router "$application_name"
+  podman exec \
+    --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
+    --env MARKWEAVE_E2E_PROFILE="$profile" \
+    --env MARKWEAVE_E2E_COMPOSER_PHASE=key-restored \
+    --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json" \
+    "$application_name" node --test /e2e/browser-next-composer-resilience.test.mjs
+}
+
 kill_backend_and_reconnect_router() {
   local backend_container="$1"
   local backend_port
@@ -1021,8 +1068,6 @@ application_settings=(
   "${E2E_SETTINGS[@]}"
   --env MARKWEAVE_USER_PROVISIONING_FILE=/run/secrets/users.csv
   --env MARKWEAVE_COMPOSER_ENABLED=true
-  --env 'MARKWEAVE_COMPOSER_ALLOWED_DESTINATIONS=["e2e-llm:8443","e2e-llm:8444"]'
-  --env "MARKWEAVE_COMPOSER_ALLOWED_NETWORKS=[\"$composer_provider_address/32\"]"
   --env MARKWEAVE_COMPOSER_SECRET_KEY_PATH=/run/secrets/composer-key
   --env MARKWEAVE_COMPOSER_UPLOAD_MAX_BYTES=1000000
   --env MARKWEAVE_COMPOSER_HTTP_REQUEST_MAX_BYTES=1100000
@@ -1039,6 +1084,18 @@ application_settings=(
   --env MARKWEAVE_COMPOSER_PENDING_PUBLICATION_STALE_SECONDS=60
   --env MARKWEAVE_COMPOSER_DRAFT_RETENTION_SECONDS=86400
 )
+if [[ "$profile" == standalone ]]; then
+  application_settings+=(
+    --env MARKWEAVE_COMPOSER_ADMIN_POLICY_DELEGATED=true
+    --env 'MARKWEAVE_COMPOSER_ALLOWED_DESTINATIONS=[]'
+    --env 'MARKWEAVE_COMPOSER_ALLOWED_NETWORKS=[]'
+  )
+else
+  application_settings+=(
+    --env 'MARKWEAVE_COMPOSER_ALLOWED_DESTINATIONS=["e2e-llm:8443","e2e-llm:8444"]'
+    --env "MARKWEAVE_COMPOSER_ALLOWED_NETWORKS=[\"$composer_provider_address/32\"]"
+  )
+fi
 created=("$application_name" "${created[@]}")
 e2e_run_in_harness_directory \
   "$temporary_directory" "$temporary_directory_identity" \
@@ -1072,6 +1129,8 @@ base_url="http://127.0.0.1:$application_port"
 wait_for_url "$base_url/health/ready" "$application_name" '"status":"ready"'
 bash "$repository/scripts/container/wait-for-fake-clamav.sh" \
   "$clamav_name" "$profile-mapped" "$application_name" e2e-clamav
+podman exec "$application_name" python \
+  /e2e/engine_network_isolation_final_image.py
 podman exec "$application_name" python -c '
 from pathlib import Path
 
@@ -1377,6 +1436,7 @@ podman exec \
 podman exec \
   --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
+  --env "MARKWEAVE_E2E_COMPOSER_PROVIDER_ADDRESS=$composer_provider_address" \
   --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json" \
   "$application_name" node --test /e2e/browser-next-composer-real.test.mjs
 if podman logs "$application_name" 2>&1 | \
@@ -1425,8 +1485,9 @@ podman exec \
   --env MARKWEAVE_E2E_COMPOSER_PHASE=restored-backup \
   --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json" \
   "$application_name" node --test /e2e/browser-next-composer-resilience.test.mjs
+prove_composer_key_loss_continuity
 provider_events="$(podman logs "$composer_provider_name")"
-if [[ "$(grep -Fc '"operation": "chat", "status": 200' <<<"$provider_events")" -ne 11 ]]; then
+if [[ "$(grep -Fc '"operation": "chat", "status": 200' <<<"$provider_events")" -ne 12 ]]; then
   echo "Restored Composer calls, cancelled step, replacement step, and occupying connection test did not reach the provider." >&2
   exit 1
 fi

@@ -56,8 +56,13 @@ class BoundedRequestBody:
             maximum_bytes = self._template_metadata_maximum_bytes
             error_code = "TEMPLATE_REQUEST_TOO_LARGE"
             error_message = "The template request is too large."
-        elif method in {"POST", "PUT", "PATCH"} and path.startswith(
-            "/api/v1/composer/"
+        elif method in {"POST", "PUT", "PATCH"} and (
+            path.startswith("/api/v1/composer/")
+            or path
+            in {
+                "/api/v1/admin/composer-policy",
+                "/api/v1/admin/composer-policy/resolve",
+            }
         ):
             if self._composer_maximum_bytes is None:
                 await self._reject_composer_unavailable(send)

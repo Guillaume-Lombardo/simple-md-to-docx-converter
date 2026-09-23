@@ -118,6 +118,22 @@ def _executable(workspace: Path, name: str, program: str) -> Path:
     return path
 
 
+def test_real_process_boundary_reports_unavailable_engine(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w") as archive:
+        for name in ("[Content_Types].xml", "_rels/.rels", "word/document.xml"):
+            archive.writestr(name, b"safe")
+    with pytest.raises(ConversionError) as captured:
+        _converter(
+            workspace,
+            executable=str(workspace / "absent-soffice"),
+            timeout=5.0,
+        ).convert(output.getvalue(), _trace(b"opaque-reference"))
+    assert captured.value.code is ConversionErrorCode.LIBREOFFICE_UNAVAILABLE
+    assert str(workspace) not in str(captured.value)
+
+
 @pytest.mark.requires_libreoffice
 def test_real_libreoffice_version_is_exactly_approved() -> None:
     completed = subprocess.run(

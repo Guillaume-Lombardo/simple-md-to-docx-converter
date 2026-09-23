@@ -61,6 +61,18 @@ def _model_step(**overrides: object) -> dict[str, object]:
     }
 
 
+def _policy(**overrides: object) -> dict[str, object]:
+    return {
+        "mode": "delegated",
+        "enabled": False,
+        "allowed_destinations": ["https://llm.example:443"],
+        "allowed_networks": ["192.0.2.0/24"],
+        "editable_destinations": True,
+        "etag": '"1"',
+        **overrides,
+    }
+
+
 @pytest.fixture
 def remote(mocker):
     profile = ConnectionProfile(
@@ -105,6 +117,96 @@ def test_capabilities_and_list_use_authenticated_safe_http(remote, capsys) -> No
         "GET",
         "/api/v1/composer/connections?offset=0&limit=50",
     )
+
+
+def test_admin_policy_show_resolve_and_set_use_http_contract(remote, capsys) -> None:
+    _profile, _constructor, client = remote
+    client.request.side_effect = (
+        ConversionHttpResponse(200, _policy()),
+        ConversionHttpResponse(
+            200, {"destination": "https://llm.example:443", "addresses": ["192.0.2.1"]}
+        ),
+        ConversionHttpResponse(200, _policy(enabled=True, etag='"2"')),
+    )
+
+    assert main(("--json", "composer", "policy", "show")) == 0
+    assert json.loads(capsys.readouterr().out)["policy"]["etag"] == '"1"'
+    assert (
+        main(
+            (
+                "--json",
+                "composer",
+                "policy",
+                "resolve",
+                "https://llm.example/v1",
+            )
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["resolution"]["addresses"] == [
+        "192.0.2.1"
+    ]
+    assert (
+        main(
+            (
+                "--json",
+                "composer",
+                "policy",
+                "set",
+                "--enable",
+                "--allowed-destination",
+                "https://llm.example:443",
+                "--allowed-network",
+                "192.0.2.0/24",
+                "--if-match",
+                '"1"',
+            )
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["policy"]["etag"] == '"2"'
+    get, resolve, update = client.request.call_args_list
+    assert get.args == ("GET", "/api/v1/admin/composer-policy")
+    assert resolve.args == ("POST", "/api/v1/admin/composer-policy/resolve")
+    assert resolve.kwargs["csrf"] is True
+    assert json.loads(resolve.kwargs["body"]) == {"endpoint": "https://llm.example/v1"}
+    assert update.args == ("PUT", "/api/v1/admin/composer-policy")
+    assert update.kwargs["csrf"] is True
+    assert update.kwargs["headers"]["If-Match"] == '"1"'
+    assert json.loads(update.kwargs["body"]) == {
+        "enabled": True,
+        "allowed_destinations": ["https://llm.example:443"],
+        "allowed_networks": ["192.0.2.0/24"],
+    }
+
+
+def test_admin_policy_set_requires_state_and_if_match(capsys) -> None:
+    for arguments in (
+        ("--if-match", '"1"'),
+        ("--enable",),
+        ("--enable", "--disable", "--if-match", '"1"'),
+    ):
+        with pytest.raises(SystemExit) as raised:
+            main(("composer", "policy", "set", *arguments))
+        assert raised.value.code == 2
+        capsys.readouterr()
+
+
+def test_admin_policy_set_can_disable_with_empty_lists(remote, capsys) -> None:
+    _profile, _constructor, client = remote
+    client.request.return_value = ConversionHttpResponse(
+        200,
+        _policy(
+            enabled=False, allowed_destinations=[], allowed_networks=[], etag='"3"'
+        ),
+    )
+    assert main(("composer", "policy", "set", "--disable", "--if-match", '"2"')) == 0
+    assert "Enabled: false" in capsys.readouterr().out
+    assert json.loads(client.request.call_args.kwargs["body"]) == {
+        "enabled": False,
+        "allowed_destinations": [],
+        "allowed_networks": [],
+    }
 
 
 def test_create_can_write_prompted_secrets_without_argv_or_output_disclosure(

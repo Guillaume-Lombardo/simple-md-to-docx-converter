@@ -194,6 +194,54 @@ export type BodyReplaceTemplateApiV1TemplatesTemplateIdContentPut = {
 };
 
 /**
+ * ComposerAdminPolicyResponse
+ */
+export type ComposerAdminPolicyResponse = {
+    /**
+     * Allowed Destinations
+     */
+    allowed_destinations: Array<string>;
+    /**
+     * Allowed Networks
+     */
+    allowed_networks: Array<string>;
+    /**
+     * Editable Destinations
+     */
+    editable_destinations: boolean;
+    /**
+     * Enabled
+     */
+    enabled: boolean;
+    /**
+     * Etag
+     */
+    etag: string;
+    /**
+     * Mode
+     */
+    mode: string;
+};
+
+/**
+ * ComposerAdminPolicyUpdateRequest
+ */
+export type ComposerAdminPolicyUpdateRequest = {
+    /**
+     * Allowed Destinations
+     */
+    allowed_destinations: Array<string>;
+    /**
+     * Allowed Networks
+     */
+    allowed_networks: Array<string>;
+    /**
+     * Enabled
+     */
+    enabled: boolean;
+};
+
+/**
  * ComposerArtifactResponse
  */
 export type ComposerArtifactResponse = {
@@ -253,6 +301,30 @@ export type ComposerCapabilitiesResponse = {
      * Status Message
      */
     status_message: string | null;
+};
+
+/**
+ * ComposerDestinationResolveRequest
+ */
+export type ComposerDestinationResolveRequest = {
+    /**
+     * Endpoint
+     */
+    endpoint: string;
+};
+
+/**
+ * ComposerDestinationResolveResponse
+ */
+export type ComposerDestinationResolveResponse = {
+    /**
+     * Addresses
+     */
+    addresses: Array<string>;
+    /**
+     * Destination
+     */
+    destination: string;
 };
 
 /**
@@ -1912,6 +1984,133 @@ export type CredentialWriteRequestWritable = {
      */
     revoke?: boolean;
 };
+
+export type GetPolicyApiV1AdminComposerPolicyGetData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/composer-policy';
+};
+
+export type GetPolicyApiV1AdminComposerPolicyGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type GetPolicyApiV1AdminComposerPolicyGetError = GetPolicyApiV1AdminComposerPolicyGetErrors[keyof GetPolicyApiV1AdminComposerPolicyGetErrors];
+
+export type GetPolicyApiV1AdminComposerPolicyGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ComposerAdminPolicyResponse;
+};
+
+export type GetPolicyApiV1AdminComposerPolicyGetResponse = GetPolicyApiV1AdminComposerPolicyGetResponses[keyof GetPolicyApiV1AdminComposerPolicyGetResponses];
+
+export type PutPolicyApiV1AdminComposerPolicyPutData = {
+    body: ComposerAdminPolicyUpdateRequest;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/composer-policy';
+};
+
+export type PutPolicyApiV1AdminComposerPolicyPutErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type PutPolicyApiV1AdminComposerPolicyPutError = PutPolicyApiV1AdminComposerPolicyPutErrors[keyof PutPolicyApiV1AdminComposerPolicyPutErrors];
+
+export type PutPolicyApiV1AdminComposerPolicyPutResponses = {
+    /**
+     * Successful Response
+     */
+    200: ComposerAdminPolicyResponse;
+};
+
+export type PutPolicyApiV1AdminComposerPolicyPutResponse = PutPolicyApiV1AdminComposerPolicyPutResponses[keyof PutPolicyApiV1AdminComposerPolicyPutResponses];
+
+export type ResolveDestinationApiV1AdminComposerPolicyResolvePostData = {
+    body: ComposerDestinationResolveRequest;
+    headers?: {
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/composer-policy/resolve';
+};
+
+export type ResolveDestinationApiV1AdminComposerPolicyResolvePostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type ResolveDestinationApiV1AdminComposerPolicyResolvePostError = ResolveDestinationApiV1AdminComposerPolicyResolvePostErrors[keyof ResolveDestinationApiV1AdminComposerPolicyResolvePostErrors];
+
+export type ResolveDestinationApiV1AdminComposerPolicyResolvePostResponses = {
+    /**
+     * Successful Response
+     */
+    200: ComposerDestinationResolveResponse;
+};
+
+export type ResolveDestinationApiV1AdminComposerPolicyResolvePostResponse = ResolveDestinationApiV1AdminComposerPolicyResolvePostResponses[keyof ResolveDestinationApiV1AdminComposerPolicyResolvePostResponses];
 
 export type GetSessionPolicyApiV1AdminSessionPolicyGetData = {
     body?: never;

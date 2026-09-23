@@ -350,6 +350,81 @@
         "title": "Body_replace_template_api_v1_templates__template_id__content_put",
         "type": "object"
       },
+      "ComposerAdminPolicyResponse": {
+        "properties": {
+          "allowed_destinations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Destinations",
+            "type": "array"
+          },
+          "allowed_networks": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Networks",
+            "type": "array"
+          },
+          "editable_destinations": {
+            "title": "Editable Destinations",
+            "type": "boolean"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "etag": {
+            "title": "Etag",
+            "type": "string"
+          },
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "enabled",
+          "allowed_destinations",
+          "allowed_networks",
+          "editable_destinations",
+          "etag"
+        ],
+        "title": "ComposerAdminPolicyResponse",
+        "type": "object"
+      },
+      "ComposerAdminPolicyUpdateRequest": {
+        "properties": {
+          "allowed_destinations": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Allowed Destinations",
+            "type": "array"
+          },
+          "allowed_networks": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Allowed Networks",
+            "type": "array"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "allowed_destinations",
+          "allowed_networks"
+        ],
+        "title": "ComposerAdminPolicyUpdateRequest",
+        "type": "object"
+      },
       "ComposerArtifactResponse": {
         "properties": {
           "kind": {
@@ -469,6 +544,42 @@
           "maximum_output_tokens"
         ],
         "title": "ComposerCapabilitiesResponse",
+        "type": "object"
+      },
+      "ComposerDestinationResolveRequest": {
+        "properties": {
+          "endpoint": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Endpoint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "endpoint"
+        ],
+        "title": "ComposerDestinationResolveRequest",
+        "type": "object"
+      },
+      "ComposerDestinationResolveResponse": {
+        "properties": {
+          "addresses": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Addresses",
+            "type": "array"
+          },
+          "destination": {
+            "title": "Destination",
+            "type": "string"
+          }
+        },
+        "required": [
+          "destination",
+          "addresses"
+        ],
+        "title": "ComposerDestinationResolveResponse",
         "type": "object"
       },
       "ComposerDraftListResponse": {
@@ -3167,6 +3278,394 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/admin/composer-policy": {
+      "get": {
+        "operationId": "get_policy_api_v1_admin_composer_policy_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComposerAdminPolicyResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The operation is forbidden",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get Policy",
+        "tags": [
+          "administration"
+        ]
+      },
+      "put": {
+        "operationId": "put_policy_api_v1_admin_composer_policy_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComposerAdminPolicyUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComposerAdminPolicyResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The operation is forbidden",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A request precondition failed",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Put Policy",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/api/v1/admin/composer-policy/resolve": {
+      "post": {
+        "operationId": "resolve_destination_api_v1_admin_composer_policy_resolve_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComposerDestinationResolveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComposerDestinationResolveResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The operation is forbidden",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Resolve Destination",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
     "/api/v1/admin/session-policy": {
       "get": {
         "operationId": "get_session_policy_api_v1_admin_session_policy_get",

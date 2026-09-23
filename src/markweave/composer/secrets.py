@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import stat
 from dataclasses import dataclass, field
@@ -62,6 +63,15 @@ class SecretCipher:
         if len(key) != _KEY_BYTES:
             raise ValueError("Composer secret key must be exactly 32 bytes")
         self._aead = AESGCM(key)
+        self._fingerprint = hashlib.sha256(
+            b"markweave-composer-key-v1\0" + key
+        ).hexdigest()
+
+    @property
+    def fingerprint(self) -> str:
+        """Return a nonsecret key identity for restore validation."""
+
+        return self._fingerprint
 
     @classmethod
     def from_key_file(cls, path: str | Path) -> SecretCipher:

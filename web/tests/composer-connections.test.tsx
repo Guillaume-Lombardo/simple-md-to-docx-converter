@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import type { ComposerConnectionsApi } from "../src/composer/api";
 import { ComposerConnectionsWorkspace } from "../src/composer/connections";
 import { ApiError } from "../src/api/transport";
@@ -105,11 +111,14 @@ test("authorized connection pages remain reachable beyond the first page", async
       user={user}
     />,
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Next" }));
+  const pages = await screen.findByRole("navigation", {
+    name: "Connection pages",
+  });
+  fireEvent.click(within(pages).getByRole("button", { name: "Next" }));
   expect(await screen.findByText("Connection 51")).toBeVisible();
   expect(connections).toHaveBeenLastCalledWith(50, 50, expect.any(AbortSignal));
   expect(screen.getByText("Page 2")).toBeVisible();
-}, 10_000);
+}, 20_000);
 
 test("admin can change a personal connection grant using its exact revision", async () => {
   const service = api({

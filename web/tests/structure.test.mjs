@@ -100,6 +100,7 @@ test("shell links target only delivered application routes", async () => {
     "/presentations",
     "/revert",
     "/templates",
+    "/admin",
     "/users",
   ]);
   for (const destination of destinations)

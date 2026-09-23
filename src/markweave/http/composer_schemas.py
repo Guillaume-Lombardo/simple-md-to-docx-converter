@@ -36,6 +36,30 @@ class ComposerCapabilitiesResponse(BaseModel):
     maximum_output_tokens: int | None
 
 
+class ComposerAdminPolicyResponse(BaseModel):
+    mode: str
+    enabled: bool
+    allowed_destinations: tuple[str, ...]
+    allowed_networks: tuple[str, ...]
+    editable_destinations: bool
+    etag: str
+
+
+class ComposerAdminPolicyUpdateRequest(BaseModel):
+    enabled: bool
+    allowed_destinations: tuple[str, ...] = Field(max_length=100)
+    allowed_networks: tuple[str, ...] = Field(max_length=100)
+
+
+class ComposerDestinationResolveRequest(BaseModel):
+    endpoint: str = Field(min_length=1, max_length=2048)
+
+
+class ComposerDestinationResolveResponse(BaseModel):
+    destination: str
+    addresses: tuple[str, ...]
+
+
 class ConnectionResponse(BaseModel):
     id: UUID
     name: str

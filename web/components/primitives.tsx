@@ -26,6 +26,7 @@ export function AppShell({
     | "Convert"
     | "Password"
     | "Revert"
+    | "Admin"
     | "Templates"
     | "Users";
   onLogout?: () => void;
@@ -74,11 +75,11 @@ export function AppShell({
               className="text-accent underline-offset-4 hover:underline"
               href="/composer/connections"
             >
-              Composer setup
+              My connections
             </Link>
           ) : user ? (
             <span aria-disabled="true" className="text-muted">
-              Composer setup
+              My connections
             </span>
           ) : null}
           {user && !user.password_change_required ? (
@@ -127,6 +128,15 @@ export function AppShell({
             <span aria-disabled="true" className="text-muted">
               templates
             </span>
+          )}
+          {user?.role === "admin" && !user.password_change_required && (
+            <Link
+              aria-current={current === "Admin" ? "page" : undefined}
+              className="text-accent underline-offset-4 hover:underline"
+              href="/admin"
+            >
+              Admin
+            </Link>
           )}
           {user?.role === "admin" && !user.password_change_required && (
             <Link

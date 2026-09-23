@@ -69,6 +69,14 @@ test("administrator shell shows identity, unified users navigation, and pending 
     "href",
     "/users",
   );
+  expect(screen.getByRole("link", { name: "Admin" })).toHaveAttribute(
+    "href",
+    "/admin",
+  );
+  expect(screen.getByRole("link", { name: "My connections" })).toHaveAttribute(
+    "href",
+    "/composer/connections",
+  );
   expect(screen.queryByRole("link", { name: "Session policy" })).toBeNull();
   expect(screen.getByText("Admin (Administrator)")).toBeVisible();
   expect(screen.queryByText(/minutes of inactivity/)).toBeNull();
