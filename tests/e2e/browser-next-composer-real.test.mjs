@@ -1189,7 +1189,9 @@ test("Composer uses real final-image routing, TLS egress and durable owner revis
         const frame = adminPage.frameLocator(
           `iframe[title^="${output.toUpperCase()} revision"]`,
         );
-        await frame.getByText("Human-reviewed addition.").waitFor();
+        await (output === "pptx" ? frame.locator("#document") : frame)
+          .getByText("Human-reviewed addition.", { exact: true })
+          .waitFor();
         assert.equal(
           await frame.locator("body").evaluate(() => window.origin),
           "null",

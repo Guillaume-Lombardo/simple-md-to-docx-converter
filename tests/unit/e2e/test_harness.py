@@ -347,7 +347,7 @@ def test_every_final_image_container_monitor_inherits_owned_directory() -> None:
         if line.lstrip().startswith("podman run")
     ]
 
-    assert len(podman_runs) == 18
+    assert len(podman_runs) == 19
     assert all(
         any(
             '"$temporary_directory" "$temporary_directory_identity"' in line
@@ -437,7 +437,7 @@ def test_browser_driver_has_its_own_bounded_cgroup_and_current_backend_network()
     assert '"$test_file" == /e2e/browser-next-composer-resilience.test.mjs' in browser
     assert browser.count("/run/composer-e2e-client.key:ro,z") == 1
     assert 'run_browser_test "$expiry_application_name"' in runner
-    assert runner.count('run_browser_test "$application_name"') == 29
+    assert runner.count('run_browser_test "$application_name"') == 30
     assert runner.count('run_browser_test "$expiry_application_name"') == 2
     assert runner.count("node --test") == 1
     assert "node --test /e2e/browser-" not in runner
@@ -457,9 +457,7 @@ def test_opt_in_browser_runner_smoke_is_terminal_and_retains_exact_evidence() ->
     )
     initial_ready = runner.index('wait_for_url "$base_url/health/ready"')
     smoke = runner.index('if [[ "$browser_runner_smoke_only" == 1 ]]', initial_ready)
-    service = runner.index(
-        'bash "$repository/scripts/container/wait-for-fake-clamav.sh"', smoke
-    )
+    service = runner.index('if [[ "$composer_scenario_only" == 1 ]]', smoke)
     phase = runner[smoke:service]
     assert (
         phase.index("start_frontend")
@@ -487,6 +485,162 @@ def test_opt_in_browser_runner_smoke_is_terminal_and_retains_exact_evidence() ->
     assert '"content-security-policy"' in fixture
     assert "await page.screenshot({ path: screenshot, fullPage: true })" in fixture
     assert "assert.ok((await stat(screenshot)).size > 0)" in fixture
+
+
+@pytest.mark.unit
+def test_composer_scenario_replays_real_browser_with_canonical_runtime() -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    assert (
+        'composer_scenario_only="${MARKWEAVE_E2E_COMPOSER_SCENARIO_ONLY:-0}"' in runner
+    )
+    assert '"$composer_scenario_only" != 0 && "$composer_scenario_only" != 1' in runner
+    assert (
+        '"$browser_runner_smoke_only" == 1 && "$composer_scenario_only" == 1' in runner
+    )
+    initial_ready = runner.index('wait_for_url "$base_url/health/ready"')
+    scenario = runner.index('if [[ "$composer_scenario_only" == 1 ]]', initial_ready)
+    service = runner.index(
+        'bash "$repository/scripts/container/wait-for-fake-clamav.sh"',
+        runner.index("\nfi\n", scenario),
+    )
+    phase = runner[scenario:service]
+    assert phase.index('podman rm --force "$application_name"') < phase.index(
+        "start_frontend"
+    )
+    assert phase.index(
+        '"${hardened_runtime[@]}" "${application_volumes[@]}" "${application_settings[@]}"'
+    ) < phase.index("--env MARKWEAVE_PUBLIC_ORIGIN=http://localhost:3100")
+    assert phase.index('wait_for_url "http://127.0.0.1:$(podman port') < phase.index(
+        'start_production_router "$application_name"'
+    )
+    assert phase.index('start_production_router "$application_name"') < phase.index(
+        'run_browser_test "$application_name" /e2e/browser-next-composer-real.test.mjs'
+    )
+    for environment in (
+        "--env MARKWEAVE_E2E_BASE_URL=http://localhost:3100",
+        '--env MARKWEAVE_E2E_PROFILE="$profile"',
+        '--env "MARKWEAVE_E2E_COMPOSER_PROVIDER_ADDRESS=$composer_provider_address"',
+        '--env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json"',
+    ):
+        assert environment in phase
+    assert (
+        'test -s "$temporary_directory/browser-artifacts/browser-next-composer-real-cgroup-001.txt"'
+        in phase
+    )
+    assert 'test -s "$browser_session_directory/composer-$profile.json"' in phase
+    assert (
+        'cp -a -- "$temporary_directory/browser-artifacts/." "$artifact_directory/"'
+        in phase
+    )
+    assert (
+        'cp -a -- "$browser_session_directory/composer-$profile.json" "$artifact_directory/"'
+        in phase
+    )
+    assert 'podman logs "$resource" >"$artifact_directory/$resource.log"' in phase
+    assert "composer_scenario_succeeded=true\n  succeeded=true" in phase
+    assert phase.rstrip().endswith("exit 0\nfi")
+    cleanup = runner.split("cleanup() {", 1)[1].split("\ntrap cleanup EXIT", 1)[0]
+    assert '"$composer_scenario_succeeded" != true' in cleanup
+    assert (
+        runner.count(
+            'run_browser_test "$application_name" /e2e/browser-next-composer-real.test.mjs'
+        )
+        == 2
+    )
+    canonical = runner.rindex(
+        'run_browser_test "$application_name" /e2e/browser-next-composer-real.test.mjs'
+    )
+    assert scenario < service < canonical
+
+
+@pytest.mark.parametrize(
+    ("scenario_mode", "smoke_mode", "message"),
+    [
+        ("yes", "0", "MARKWEAVE_E2E_COMPOSER_SCENARIO_ONLY must be 0 or 1."),
+        (
+            "1",
+            "1",
+            "Browser runner smoke and Composer scenario modes are mutually exclusive.",
+        ),
+    ],
+)
+def test_composer_scenario_rejects_invalid_modes_before_runtime_setup(
+    scenario_mode: str, smoke_mode: str, message: str
+) -> None:
+    result = subprocess.run(
+        [str(RUNNER), "standalone"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ
+        | {
+            "MARKWEAVE_E2E_COMPOSER_SCENARIO_ONLY": scenario_mode,
+            "MARKWEAVE_E2E_BROWSER_RUNNER_SMOKE_ONLY": smoke_mode,
+        },
+    )
+    assert result.returncode == 2
+    assert message in result.stderr
+
+
+@pytest.mark.unit
+def test_composer_browser_mounts_only_checksum_verified_small_corpus(
+    tmp_path: Path,
+) -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    stage = runner.split("for corpus_file in docx/text.docx pdf/text.pdf; do", 1)[
+        1
+    ].split("\ndone", 1)[0]
+    stage = "for corpus_file in docx/text.docx pdf/text.pdf; do" + stage + "\ndone"
+    repository = tmp_path / "repository"
+    corpus = repository / "spikes" / "anydoc" / "corpus"
+    for filename in ("docx/text.docx", "pdf/text.pdf"):
+        source = corpus / filename
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_bytes(filename.encode())
+    temporary_directory = tmp_path / "harness"
+    temporary_directory.mkdir()
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            "set -euo pipefail\n"
+            'repository="$1"\n'
+            'temporary_directory="$2"\n'
+            'composer_corpus_directory="$temporary_directory/composer-corpus"\n'
+            + stage,
+            "composer-corpus-stage",
+            str(repository),
+            str(temporary_directory),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    staged = temporary_directory / "composer-corpus"
+    assert {
+        path.relative_to(staged).as_posix()
+        for path in staged.rglob("*")
+        if path.is_file()
+    } == {
+        "docx/text.docx",
+        "pdf/text.pdf",
+    }
+    for filename in ("docx/text.docx", "pdf/text.pdf"):
+        assert (staged / filename).read_bytes() == (corpus / filename).read_bytes()
+    browser = runner.split("run_browser_test() {", 1)[1].split(
+        "\nstart_production_router() {", 1
+    )[0]
+    real = browser.split(
+        'if [[ "$test_file" == /e2e/browser-next-composer-real.test.mjs ]]; then', 1
+    )[1].split("\n  elif", 1)[0]
+    assert '--volume "$composer_corpus_directory:/spikes/anydoc/corpus:ro,z"' in real
+    assert browser.count("/spikes/anydoc/corpus:ro,z") == 1
+    assert "$repository/spikes/anydoc/corpus:/spikes/anydoc/corpus" not in browser
+    shared = runner.split("application_volumes=(", 1)[1].split(
+        "\napplication_mode=serve", 1
+    )[0]
+    assert "/spikes/anydoc/corpus" not in shared
 
 
 @pytest.mark.unit
@@ -651,7 +805,7 @@ def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
     assert "AbortSignal.timeout(1000)" in runner
     assert "--env PUBLIC_HOSTS=localhost:3100" in runner
     assert "--env ROUTER_UPSTREAM_TIMEOUT_MS=30000" in runner
-    assert runner.count('start_production_router "$application_name"') == 11
+    assert runner.count('start_production_router "$application_name"') == 12
     assert runner.count('restart_backend_and_router "$application_name"') == 1
     assert runner.count('kill_backend_and_reconnect_router "$application_name"') == 1
     assert runner.count('start_production_router "$expiry_application_name"') == 1

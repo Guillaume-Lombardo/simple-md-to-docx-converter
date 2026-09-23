@@ -15,8 +15,17 @@ readonly local_reverse_attempt_image="${MARKWEAVE_E2E_LOCAL_REVERSE_ATTEMPT_IMAG
 readonly local_image="${MARKWEAVE_E2E_LOCAL_IMAGE:-}"
 readonly local_frontend_image="${MARKWEAVE_E2E_LOCAL_FRONTEND_IMAGE:-}"
 readonly browser_runner_smoke_only="${MARKWEAVE_E2E_BROWSER_RUNNER_SMOKE_ONLY:-0}"
+readonly composer_scenario_only="${MARKWEAVE_E2E_COMPOSER_SCENARIO_ONLY:-0}"
 if [[ "$browser_runner_smoke_only" != 0 && "$browser_runner_smoke_only" != 1 ]]; then
   echo "MARKWEAVE_E2E_BROWSER_RUNNER_SMOKE_ONLY must be 0 or 1." >&2
+  exit 2
+fi
+if [[ "$composer_scenario_only" != 0 && "$composer_scenario_only" != 1 ]]; then
+  echo "MARKWEAVE_E2E_COMPOSER_SCENARIO_ONLY must be 0 or 1." >&2
+  exit 2
+fi
+if [[ "$browser_runner_smoke_only" == 1 && "$composer_scenario_only" == 1 ]]; then
+  echo "Browser runner smoke and Composer scenario modes are mutually exclusive." >&2
   exit 2
 fi
 if [[ -n "$published_image" ]] &&
@@ -124,6 +133,7 @@ node_runtime_directory="$temporary_directory/node_modules"
 browser_session_directory="$temporary_directory/browser-session"
 provisioning_file="$temporary_directory/users.csv"
 composer_provider_directory="$temporary_directory/composer-provider"
+composer_corpus_directory="$temporary_directory/composer-corpus"
 composer_key_file="$temporary_directory/composer-key"
 provisioned_username="e2e-provisioned-$profile"
 provisioned_initial_password="Provisioned-$profile-initial"
@@ -136,6 +146,7 @@ reverse_diagnostics_pid=""
 created=()
 succeeded=false
 browser_smoke_succeeded=false
+composer_scenario_succeeded=false
 
 # shellcheck source=scripts/e2e/runtime-settings.sh
 source "$repository/scripts/e2e/runtime-settings.sh"
@@ -306,7 +317,8 @@ cleanup() {
       broker_cleanup_proven=false
     fi
   fi
-  if [[ "$succeeded" == true && "$browser_smoke_succeeded" != true ]]; then
+  if [[ "$succeeded" == true && "$browser_smoke_succeeded" != true && \
+    "$composer_scenario_succeeded" != true ]]; then
     if ! remove_artifacts; then
       exit_code=1
     fi
@@ -489,6 +501,7 @@ run_browser_test() {
       --volume "$composer_provider_directory/server.crt:/run/composer-e2e-ca.crt:ro,z"
       --volume "$composer_provider_directory/client.crt:/run/composer-e2e-client.crt:ro,z"
       --volume "$composer_provider_directory/client.key:/run/composer-e2e-client.key:ro,z"
+      --volume "$composer_corpus_directory:/spikes/anydoc/corpus:ro,z"
     )
   elif [[ "$test_file" == /e2e/browser-next-composer-resilience.test.mjs ]]; then
     browser_credentials=(
@@ -979,6 +992,12 @@ podman unshare chown "$runtime_uid:0" \
   "$composer_provider_directory/server.key" \
   "$composer_provider_directory/client.key" "$composer_key_file"
 cp -a "$repository/tests/e2e" "$browser_runtime_directory"
+for corpus_file in docx/text.docx pdf/text.pdf; do
+  install -D -m 0444 -- "$repository/spikes/anydoc/corpus/$corpus_file" \
+    "$composer_corpus_directory/$corpus_file"
+  test "$(sha256sum "$repository/spikes/anydoc/corpus/$corpus_file" | cut -d ' ' -f 1)" = \
+    "$(sha256sum "$composer_corpus_directory/$corpus_file" | cut -d ' ' -f 1)"
+done
 COREPACK_ENABLE_NETWORK=0 pnpm install --frozen-lockfile --ignore-scripts --filter md-converter-web-tests
 cp -a "$repository/node_modules" "$node_runtime_directory"
 chmod -R a+rX "$browser_runtime_directory" "$node_runtime_directory"
@@ -1297,6 +1316,58 @@ if [[ "$browser_runner_smoke_only" == 1 ]]; then
   browser_smoke_succeeded=true
   succeeded=true
   echo "Final-image $profile browser runner smoke passed; evidence: $artifact_directory."
+  exit 0
+fi
+if [[ "$composer_scenario_only" == 1 ]]; then
+  # Match the canonical browser phase's public origin without replaying its
+  # preceding service workflows or discarding the initialized data volume.
+  bash "$repository/scripts/container/wait-for-fake-clamav.sh" \
+    "$clamav_name" "$profile-mapped" "$application_name" e2e-clamav
+  podman rm --force "$application_name" >/dev/null
+  created=("$router_name" "$frontend_name" "${created[@]}")
+  start_frontend
+  e2e_run_in_harness_directory \
+    "$temporary_directory" "$temporary_directory_identity" \
+    podman run --detach --name "$application_name" --network "$network_name" \
+    --network-alias application --publish 127.0.0.1::8080 \
+    "${scanner_host_mapping[@]}" \
+    "${hardened_runtime[@]}" "${application_volumes[@]}" "${application_settings[@]}" \
+    --env MARKWEAVE_PUBLIC_ORIGIN=http://localhost:3100 \
+    "$image" "$application_mode" >/dev/null
+  wait_for_url "http://127.0.0.1:$(podman port "$application_name" 8080/tcp | sed 's/.*://')/health/ready" \
+    "$application_name" '"status":"ready"'
+  start_production_router "$application_name"
+  run_browser_test "$application_name" /e2e/browser-next-composer-real.test.mjs \
+    --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
+    --env MARKWEAVE_E2E_PROFILE="$profile" \
+    --env "MARKWEAVE_E2E_COMPOSER_PROVIDER_ADDRESS=$composer_provider_address" \
+    --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json"
+  if podman logs "$application_name" 2>&1 | grep -Fq 'composer-e2e-write-only-secret'; then
+    echo "Composer credential appeared in application logs." >&2
+    exit 1
+  fi
+  if podman logs "$composer_provider_name" 2>&1 | grep -Fq 'composer-e2e-write-only-secret'; then
+    echo "Composer credential appeared in provider logs." >&2
+    exit 1
+  fi
+  podman unshare chown -R 0:0 -- "$temporary_directory/browser-artifacts"
+  test -s "$temporary_directory/browser-artifacts/browser-next-composer-real-cgroup-001.txt"
+  test -s "$browser_session_directory/composer-$profile.json"
+  podman unshare chown -R 0:0 -- "$browser_session_directory"
+  mkdir -p -- "$artifact_directory"
+  cp -a -- "$temporary_directory/browser-artifacts/." "$artifact_directory/"
+  cp -a -- "$browser_session_directory/composer-$profile.json" "$artifact_directory/"
+  for resource in "$application_name" "$frontend_name" "$router_name" "$composer_provider_name"; do
+    podman logs "$resource" >"$artifact_directory/$resource.log" 2>&1
+    podman inspect "$resource" \
+      --format 'name={{.Name}} state={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' \
+      >"$artifact_directory/$resource.state"
+  done
+  printf 'profile=%s\nresult=composer-scenario-passed\n' "$profile" \
+    >"$artifact_directory/summary.txt"
+  composer_scenario_succeeded=true
+  succeeded=true
+  echo "Final-image $profile Composer scenario passed; evidence: $artifact_directory."
   exit 0
 fi
 bash "$repository/scripts/container/wait-for-fake-clamav.sh" \
