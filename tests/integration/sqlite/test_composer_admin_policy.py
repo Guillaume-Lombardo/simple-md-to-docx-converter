@@ -13,7 +13,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from markweave.composer.admin_policy import ComposerAdminPolicy
-from markweave.composer.connections import ConnectionConflictError
+from markweave.composer.connections import (
+    ConnectionConfigurationError,
+    ConnectionConflictError,
+)
 from markweave.composer.egress import (
     AllowedDestination,
     ConnectionPolicy,
@@ -73,6 +76,10 @@ def test_delegated_approval_is_disabled_until_exact_addresses_are_confirmed(
         actor = uuid4()
         assert policy.read().enabled is False
         assert policy.snapshot().policy.destinations == frozenset()
+        with pytest.raises(ConnectionConfigurationError, match="disabled"):
+            policy.require_enabled()
+        with pytest.raises(EgressPolicyError, match="invalid"):
+            policy.resolve("not-a-url")
         destination, addresses = policy.resolve("https://models.example.test/v1")
         assert destination == "models.example.test:443"
         assert addresses == ("192.0.2.10/32",)
@@ -93,6 +100,9 @@ def test_delegated_approval_is_disabled_until_exact_addresses_are_confirmed(
         )
         assert approved.version == 1
         assert policy.snapshot().enabled
+        assert policy.require_enabled().destinations == frozenset(
+            {AllowedDestination("models.example.test", 443)}
+        )
         with pytest.raises(ConnectionConflictError):
             policy.write(
                 enabled=False,
