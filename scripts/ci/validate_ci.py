@@ -369,7 +369,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
             ): "${{ always() && matrix.domain == 'container' }}",
             ("mutation", "Retain mutation evidence"): "${{ always() }}",
         },
-        canonical_digest="1ed133ffec42c08e9d4c3fe68158177554f3451eb8feb1d0849fcb3789d84614",
+        canonical_digest="21b39cb3f1ecabce1292baa855837473257e19e8cdc1a8f58dd8243c8326b9bc",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -973,6 +973,7 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
 
     required_commands = {
         ("python-tests", "Run a complementary light test shard"): (
+            "uv run python -m scripts.ci.engine_userns_gate -- "
             'uv run pytest -m "unit or light_coverage" '
             "-p no:scripts.ci.pytest_branch_coverage "
             "-p scripts.ci.light_sharding --light-shard-count=2 "

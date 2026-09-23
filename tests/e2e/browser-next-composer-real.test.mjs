@@ -103,10 +103,13 @@ async function createUser(adminPage, name) {
 }
 
 async function configureAdminPolicy(page, profile, providerAddress) {
-  await page.getByRole("link", { name: "Administration" }).click();
+  await page.getByRole("link", { name: "Admin", exact: true }).click();
   await page.getByRole("heading", { name: "Administration" }).waitFor();
   assert.equal(
-    await page.getByRole("link", { name: "Templates" }).getAttribute("href"),
+    await page
+      .getByRole("main")
+      .getByRole("link", { name: "Templates", exact: true })
+      .getAttribute("href"),
     "/templates",
   );
   await page.getByRole("link", { name: "LLM settings" }).click();
@@ -151,7 +154,11 @@ async function configureAdminPolicy(page, profile, providerAddress) {
       .getByRole("button", { name: "Preview destination and DNS addresses" })
       .click();
     await page.getByText(`Destination: e2e-llm:${port}`).waitFor();
-    await page.getByText(`${providerAddress}/32`).waitFor();
+    await page
+      .getByRole("heading", { name: "Review exact destination" })
+      .locator("..")
+      .getByText(`${providerAddress}/32`, { exact: true })
+      .waitFor();
     await page
       .getByRole("button", { name: "Approve destination and addresses" })
       .click();

@@ -212,6 +212,7 @@ jobs:
         env:
           SHARD_INDEX: ${{ matrix.shard }}
         run: >-
+          uv run python -m scripts.ci.engine_userns_gate --
           uv run pytest -m "unit or light_coverage"
           -p no:scripts.ci.pytest_branch_coverage
           -p scripts.ci.light_sharding --light-shard-count=2
@@ -608,8 +609,15 @@ jobs:
         run: pnpm install --frozen-lockfile --ignore-scripts --filter md-converter-web-tests
       - name: Run selected domain suite without a shell
         env:
+          CI_DOMAIN: ${{ matrix.domain }}
           MARKWEAVE_TOOLCHAIN_CACHE_DIRECTORY: ${{ runner.temp }}/markweave-toolchain
-        run: uv run python -m scripts.ci.run_domain "${{ matrix.domain }}"
+        run: |
+          if [[ "$CI_DOMAIN" == "document-engines" ]]; then
+            uv run python -m scripts.ci.engine_userns_gate -- \
+              uv run python -m scripts.ci.run_domain "$CI_DOMAIN"
+          else
+            uv run python -m scripts.ci.run_domain "$CI_DOMAIN"
+          fi
       - name: Retain failed E2E evidence
         if: ${{ failure() && startsWith(matrix.domain, 'e2e-') }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
