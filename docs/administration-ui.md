@@ -1,5 +1,33 @@
 # Template and account administration interface
 
+The **Administration** navigation entry opens `/admin` for administrators. Its setup hub links to
+**LLM settings**, **Templates**, and **Users**. Templates at `/templates` remain visible to every
+authenticated user, including non-administrators. Existing `/composer/connections` remains the
+personal-connection route for users with that permission.
+
+## LLM settings
+
+Open **Administration → LLM settings** (`/admin/llm`) to configure Composer in a compatible
+deployment. The currently pinned published 0.7.3 simple quickstart does not include this setup;
+a matched Composer-capable image pair requires the explicit
+`MARKWEAVE_SIMPLE_COMPOSER_SETUP=true` opt-in until its published release pair is adopted. In that
+standalone evaluation setup, the initial policy is disabled with no approved destination. Enter an HTTPS
+endpoint, preview the resolved addresses, then explicitly approve its exact host, port and
+individual addresses. The policy update uses `ETag`/`If-Match`; a stale page must reload before
+another edit. DNS re-resolution is checked again on every model call, so a changed address needs
+new approval. The service never calls an endpoint during the DNS preview.
+
+After approval, add an instance connection, submit a write-only API key and/or mTLS identity and
+internal CA, choose a permitted model, run a bounded test, and enable the connection. Grant access
+to each intended user explicitly, including the administrator if they will use it; the right to
+manage a connection does not automatically grant model use. The forms display only credential
+presence after submission. Revocation, rotation, provider outages and disabled policy state do not
+remove existing owner drafts or exports. Production deployments display the immutable operator
+destination ceiling and permit the administrator to disable or re-enable model access within it.
+
+Current **Templates** are Pandoc DOCX/PPTX style references. Structured typed filling templates
+are a separate planned capability and do not appear in this setup flow.
+
 The authenticated Next.js interface is available at `/templates`. Unauthenticated requests are
 sent to `/login` by the frontend after the FastAPI session authority rejects the session. Dynamic
 HTML carries the reviewed nonce CSP, and user-controlled names and identity text are rendered as

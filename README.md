@@ -38,6 +38,14 @@ The first startup can take several minutes while ClamAV loads its signatures.
 
 For editable PowerPoint, open **2pptx** and follow the [PowerPoint guide](docs/powerpoint.md).
 The ordinary quickstart supports both forward workflows; **2md** requires the external broker.
+The currently pinned published 0.7.3 images keep Composer model setup disabled. An explicitly
+supplied, matched Composer-capable backend/frontend pair can opt in with
+`MARKWEAVE_SIMPLE_COMPOSER_SETUP=true`; the helper then includes
+`compose.simple-composer.yaml`. Its administrator can
+then open **Administration → LLM settings** to approve an HTTPS destination, enter a write-only
+credential, select and test a model, and grant access. The candidate quickstart keeps its Composer
+key in a separate persistent private volume. See the
+[administration guide](docs/administration-ui.md#llm-settings).
 
 ```bash
 scripts/quickstart-simple.sh ps

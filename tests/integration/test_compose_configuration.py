@@ -19,6 +19,55 @@ CANDIDATE_BACKEND = "localhost/markweave-backend:t64"
 CANDIDATE_FRONTEND = "localhost/markweave-frontend:t64"
 
 
+def test_composer_candidate_overlay_does_not_change_published_quickstart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base = [
+        "docker",
+        "compose",
+        "--project-name",
+        "markweave-compose-contract",
+        "--file",
+        str(ROOT / "compose.yaml"),
+        "--file",
+        str(ROOT / "compose.simple.yaml"),
+    ]
+    environment = os.environ | {
+        "MARKWEAVE_INITIAL_ADMIN_PASSWORD": "compose-contract-password",
+        "MARKWEAVE_WORK_DEVICE": "/dev/null",
+    }
+
+    def render(files: list[str]) -> dict[str, Any]:
+        result = subprocess.run(
+            [*base, *files, "config", "--format", "json"],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+        return json.loads(result.stdout)
+
+    published = render([])["services"]["markweave"]
+    assert published["image"].startswith(
+        "ghcr.io/guillaume-lombardo/md-converter:0.7.3@sha256:"
+    )
+    assert "MARKWEAVE_COMPOSER_ENABLED" not in published["environment"]
+    assert not _load_rendered_settings(
+        monkeypatch, published["environment"]
+    ).composer_enabled
+
+    candidate = render(["--file", str(ROOT / "compose.simple-composer.yaml")])[
+        "services"
+    ]["markweave"]
+    settings = _load_rendered_settings(monkeypatch, candidate["environment"])
+    assert settings.composer_enabled and settings.composer_admin_policy_delegated
+    assert "composer-egress" in candidate["networks"]
+    assert any(
+        mount.get("source") == "markweave-composer-key" and mount.get("read_only")
+        for mount in candidate["volumes"]
+    )
+
+
 def _load_rendered_settings(
     monkeypatch: pytest.MonkeyPatch, environment: dict[str, str]
 ) -> Settings:

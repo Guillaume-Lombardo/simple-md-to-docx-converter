@@ -102,6 +102,86 @@ async function createUser(adminPage, name) {
   return { ...user, password };
 }
 
+async function configureAdminPolicy(page, profile, providerAddress) {
+  await page.getByRole("link", { name: "Administration" }).click();
+  await page.getByRole("heading", { name: "Administration" }).waitFor();
+  assert.equal(
+    await page.getByRole("link", { name: "Templates" }).getAttribute("href"),
+    "/templates",
+  );
+  await page.getByRole("link", { name: "LLM settings" }).click();
+  await page.getByRole("heading", { name: "LLM settings" }).waitFor();
+  const initial = exactStatus(
+    await api(page, "GET", "/api/v1/admin/composer-policy"),
+    200,
+  );
+  if (profile === "distributed") {
+    assert.equal(initial.mode, "operator");
+    assert.equal(initial.enabled, true);
+    assert.equal(initial.editable_destinations, false);
+    assert.equal(
+      (
+        await api(page, "PUT", "/api/v1/admin/composer-policy", {
+          headers: { "If-Match": initial.etag },
+          json: {
+            enabled: true,
+            allowed_destinations: ["unapproved.example:443"],
+            allowed_networks: initial.allowed_networks,
+          },
+        })
+      ).status,
+      422,
+    );
+    return;
+  }
+
+  assert.equal(initial.mode, "delegated");
+  assert.equal(initial.enabled, false);
+  assert.deepEqual(initial.allowed_destinations, []);
+  assert.deepEqual(initial.allowed_networks, []);
+  assert.equal(
+    await page.getByRole("heading", { name: "Add a connection" }).count(),
+    0,
+  );
+  for (const port of [8443, 8444]) {
+    await page
+      .getByLabel("OpenAI-compatible endpoint URL")
+      .fill(`https://e2e-llm:${port}/v1`);
+    await page
+      .getByRole("button", { name: "Preview destination and DNS addresses" })
+      .click();
+    await page.getByText(`Destination: e2e-llm:${port}`).waitFor();
+    await page.getByText(`${providerAddress}/32`).waitFor();
+    await page
+      .getByRole("button", { name: "Approve destination and addresses" })
+      .click();
+    await page.getByText("Composer egress is enabled.").waitFor();
+  }
+  const approved = exactStatus(
+    await api(page, "GET", "/api/v1/admin/composer-policy"),
+    200,
+  );
+  assert.equal(approved.enabled, true);
+  assert.deepEqual(approved.allowed_destinations, [
+    "e2e-llm:8443",
+    "e2e-llm:8444",
+  ]);
+  assert.deepEqual(approved.allowed_networks, [`${providerAddress}/32`]);
+  assert.equal(
+    (
+      await api(page, "PUT", "/api/v1/admin/composer-policy", {
+        headers: { "If-Match": initial.etag },
+        json: {
+          enabled: false,
+          allowed_destinations: approved.allowed_destinations,
+          allowed_networks: approved.allowed_networks,
+        },
+      })
+    ).status,
+    412,
+  );
+}
+
 async function createConnection(
   page,
   name,
@@ -109,9 +189,12 @@ async function createConnection(
   ca,
   { allowedUserIds = [], clientCertificate, clientKey } = {},
 ) {
-  await page.goto(`${baseURL}/composer/connections`, {
+  await page.goto(
+    `${baseURL}/${scope === "instance" ? "admin/llm" : "composer/connections"}`,
+    {
     waitUntil: "networkidle",
-  });
+    },
+  );
   const createForm = page.locator("form").filter({
     has: page.getByRole("heading", { name: "Add a connection" }),
   });
@@ -296,6 +379,11 @@ test("Composer uses real final-image routing, TLS egress and durable owner revis
     const adminIdentity = exactStatus(
       await api(adminPage, "GET", "/api/v1/session"),
       200,
+    );
+    await configureAdminPolicy(
+      adminPage,
+      profile,
+      process.env.MARKWEAVE_E2E_COMPOSER_PROVIDER_ADDRESS,
     );
     const alice = await createUser(adminPage, `composer-alice-${suffix}`);
     const bob = await createUser(adminPage, `composer-bob-${suffix}`);

@@ -38,6 +38,7 @@ _METRIC_METHODS = frozenset(
 _LOG_METHODS = _METRIC_METHODS | {"OTHER"}
 _LOG_EVENTS = frozenset(
     {
+        "composer_connection_unavailable",
         "http_request_completed",
         "job_expiration_completed",
         "job_processing_completed",

@@ -101,7 +101,7 @@ test("Composer retains exact owner artifacts through scanner outage and restore"
   const phase = process.env.MARKWEAVE_E2E_COMPOSER_PHASE;
   assert.ok(profile === "standalone" || profile === "distributed");
   assert.ok(
-    ["scanner-unavailable", "restart", "restored-backup"].includes(phase),
+    ["scanner-unavailable", "restart", "restored-backup", "key-unavailable", "key-restored"].includes(phase),
   );
   const statePath = process.env.MARKWEAVE_E2E_COMPOSER_STATE;
   assert.ok(statePath?.startsWith("/browser-session/composer-"));
@@ -150,7 +150,35 @@ test("Composer retains exact owner artifacts through scanner outage and restore"
       assert.equal(download.status, 200);
       assert.equal(download.text, source);
     }
-    if (phase === "scanner-unavailable") {
+    if (phase === "key-unavailable") {
+      const policy = await request(page, "GET", "/api/v1/admin/composer-policy");
+      assert.equal(policy.status, 503);
+      const connection = await request(
+        page,
+        "GET",
+        `/api/v1/composer/connections/${backupConnectionId}`,
+      );
+      assert.equal(connection.status, 503);
+      const modelStep = await request(
+        page,
+        "POST",
+        `${draftPath}/model-steps`,
+        undefined,
+        {
+          connection_id: backupConnectionId,
+          approved_endpoint: "https://e2e-llm:8443/v1",
+          approved_model: "composer-e2e-model",
+          content: "Do not send this request.",
+          max_output_tokens: 16,
+        },
+        {
+          "If-Match": draft.json.etag,
+          "Idempotency-Key": `key-unavailable-${profile}-${Date.now()}`,
+        },
+      );
+      assert.equal(modelStep.status, 503);
+      assert.equal((await request(page, "GET", draftPath)).status, 200);
+    } else if (phase === "scanner-unavailable") {
       const rejected = await request(
         page,
         "POST",
@@ -169,6 +197,17 @@ test("Composer retains exact owner artifacts through scanner outage and restore"
       assert.equal(connection.status, 200);
       assert.equal(connection.json.credential_present, false);
       assert.equal(connection.json.selected_model, "composer-e2e-model");
+      if (phase === "key-restored") {
+        const recovered = await request(
+          page,
+          "POST",
+          `/api/v1/composer/connections/${backupConnectionId}/test`,
+          undefined,
+          {},
+        );
+        assert.equal(recovered.status, 200);
+        assert.equal(recovered.json.status, "ready");
+      }
       if (phase === "restored-backup") {
         const backupPath = `/api/v1/composer/connections/${backupConnectionId}`;
         const backup = await request(page, "GET", backupPath);

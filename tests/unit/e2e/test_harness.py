@@ -432,7 +432,7 @@ def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
     assert "AbortSignal.timeout(1000)" in runner
     assert "--env PUBLIC_HOSTS=localhost:3100" in runner
     assert "--env ROUTER_UPSTREAM_TIMEOUT_MS=30000" in runner
-    assert runner.count('start_production_router "$application_name"') == 8
+    assert runner.count('start_production_router "$application_name"') == 10
     assert runner.count('restart_backend_and_router "$application_name"') == 1
     assert runner.count('kill_backend_and_reconnect_router "$application_name"') == 1
     assert runner.count('start_production_router "$expiry_application_name"') == 1
@@ -690,7 +690,7 @@ def test_router_is_removed_before_every_backend_network_parent() -> None:
 
     assert 'podman rm --force "$router_name" "$application_name"' not in runner
     assert 'podman rm --force "$router_name" "$expiry_application_name"' not in runner
-    assert runner.count('podman rm --force "$router_name" >/dev/null') == 10
+    assert runner.count('podman rm --force "$router_name" >/dev/null') == 12
     cleanup = runner[runner.index("cleanup() {") : runner.index("trap cleanup EXIT")]
     assert cleanup.index('podman rm --force "$router_name"') < cleanup.index(
         'for resource in "${created[@]}"'

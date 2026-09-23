@@ -51,6 +51,27 @@ export const vBodyReplaceTemplateApiV1TemplatesTemplateIdContentPut = v.object({
 });
 
 /**
+ * ComposerAdminPolicyResponse
+ */
+export const vComposerAdminPolicyResponse = v.object({
+    allowed_destinations: v.array(v.string()),
+    allowed_networks: v.array(v.string()),
+    editable_destinations: v.boolean(),
+    enabled: v.boolean(),
+    etag: v.string(),
+    mode: v.string()
+});
+
+/**
+ * ComposerAdminPolicyUpdateRequest
+ */
+export const vComposerAdminPolicyUpdateRequest = v.object({
+    allowed_destinations: v.pipe(v.array(v.string()), v.maxLength(100)),
+    allowed_networks: v.pipe(v.array(v.string()), v.maxLength(100)),
+    enabled: v.boolean()
+});
+
+/**
  * ComposerArtifactResponse
  */
 export const vComposerArtifactResponse = v.object({
@@ -83,6 +104,21 @@ export const vComposerCapabilitiesResponse = v.object({
     personal_connections_allowed: v.boolean(),
     status: vComposerAvailabilityState,
     status_message: v.nullable(v.string())
+});
+
+/**
+ * ComposerDestinationResolveRequest
+ */
+export const vComposerDestinationResolveRequest = v.object({
+    endpoint: v.pipe(v.string(), v.minLength(1), v.maxLength(2048))
+});
+
+/**
+ * ComposerDestinationResolveResponse
+ */
+export const vComposerDestinationResolveResponse = v.object({
+    addresses: v.array(v.string()),
+    destination: v.string()
 });
 
 /**
@@ -1005,6 +1041,34 @@ export const vCredentialWriteRequestWritable = v.object({
     internal_ca: v.nullish(v.string()),
     revoke: v.optional(v.boolean(), false)
 });
+
+/**
+ * Successful Response
+ */
+export const vGetPolicyApiV1AdminComposerPolicyGetResponse = vComposerAdminPolicyResponse;
+
+export const vPutPolicyApiV1AdminComposerPolicyPutBody = vComposerAdminPolicyUpdateRequest;
+
+export const vPutPolicyApiV1AdminComposerPolicyPutHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+/**
+ * Successful Response
+ */
+export const vPutPolicyApiV1AdminComposerPolicyPutResponse = vComposerAdminPolicyResponse;
+
+export const vResolveDestinationApiV1AdminComposerPolicyResolvePostBody = vComposerDestinationResolveRequest;
+
+export const vResolveDestinationApiV1AdminComposerPolicyResolvePostHeaders = v.object({
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+/**
+ * Successful Response
+ */
+export const vResolveDestinationApiV1AdminComposerPolicyResolvePostResponse = vComposerDestinationResolveResponse;
 
 /**
  * Successful Response

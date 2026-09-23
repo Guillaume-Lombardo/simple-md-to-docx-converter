@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from threading import Event
@@ -223,11 +224,28 @@ class ConnectionService:
         cipher: SecretCipher,
         egress: ConnectionGateway,
         policy: ConnectionPolicy,
+        policy_state: Callable[[], tuple[ConnectionPolicy, bool, int]] | None = None,
     ) -> None:
         self._repository = repository
         self._cipher = cipher
         self._egress = egress
         self._policy = policy
+        self._policy_state = policy_state
+
+    def _snapshot(self) -> tuple[ConnectionPolicy, bool, int]:
+        if self._policy_state is not None:
+            return self._policy_state()
+        return self._policy, True, 0
+
+    def policy_allows(self, record: ConnectionRecord) -> bool:
+        policy, enabled, _ = self._snapshot()
+        if not enabled:
+            return False
+        try:
+            validate_endpoint(record.endpoint, policy)
+        except EgressPolicyError:
+            return False
+        return True
 
     def list_visible(
         self,
@@ -305,6 +323,8 @@ class ConnectionService:
                 ):
                     continue
                 eligible_found = True
+                if not self.policy_allows(record):
+                    continue
                 if not record.enabled or record.selected_model is None:
                     continue
                 identity = _credential_user_id(actor, record)
@@ -446,7 +466,7 @@ class ConnectionService:
         *,
         cancel_event: Event | None = None,
     ) -> tuple[str, ...]:
-        record, credentials = self._prepare(
+        record, credentials, policy_version = self._prepare(
             actor, connection_id, allow_manager=True, cancel_event=cancel_event
         )
         try:
@@ -462,7 +482,13 @@ class ConnectionService:
                 expected_generation=record.generation,
             )
             raise
-        self._fence(actor, record, allow_manager=True, cancel_event=cancel_event)
+        self._fence(
+            actor,
+            record,
+            expected_policy_version=policy_version,
+            allow_manager=True,
+            cancel_event=cancel_event,
+        )
         _check_cancelled(cancel_event)
         self._repository.set_outage(
             record.id,
@@ -483,7 +509,7 @@ class ConnectionService:
         model: str | None = None,
         cancel_event: Event | None = None,
     ) -> None:
-        record, credentials = self._prepare(
+        record, credentials, policy_version = self._prepare(
             actor, connection_id, allow_manager=True, cancel_event=cancel_event
         )
         selected = model or record.selected_model
@@ -507,7 +533,13 @@ class ConnectionService:
                 expected_generation=record.generation,
             )
             raise
-        self._fence(actor, record, allow_manager=True, cancel_event=cancel_event)
+        self._fence(
+            actor,
+            record,
+            expected_policy_version=policy_version,
+            allow_manager=True,
+            cancel_event=cancel_event,
+        )
         _check_cancelled(cancel_event)
         self._repository.set_outage(
             record.id,
@@ -531,7 +563,7 @@ class ConnectionService:
         The caller owns durable operation state and final proposal publication.
         """
 
-        record, credentials = self._prepare(
+        record, credentials, policy_version = self._prepare(
             actor, connection_id, cancel_event=cancel_event
         )
         if record.selected_model is None:
@@ -554,7 +586,12 @@ class ConnectionService:
                 expected_generation=record.generation,
             )
             raise
-        self._fence(actor, record, cancel_event=cancel_event)
+        self._fence(
+            actor,
+            record,
+            expected_policy_version=policy_version,
+            cancel_event=cancel_event,
+        )
         _check_cancelled(cancel_event)
         self._repository.set_outage(
             record.id,
@@ -578,7 +615,7 @@ class ConnectionService:
         *,
         allow_manager: bool = False,
         cancel_event: Event | None = None,
-    ) -> tuple[ConnectionRecord, PlainCredentials]:
+    ) -> tuple[ConnectionRecord, PlainCredentials, int]:
         _check_cancelled(cancel_event)
         record = self._get(connection_id)
         if not _may_use(actor, record) and not (
@@ -589,7 +626,10 @@ class ConnectionService:
             raise ConnectionAuthorizationError("Connection access is denied")
         if not record.enabled:
             raise ConnectionConfigurationError("Connection is disabled")
-        self._validate_record(record)
+        policy, policy_enabled, policy_version = self._snapshot()
+        if not policy_enabled:
+            raise ConnectionConfigurationError("Composer model access is disabled")
+        self._validate_record(record, policy=policy)
         encrypted = self._repository.get_credentials(
             record.id, _credential_user_id(actor, record)
         )
@@ -605,22 +645,26 @@ class ConnectionService:
             ) from None
         self._validate_credentials(credentials)
         _check_cancelled(cancel_event)
-        return record, credentials
+        return record, credentials, policy_version
 
     def _fence(
         self,
         actor: ConnectionActor,
         original: ConnectionRecord,
         *,
+        expected_policy_version: int,
         allow_manager: bool = False,
         cancel_event: Event | None = None,
     ) -> None:
         _check_cancelled(cancel_event)
+        policy, policy_enabled, policy_version = self._snapshot()
         current = self._repository.get_connection(original.id)
         if (
             current is None
             or current.generation != original.generation
             or not current.enabled
+            or not policy_enabled
+            or policy_version != expected_policy_version
             or not self._current_capability(actor, current)
             or (
                 not _may_use(actor, current)
@@ -628,6 +672,12 @@ class ConnectionService:
             )
         ):
             raise ConnectionConflictError("Connection changed during model call")
+        try:
+            self._validate_record(current, policy=policy)
+        except EgressPolicyError:
+            raise ConnectionConflictError(
+                "Connection changed during model call"
+            ) from None
         _check_cancelled(cancel_event)
 
     def _current_capability(
@@ -639,14 +689,17 @@ class ConnectionService:
             )
         return True
 
-    def _validate_record(self, record: ConnectionRecord) -> None:
-        validate_endpoint(record.endpoint, self._policy)
-        if len(record.allowed_user_ids) > self._policy.maximum_allowed_users:
+    def _validate_record(
+        self, record: ConnectionRecord, *, policy: ConnectionPolicy | None = None
+    ) -> None:
+        effective = policy or self._snapshot()[0]
+        validate_endpoint(record.endpoint, effective)
+        if len(record.allowed_user_ids) > effective.maximum_allowed_users:
             raise ConnectionConfigurationError(
                 "Connection access list exceeds its configured limit"
             )
-        if len(record.permitted_models) > self._policy.maximum_models or any(
-            not _valid_model(model, self._policy.maximum_model_name_length)
+        if len(record.permitted_models) > effective.maximum_models or any(
+            not _valid_model(model, effective.maximum_model_name_length)
             for model in record.permitted_models
         ):
             raise ConnectionConfigurationError("Permitted model list is invalid")

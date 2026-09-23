@@ -17,14 +17,16 @@ from markweave.composer.connections import (
     ConnectionScope,
     IdentityMode,
 )
-from markweave.composer.secrets import EncryptedCredentials
+from markweave.composer.secrets import EncryptedCredentials, SecretCipher, SecretError
 from markweave.persistence.composer.common import DEFAULT_PAGE_LIMIT, validate_page
 from markweave.persistence.errors import PersistenceError
 from markweave.persistence.schema import (
+    ComposerAdminPolicyAuditRow,
     ComposerConnectionAuditRow,
     ComposerConnectionGrantRow,
     ComposerConnectionRow,
     ComposerCredentialRow,
+    ComposerKeyIdentityRow,
     ComposerPermissionAuditRow,
     ComposerPersonalPermissionRow,
     RetentionCleanupRunRow,
@@ -65,6 +67,56 @@ class SqlConnectionRepository:
             raise ValueError("Maximum allowed users must be positive")
         self._engine = engine
         self._maximum_allowed_users = maximum_allowed_users
+
+    def bind_key_identity(self, cipher: SecretCipher) -> None:
+        """Verify a restored key before allowing any credential read or write."""
+
+        try:
+            with Session(self._engine) as database, database.begin():
+                serialize_sqlite_write(database, self._engine)
+                identity = database.scalar(
+                    select(ComposerKeyIdentityRow)
+                    .where(ComposerKeyIdentityRow.id == 1)
+                    .with_for_update()
+                )
+                if identity is not None:
+                    if identity.fingerprint != cipher.fingerprint:
+                        raise SecretError("Composer encryption key does not match data")
+                    return
+                legacy = database.scalar(
+                    select(ComposerCredentialRow).where(
+                        or_(
+                            ComposerCredentialRow.api_key.is_not(None),
+                            ComposerCredentialRow.client_certificate.is_not(None),
+                            ComposerCredentialRow.client_private_key.is_not(None),
+                            ComposerCredentialRow.ca_bundle.is_not(None),
+                        )
+                    )
+                )
+                if legacy is not None:
+                    cipher.open_credentials(
+                        UUID(legacy.connection_id),
+                        EncryptedCredentials(
+                            legacy.api_key,
+                            legacy.client_certificate,
+                            legacy.client_private_key,
+                            legacy.ca_bundle,
+                        ),
+                    )
+                database.add(
+                    ComposerKeyIdentityRow(id=1, fingerprint=cipher.fingerprint)
+                )
+                database.flush()
+        except IntegrityError:
+            # A second process may bind the same restored key concurrently.
+            with Session(self._engine) as database:
+                identity = database.get(ComposerKeyIdentityRow, 1)
+                if identity is None or identity.fingerprint != cipher.fingerprint:
+                    raise SecretError(
+                        "Composer encryption key does not match data"
+                    ) from None
+        except SQLAlchemyError:
+            raise PersistenceError from None
 
     def _required_limit(self) -> int:
         if self._maximum_allowed_users is None:
@@ -597,8 +649,24 @@ class SqlConnectionRepository:
                     if remaining
                     else ()
                 )
+                remaining -= len(permission_ids)
+                policy_ids = (
+                    tuple(
+                        database.scalars(
+                            select(ComposerAdminPolicyAuditRow.id)
+                            .where(ComposerAdminPolicyAuditRow.created_at < cutoff_at)
+                            .order_by(
+                                ComposerAdminPolicyAuditRow.created_at,
+                                ComposerAdminPolicyAuditRow.id,
+                            )
+                            .limit(remaining)
+                        )
+                    )
+                    if remaining
+                    else ()
+                )
                 removed = 0
-                if connection_ids or permission_ids:
+                if connection_ids or permission_ids or policy_ids:
                     guard_id = str(uuid4())
                     database.execute(
                         text("INSERT INTO audit_cleanup_guards (id) VALUES (:id)"),
@@ -607,6 +675,7 @@ class SqlConnectionRepository:
                     for row_type, ids in (
                         (ComposerConnectionAuditRow, connection_ids),
                         (ComposerPermissionAuditRow, permission_ids),
+                        (ComposerAdminPolicyAuditRow, policy_ids),
                     ):
                         if ids:
                             removed += int(

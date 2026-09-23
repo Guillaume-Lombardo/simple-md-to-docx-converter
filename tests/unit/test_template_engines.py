@@ -164,7 +164,9 @@ def test_run_success_uses_shell_free_isolated_process(
     popen = mocker.patch.object(engines.subprocess, "Popen", return_value=process)
     config = TemplateEngineConfig("engine", "soffice", 1.0, 0.5, tmp_path)
     engines._run(("engine", "--fixed"), tmp_path, {"PATH": "/bin"}, config)
+    assert popen.call_args.args[0][4:] == ["engine", "--fixed"]
     assert popen.call_args.kwargs["start_new_session"] is True
+    assert popen.call_args.kwargs["close_fds"] is True
     assert popen.call_args.kwargs["stdin"] is subprocess.DEVNULL
 
 

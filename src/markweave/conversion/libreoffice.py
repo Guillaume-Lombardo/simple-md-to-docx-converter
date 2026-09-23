@@ -27,6 +27,10 @@ from pypdf import filters as pypdf_filters
 from pypdf.errors import LimitReachedError, PyPdfError
 from pypdf.generic import ArrayObject, DictionaryObject, IndirectObject
 
+from markweave.conversion.engine_launcher import (
+    ENGINE_UNAVAILABLE_EXIT_STATUS,
+    isolated_engine_command,
+)
 from markweave.conversion.errors import ConversionError, ConversionErrorCode
 
 _PDF_EXPORT_FILTER = "pdf:writer_pdf_Export"
@@ -767,7 +771,7 @@ class LibreOfficePdfConverter:
     def _start(self, arguments: list[str], workspace: Path) -> subprocess.Popen[bytes]:
         try:
             return subprocess.Popen(  # noqa: S603 - fixed shell-free arguments
-                arguments,
+                isolated_engine_command(arguments),
                 cwd=workspace,
                 env=_environment(workspace, self._host_environment),
                 stdin=subprocess.DEVNULL,
@@ -775,6 +779,7 @@ class LibreOfficePdfConverter:
                 stderr=subprocess.DEVNULL,
                 shell=False,
                 start_new_session=True,
+                close_fds=True,
             )
         except OSError:
             _error(
@@ -815,6 +820,11 @@ class LibreOfficePdfConverter:
             except subprocess.TimeoutExpired:
                 continue
             _terminate_group(process, self._config.termination_grace_seconds)
+            if return_code == ENGINE_UNAVAILABLE_EXIT_STATUS:
+                _error(
+                    ConversionErrorCode.LIBREOFFICE_UNAVAILABLE,
+                    "LibreOffice is unavailable.",
+                )
             if return_code != 0:
                 _error(
                     ConversionErrorCode.PDF_FAILURE,

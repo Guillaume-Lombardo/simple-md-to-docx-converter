@@ -153,6 +153,11 @@ accounts and to configure the effective system-wide, role-specific idle session 
 session-expiry decision is enforced by FastAPI. Application TypeScript and JavaScript receive their
 own tests and blocking coverage checks.
 
+The administrator navigation includes an **Administration** setup hub with **LLM settings**,
+**Templates**, and **Users**. LLM settings lead to the authorized Composer connection flow;
+Templates continue to use the existing style-reference catalog. Typed filling templates remain
+the separate T91 capability. Existing template and personal-connection URLs remain valid.
+
 #### 3.3.1 Next.js production and migration contract
 
 The reviewed routing boundary sends both exact `/api/v1` and `/api/v1/**`, plus `/health/live`,
@@ -520,6 +525,38 @@ citation text in logs. Retrieval permissions are checked before material is asse
 transmission and again before executing an asynchronously returned result. Prompt text and
 retrieved material have no
 authority to expand permissions, destinations, tool schemas, or document access.
+
+The production operator setting remains the outer enable switch and destination/address ceiling.
+An administrator may disable the instance policy, but cannot expand a production ceiling from the
+browser. Replacing the operator ceiling invalidates any stored approval outside its new bounds;
+the administrator must explicitly re-enable the displayed new ceiling. The loopback standalone
+evaluation quickstart may explicitly delegate destination
+approval to its authenticated administrator. This delegation starts with an empty, disabled,
+durable policy; the administrator previews DNS, approves exact HTTPS host/port and individual
+resolved addresses through a versioned `ETag` update, then configures, tests, selects and enables
+a connection. Every call checks the current approval and re-resolved address, and a policy change
+fences an in-flight result. The administrator explicitly grants connection use, including to their
+own account when desired; management rights alone do not imply model-use rights. The deployment
+retains the operator-configurable size and time ceilings and may revoke browser delegation by
+disabling Composer. Ordinary conversion and retained owner Composer data remain independent of
+provider outages and connection approval state. A missing or mismatched Composer key closes model
+and credential operations while ordinary conversion and authorized retained-draft reads remain
+available. Restoring the original key restores model access without resetting application data.
+
+On the qualified Linux/AMD64 container profile, every document-engine subprocess enters a private
+user and network namespace while preserving the application UID. A fixed syscall filter and closed
+inherited descriptors prevent it from acquiring an IP socket; the process must fail closed if its
+namespace or filter cannot be installed. No engine-accessible mount may expose a pathname Unix
+proxy or descriptor broker socket that could pass an IP socket into that namespace. This is the
+document-engine network boundary, not a general filesystem sandbox or an ARM qualification.
+
+The evaluation quickstart stores a persistent server-only envelope key in its own protected named
+volume outside the image, repository and application database. A nonsecret key identity in the
+database prevents a restored or upgraded instance from accepting a different key for new writes.
+An existing data volume is inspected read-only before initial key creation; existing encrypted
+credentials or key identity require recovery of the original key. Production and distributed
+profiles continue to receive the same external operator-managed key across API and worker
+processes, and backup/restore preserves that key separately through the operator's secret manager.
 
 The real qualification endpoint `https://litellm.g1lom.xyz` and a cost-conscious model selected
 from its actual catalog are an operational test preference for T93, not a hardcoded provider,

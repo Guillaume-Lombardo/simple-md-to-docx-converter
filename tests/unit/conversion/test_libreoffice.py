@@ -230,7 +230,7 @@ def test_success_uses_fixed_isolated_arguments_and_canonical_manifest(
     assert decoded["source_docx_sha256"] != decoded["output_pdf_sha256"]
     assert b"/tmp/" not in manifest.canonical_json()
     arguments = popen.call_args.args[0]
-    assert arguments[1:5] == [
+    assert arguments[5:9] == [
         "--headless",
         "--nologo",
         "--nodefault",
@@ -239,6 +239,7 @@ def test_success_uses_fixed_isolated_arguments_and_canonical_manifest(
     assert "pdf:writer_pdf_Export" in arguments
     assert popen.call_args.kwargs["shell"] is False
     assert popen.call_args.kwargs["start_new_session"] is True
+    assert popen.call_args.kwargs["close_fds"] is True
     assert not tuple(tmp_path.iterdir())
 
 

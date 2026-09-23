@@ -241,6 +241,7 @@ class Settings(BaseSettings):
     s3_access_key_id: SecretStr | None = None
     s3_secret_access_key: SecretStr | None = None
     composer_enabled: bool = False
+    composer_admin_policy_delegated: bool = False
     composer_allowed_destinations: tuple[str, ...] | None = None
     composer_allowed_networks: tuple[str, ...] | None = None
     composer_secret_key_path: Path | None = None
@@ -397,8 +398,13 @@ class Settings(BaseSettings):
         if any(value is None for value in required):
             raise ValueError("Composer connection policy must be complete")
         if (
-            not self.composer_allowed_destinations
-            or not self.composer_allowed_networks
+            (
+                not self.composer_admin_policy_delegated
+                and (
+                    not self.composer_allowed_destinations
+                    or not self.composer_allowed_networks
+                )
+            )
             or self.composer_secret_key_path is None
             or not self.composer_secret_key_path.is_absolute()
             or self.composer_http_request_max_bytes is None
@@ -406,6 +412,14 @@ class Settings(BaseSettings):
             or self.composer_http_request_max_bytes <= self.composer_upload_max_bytes
         ):
             raise ValueError("Composer connection policy is invalid")
+        if self.composer_admin_policy_delegated and (
+            self.storage_profile is not StorageProfile.STANDALONE
+            or self.composer_allowed_destinations
+            or self.composer_allowed_networks
+        ):
+            raise ValueError(
+                "Delegated Composer setup requires a standalone empty ceiling"
+            )
 
     @property
     def reversion_execution_configured(self) -> bool:

@@ -14,6 +14,10 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
+from markweave.conversion.engine_launcher import (
+    ENGINE_UNAVAILABLE_EXIT_STATUS,
+    isolated_engine_command,
+)
 from markweave.conversion.validation import PANDOC_READER
 from markweave.templates.errors import (
     TemplateValidationError,
@@ -117,13 +121,14 @@ def _run(
 ) -> None:
     try:
         process = subprocess.Popen(  # noqa: S603 - fixed, shell-free argv
-            list(arguments),
+            isolated_engine_command(list(arguments)),
             cwd=workspace,
             env=dict(environment),
             stdin=subprocess.DEVNULL,
             stdout=stdout,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
+            close_fds=True,
         )
     except FileNotFoundError, PermissionError:
         _engine_error(
@@ -142,6 +147,11 @@ def _run(
         _engine_error(
             TemplateValidationErrorCode.ENGINE_TIMEOUT,
             "Template validation engine timed out.",
+        )
+    if return_code == ENGINE_UNAVAILABLE_EXIT_STATUS:
+        _engine_error(
+            TemplateValidationErrorCode.ENGINE_UNAVAILABLE,
+            "Template validation engine is unavailable.",
         )
     if return_code != 0:
         _engine_error(

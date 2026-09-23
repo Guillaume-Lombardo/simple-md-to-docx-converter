@@ -213,14 +213,23 @@ class ConnectionEgress:
     """One backend-only egress gate with independent DNS checks per request."""
 
     def __init__(
-        self, policy: ConnectionPolicy, resolver: Resolver | None = None
+        self,
+        policy: ConnectionPolicy,
+        resolver: Resolver | None = None,
+        *,
+        policy_provider: Callable[[], ConnectionPolicy] | None = None,
     ) -> None:
-        self.policy = policy
+        self._base_policy = policy
+        self._policy_provider = policy_provider
         self._resolver = resolver or _system_resolver
         self._slots = threading.BoundedSemaphore(policy.maximum_concurrent_calls)
         self._resolver_slots = threading.BoundedSemaphore(
             policy.maximum_concurrent_calls
         )
+
+    @property
+    def policy(self) -> ConnectionPolicy:
+        return self._policy_provider() if self._policy_provider else self._base_policy
 
     def discover_models(
         self,
@@ -313,7 +322,8 @@ class ConnectionEgress:
         cancel_event: threading.Event | None,
     ) -> dict[str, Any]:
         _raise_if_cancelled(cancel_event)
-        endpoint = validate_endpoint(endpoint_url, self.policy)
+        policy = self.policy
+        endpoint = validate_endpoint(endpoint_url, policy)
         try:
             encoded = (
                 json.dumps(body, separators=(",", ":"), ensure_ascii=False).encode(
@@ -324,10 +334,10 @@ class ConnectionEgress:
             )
         except UnicodeEncodeError:
             raise EgressPolicyError("Model request is invalid") from None
-        if len(encoded) > self.policy.maximum_request_bytes:
+        if len(encoded) > policy.maximum_request_bytes:
             raise EgressPolicyError("Model request exceeds its configured limit")
-        _validate_credential_sizes(credentials, self.policy.maximum_credential_bytes)
-        deadline = time.monotonic() + self.policy.timeout_seconds
+        _validate_credential_sizes(credentials, policy.maximum_credential_bytes)
+        deadline = time.monotonic() + policy.timeout_seconds
         _raise_if_cancelled(cancel_event)
         if not self._slots.acquire(blocking=False):
             _raise_if_cancelled(cancel_event)
@@ -338,6 +348,7 @@ class ConnectionEgress:
                 endpoint,
                 timeout=deadline - time.monotonic(),
                 cancel_event=cancel_event,
+                policy=policy,
             )
             _raise_if_cancelled(cancel_event)
             context = _tls_context(credentials)
@@ -353,7 +364,7 @@ class ConnectionEgress:
                     method,
                     suffix,
                     encoded,
-                    self.policy,
+                    policy,
                     remaining,
                     cancel_event,
                 ),
@@ -384,8 +395,10 @@ class ConnectionEgress:
         *,
         timeout: float | None = None,
         cancel_event: threading.Event | None = None,
+        policy: ConnectionPolicy | None = None,
     ) -> IPAddress:
-        budget = self.policy.timeout_seconds if timeout is None else timeout
+        effective_policy = policy or self.policy
+        budget = effective_policy.timeout_seconds if timeout is None else timeout
         deadline = time.monotonic() + budget
         if budget <= 0:
             raise EgressUnavailableError("Model destination resolution timed out")
@@ -433,10 +446,10 @@ class ConnectionEgress:
             raise EgressUnavailableError(
                 "Model destination could not be resolved"
             ) from None
-        if not addresses or not self.policy.allowed_networks:
+        if not addresses or not effective_policy.allowed_networks:
             raise EgressPolicyError("Model destination address is not allowed")
         if any(
-            not any(address in network for network in self.policy.allowed_networks)
+            not any(address in network for network in effective_policy.allowed_networks)
             for address in addresses
         ):
             raise EgressPolicyError("Model destination address is not allowed")

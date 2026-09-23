@@ -20,8 +20,9 @@ from markweave.auth.security import (
     SystemClock,
 )
 from markweave.auth.service import AuthenticationService, SecurityRuntime, SessionPolicy
+from markweave.composer.admin_policy import ComposerAdminPolicy
 from markweave.composer.connections import ConnectionService
-from markweave.composer.runtime import build_connection_service
+from markweave.composer.runtime import build_connection_policy, build_connection_service
 from markweave.config import (
     ConfigurationError,
     MalwareScanningMode,
@@ -58,6 +59,7 @@ from markweave.persistence.composer import (
     SqlComposerRepository,
     SqlConnectionRepository,
 )
+from markweave.persistence.composer.admin_policy import SqlComposerAdminPolicyRepository
 from markweave.persistence.jobs import SqlJobRepository
 from markweave.persistence.migrations import upgrade_database
 from markweave.persistence.observability import SqlAuditReader, SqlOperationalObserver
@@ -123,6 +125,7 @@ class AppComponents:
     reversion_broker: ReversionBrokerClient | None = None
     composer_store: SqlComposerRepository | None = None
     composer_connection_repository: SqlConnectionRepository | None = None
+    composer_admin_policy: ComposerAdminPolicy | None = None
     composer_connections: ConnectionService | None = None
     composer_model_step_repository: SqlComposerModelStepRepository | None = None
     composer_steps: ComposerStepRunner | None = None
@@ -401,7 +404,7 @@ def _build_composer_step_runtime(
     return repository, runner, (runner,)
 
 
-def build_components(  # noqa: PLR0915 - explicit resource ownership composition
+def build_components(  # noqa: PLR0912, PLR0915 - explicit resource ownership composition
     settings: Settings,
 ) -> AppComponents:
     """Assemble the selected coherent persistent storage profile."""
@@ -552,9 +555,23 @@ def build_components(  # noqa: PLR0915 - explicit resource ownership composition
             engine,
             maximum_allowed_users=settings.composer_maximum_allowed_users,
         )
-        composer_connections = build_connection_service(
-            settings, composer_connection_repository
-        )
+        composer_admin_policy = None
+        if settings.composer_enabled:
+            composer_admin_policy = ComposerAdminPolicy(
+                SqlComposerAdminPolicyRepository(engine),
+                build_connection_policy(settings),
+                delegated=settings.composer_admin_policy_delegated,
+            )
+        try:
+            composer_connections = build_connection_service(
+                settings, composer_connection_repository, composer_admin_policy
+            )
+        except ConfigurationError:
+            # An unavailable or mismatched key closes model and credential paths,
+            # while conversion and authorized draft reads remain usable.
+            log_event("composer_connection_unavailable", level=logging.WARNING)
+            composer_admin_policy = None
+            composer_connections = None
         metrics = OperationalMetrics()
         composer_model_step_repository, composer_steps, step_resources = (
             _build_composer_step_runtime(
@@ -599,6 +616,7 @@ def build_components(  # noqa: PLR0915 - explicit resource ownership composition
             reversion_broker=reversion_broker,
             composer_store=composer_store,
             composer_connection_repository=composer_connection_repository,
+            composer_admin_policy=composer_admin_policy,
             composer_connections=composer_connections,
             composer_model_step_repository=composer_model_step_repository,
             composer_steps=composer_steps,

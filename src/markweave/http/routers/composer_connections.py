@@ -130,7 +130,9 @@ def _record_response(
     )
     if not authorized:
         state = ComposerAvailabilityState.UNAUTHORIZED
-    elif not record.enabled:
+    elif not record.enabled or (
+        service is not None and not service.policy_allows(record)
+    ):
         state = ComposerAvailabilityState.DISABLED
     elif not has_api_key and not has_certificate:
         state = ComposerAvailabilityState.UNCONFIGURED

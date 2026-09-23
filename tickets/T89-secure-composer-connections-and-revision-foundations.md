@@ -22,6 +22,16 @@ storage profiles.
 - Provide a simple authorized browser configuration flow for instance or personal connections:
   test, model selection, write-only credential and client-certificate entry, internal CA setup,
   rotation, and revocation. Test the complete flow through final-image E2E without exposing secrets.
+- Make initial setup discoverable from an Administration hub with LLM settings and existing Templates.
+  In the standalone evaluation quickstart, persist a private external envelope key, start with
+  model egress disabled, and let the administrator explicitly preview and approve exact destinations
+  and resolved addresses before the existing credential, model, test, enable and grant flow. Keep
+  production operator ceilings authoritative, fence concurrent policy edits with ETags, and verify
+  key identity on restart/restore before any new credential write. A missing or mismatched key must
+  leave conversion and authorized retained-draft reads usable while blocking model and credential
+  operations. Administrator policy audit follows guarded, bounded retention. On the qualified
+  Linux/AMD64 runtime, document engines retain a private network namespace even when backend model
+  egress is enabled; no engine-accessible Unix descriptor broker is mounted.
 - Advertise distinct configured, enabled, authorized, and outage states; ordinary conversion
   readiness is independent of LLM health, and retained owner drafts/exports remain accessible.
 - Persist owner-scoped drafts, messages, proposal states, frozen approved inputs/template/model
@@ -141,3 +151,6 @@ T88.
 ## Synchronization
 
 Keep status, scope, acceptance criteria, dependencies, and progress aligned with G1L-588.
+The administrator setup correction was authorized while Linear access was unavailable on
+2026-09-23; synchronize this updated acceptance criterion and progress with G1L-588 when access
+returns. T89 remains In Progress until its remaining qualification and deployment criteria pass.

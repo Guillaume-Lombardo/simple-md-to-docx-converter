@@ -13,6 +13,7 @@ import pytest
 from PIL import Image
 
 from markweave.conversion.archive import ApprovedResource
+from markweave.conversion.engine_launcher import isolated_engine_command
 from markweave.conversion.errors import ConversionError, ConversionErrorCode
 from markweave.conversion.images import ImageLimits, normalize_image
 from markweave.conversion.mermaid import (
@@ -433,31 +434,34 @@ def test_cli_uses_fixed_arguments_environment_and_private_workspace(
     def start(arguments, **options):
         workspace = options["cwd"]
         workspaces.append(workspace)
-        assert arguments == [
-            "mmdc",
-            "--quiet",
-            "--puppeteerConfigFile",
-            str(workspace / "puppeteer.json"),
-            "--configFile",
-            str(workspace / "mermaid.json"),
-            "--input",
-            str(workspace / "diagram.mmd"),
-            "--output",
-            str(workspace / "diagram.png"),
-            "--outputFormat",
-            "png",
-            "--backgroundColor",
-            "transparent",
-            "--width",
-            "800",
-            "--height",
-            "600",
-            "--scale",
-            "1",
-        ]
+        assert arguments == isolated_engine_command(
+            [
+                "mmdc",
+                "--quiet",
+                "--puppeteerConfigFile",
+                str(workspace / "puppeteer.json"),
+                "--configFile",
+                str(workspace / "mermaid.json"),
+                "--input",
+                str(workspace / "diagram.mmd"),
+                "--output",
+                str(workspace / "diagram.png"),
+                "--outputFormat",
+                "png",
+                "--backgroundColor",
+                "transparent",
+                "--width",
+                "800",
+                "--height",
+                "600",
+                "--scale",
+                "1",
+            ]
+        )
         assert "--no-sandbox" not in arguments
         assert options["shell"] is False
         assert options["start_new_session"] is True
+        assert options["close_fds"] is True
         assert options["stdin"] is subprocess.DEVNULL
         assert options["stdout"] is subprocess.DEVNULL
         assert options["stderr"] is subprocess.DEVNULL
@@ -469,6 +473,7 @@ def test_cli_uses_fixed_arguments_environment_and_private_workspace(
         assert json.loads((workspace / "puppeteer.json").read_text()) == {
             "executablePath": "/usr/bin/chrome",
             "headless": "shell",
+            "pipe": True,
         }
         assert json.loads((workspace / "mermaid.json").read_text()) == {
             "securityLevel": "strict"

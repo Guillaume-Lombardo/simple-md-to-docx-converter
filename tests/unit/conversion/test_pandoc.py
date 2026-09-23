@@ -11,6 +11,7 @@ import pytest
 from PIL import Image
 
 from markweave.conversion.archive import ApprovedResource
+from markweave.conversion.engine_launcher import isolated_engine_command
 from markweave.conversion.errors import ConversionError, ConversionErrorCode
 from markweave.conversion.images import ImageLimits, normalize_image
 from markweave.conversion.pandoc import PandocConfig, PandocDocxConverter
@@ -53,17 +54,20 @@ def test_adapter_uses_fixed_arguments_isolated_workspace_and_allowlisted_environ
         workspace = options["cwd"]
         assert isinstance(workspace, Path)
         (workspace / "output.docx").write_bytes(reference)
-        assert arguments == [
-            "pandoc",
-            f"--from={PANDOC_READER}",
-            "--to=docx",
-            f"--reference-doc={workspace / 'reference.docx'}",
-            f"--resource-path={workspace / 'package'}",
-            f"--output={workspace / 'output.docx'}",
-            str(workspace / "package/input.md"),
-        ]
+        assert arguments == isolated_engine_command(
+            [
+                "pandoc",
+                f"--from={PANDOC_READER}",
+                "--to=docx",
+                f"--reference-doc={workspace / 'reference.docx'}",
+                f"--resource-path={workspace / 'package'}",
+                f"--output={workspace / 'output.docx'}",
+                str(workspace / "package/input.md"),
+            ]
+        )
         assert options["shell"] is False
         assert options["start_new_session"] is True
+        assert options["close_fds"] is True
         assert options["stdin"] is subprocess.DEVNULL
         assert options["stdout"] is subprocess.DEVNULL
         assert options["stderr"] is subprocess.DEVNULL
@@ -155,8 +159,8 @@ def test_adapter_materializes_only_approved_package_resources(
             "![safe](../assets/image.svg)"
         )
         assert (workspace / "package/assets/image.svg").read_bytes() == png
-        assert arguments[4] == f"--resource-path={workspace / 'package/docs'}"
-        assert arguments[6] == str(workspace / "package/docs/readme.md")
+        assert arguments[8] == f"--resource-path={workspace / 'package/docs'}"
+        assert arguments[10] == str(workspace / "package/docs/readme.md")
         (workspace / "output.docx").write_bytes(reference)
         return process
 
