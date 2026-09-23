@@ -226,7 +226,9 @@ The marker also selects local SQLite, filesystem, loopback HTTP/TLS, and functio
 boundary tests. A separate, always-run coverage job uses the pinned PostgreSQL and
 RustFS services to run the `storage-distributed` test selection. This job runs for
 every pull request, even when affected-domain selection omits the heavier storage
-suite. The normal local test commands remain unchanged.
+suite. Both light shards have a 25-minute job bound, measured against the expanded
+cohort while preserving the same two-partition selection. The normal local test
+commands remain unchanged.
 
 To reproduce a partition, use index `0` or `1` and a distinct coverage data file:
 

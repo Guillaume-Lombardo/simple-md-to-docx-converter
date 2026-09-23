@@ -113,20 +113,26 @@ async function createConnection(
   await page.goto(`${baseURL}/composer/connections`, {
     waitUntil: "networkidle",
   });
-  await page.getByRole("heading", { name: "Add a connection" }).waitFor();
-  await page.getByLabel("Scope").selectOption(scope);
-  await page.getByLabel("Connection name").fill(name);
-  await page
+  const createForm = page.locator("form").filter({
+    has: page.getByRole("heading", { name: "Add a connection" }),
+  });
+  await createForm.waitFor();
+  assert.equal(await createForm.count(), 1);
+  await createForm.getByLabel("Scope").selectOption(scope);
+  await createForm.getByLabel("Connection name").fill(name);
+  await createForm
     .getByLabel("Endpoint URL")
     .fill(clientCertificate ? mutualTlsEndpoint : endpoint);
-  await page.getByLabel("Permitted models (comma separated)").fill(model);
+  await createForm.getByLabel("Permitted models (comma separated)").fill(model);
   if (clientCertificate) {
-    await page.getByLabel("Client certificate (PEM)").fill(clientCertificate);
-    await page.getByLabel("Client private key (PEM)").fill(clientKey);
+    await createForm
+      .getByLabel("Client certificate (PEM)")
+      .fill(clientCertificate);
+    await createForm.getByLabel("Client private key (PEM)").fill(clientKey);
   } else {
-    await page.getByLabel("API key").fill(secret);
+    await createForm.getByLabel("API key").fill(secret);
   }
-  await page.getByLabel("Internal CA bundle (PEM)").fill(ca);
+  await createForm.getByLabel("Internal CA bundle (PEM)").fill(ca);
   await Promise.all([
     page.waitForResponse(
       (response) =>
@@ -134,20 +140,20 @@ async function createConnection(
         response.request().method() === "POST" &&
         response.status() === 201,
     ),
-    page.getByRole("button", { name: "Create connection" }).click(),
+    createForm.getByRole("button", { name: "Create connection" }).click(),
   ]);
   await page.getByText(/Connection created disabled\./).waitFor();
-  assert.equal(await page.getByLabel("API key").inputValue(), "");
+  assert.equal(await createForm.getByLabel("API key").inputValue(), "");
   assert.equal(
-    await page.getByLabel("Client certificate (PEM)").inputValue(),
+    await createForm.getByLabel("Client certificate (PEM)").inputValue(),
     "",
   );
   assert.equal(
-    await page.getByLabel("Client private key (PEM)").inputValue(),
+    await createForm.getByLabel("Client private key (PEM)").inputValue(),
     "",
   );
   assert.equal(
-    await page.getByLabel("Internal CA bundle (PEM)").inputValue(),
+    await createForm.getByLabel("Internal CA bundle (PEM)").inputValue(),
     "",
   );
   assert.equal((await page.content()).includes(secret), false);

@@ -273,22 +273,42 @@ test(
       await alicePage
         .getByRole("heading", { name: "Add a connection" })
         .waitFor();
-      assert.deepEqual(await alicePage.getByLabel("Scope").allTextContents(), [
+      const aliceForm = alicePage.locator("form").filter({
+        has: alicePage.getByRole("heading", { name: "Add a connection" }),
+      });
+      const adminForm = adminPage.locator("form").filter({
+        has: adminPage.getByRole("heading", { name: "Add a connection" }),
+      });
+      assert.equal(await aliceForm.count(), 1);
+      assert.equal(await adminForm.count(), 1);
+      assert.deepEqual(await aliceForm.getByLabel("Scope").allTextContents(), [
         "Personal",
       ]);
 
-      await adminPage.getByLabel("Scope").selectOption("instance");
-      await adminPage.getByLabel("Connection name").fill("Admin endpoint");
-      await adminPage.getByLabel("Endpoint URL").fill("https://llm.example/v1");
-      await adminPage
+      await adminForm.getByLabel("Scope").selectOption("instance");
+      await adminForm.getByLabel("Connection name").fill("Admin endpoint");
+      await adminForm.getByLabel("Endpoint URL").fill("https://llm.example/v1");
+      await adminForm
         .getByLabel("Permitted models (comma separated)")
         .fill("approved-model");
-      await adminPage.getByLabel("API key").fill(state.secret);
-      await adminPage
+      await adminForm.getByLabel("API key").fill(state.secret);
+      await adminForm
         .getByRole("button", { name: "Create connection" })
         .click();
       await adminPage.getByText(/Connection created disabled\./).waitFor();
-      assert.equal(await adminPage.getByLabel("API key").inputValue(), "");
+      assert.equal(await adminForm.getByLabel("API key").inputValue(), "");
+      assert.equal(
+        await adminForm.getByLabel("Client certificate (PEM)").inputValue(),
+        "",
+      );
+      assert.equal(
+        await adminForm.getByLabel("Client private key (PEM)").inputValue(),
+        "",
+      );
+      assert.equal(
+        await adminForm.getByLabel("Internal CA bundle (PEM)").inputValue(),
+        "",
+      );
       assert.equal(
         (await adminPage.locator("body").innerText()).includes(state.secret),
         false,
@@ -327,13 +347,26 @@ test(
       await card.getByRole("button", { name: "Test connection" }).click();
       await adminPage.getByText("Connection test completed.").waitFor();
 
-      await alicePage.getByLabel("Connection name").fill("Alice endpoint");
-      await alicePage.getByLabel("Endpoint URL").fill("https://llm.example/v1");
-      await alicePage.getByLabel("API key").fill(state.secret);
-      await alicePage
+      await aliceForm.getByLabel("Connection name").fill("Alice endpoint");
+      await aliceForm.getByLabel("Endpoint URL").fill("https://llm.example/v1");
+      await aliceForm.getByLabel("API key").fill(state.secret);
+      await aliceForm
         .getByRole("button", { name: "Create connection" })
         .click();
       await alicePage.getByText(/Connection created disabled\./).waitFor();
+      assert.equal(await aliceForm.getByLabel("API key").inputValue(), "");
+      assert.equal(
+        await aliceForm.getByLabel("Client certificate (PEM)").inputValue(),
+        "",
+      );
+      assert.equal(
+        await aliceForm.getByLabel("Client private key (PEM)").inputValue(),
+        "",
+      );
+      assert.equal(
+        await aliceForm.getByLabel("Internal CA bundle (PEM)").inputValue(),
+        "",
+      );
       await alicePage
         .getByRole("heading", { name: "Alice endpoint" })
         .waitFor();

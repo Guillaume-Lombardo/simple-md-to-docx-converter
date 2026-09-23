@@ -77,6 +77,19 @@ T88.
   a simulation combining authentic CI shard artifacts with the additional real-boundary tests
   passes the official branch and changed-line checkers at 90.33% and 90.64%. The corrective commit
   and hosted rerun are pending; neither final-image profile nor docker-box deployment is accepted.
+- 2026-09-23: The second hosted
+  [CI run 35816849061](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/35816849061)
+  at exact PR head `e89bf4c894730d062883edbd24011885ca43a1e1` ended `cancelled`.
+  The new unconditional PostgreSQL/S3 coverage job and Python shard 1 passed; shard 0 reached
+  99% before its 20-minute job limit cancelled it, so the aggregate coverage job was skipped.
+  Both final-image E2E profiles stopped after successful connection metadata creation because
+  a page-global secret-field locator matched both the Add form and the new card's rotation form.
+  Every other substantive job passed, while the final gate failed. The next corrective candidate
+  bounds light shards to 25 minutes without changing their selection or coverage
+  contract, and scopes all four secret-field clearing assertions to the Add form in both real and
+  mocked browser tests. The mocked browser test and 13 Composer component tests pass locally;
+  the real final-image journeys remain unverified after that assertion. The next corrective commit,
+  hosted rerun, and docker-box deployment/rollback are pending; T89 remains In Progress.
 
 ## Synchronization
 

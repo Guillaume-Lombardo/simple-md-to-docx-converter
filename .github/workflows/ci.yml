@@ -181,7 +181,7 @@ jobs:
   python-tests:
     name: CI / Python tests (${{ matrix.shard }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       max-parallel: 2

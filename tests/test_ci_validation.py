@@ -2057,6 +2057,7 @@ def test_python_source_discovery_excludes_installed_package_managers(
     ("original", "replacement"),
     [
         ("shard: [0, 1]", "shard: [0]"),
+        ("timeout-minutes: 25", "timeout-minutes: 20"),
         (
             "needs: [python-tests, python-distributed-coverage]",
             "needs: python-tests",
