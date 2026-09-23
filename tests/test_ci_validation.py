@@ -525,6 +525,17 @@ def test_validator_rejects_removed_changed_line_coverage() -> None:
 
 
 @pytest.mark.unit
+def test_validator_rejects_ungated_functional_engine_domain() -> None:
+    """Native functional tests must retain the document-engine namespace preflight."""
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    weakened = workflow.replace(' || "$CI_DOMAIN" == "functional"', "", 1)
+    assert any(
+        "scripts.ci.engine_userns_gate" in error
+        for error in validate_workflow_text(weakened)
+    )
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("command", "replacement"),
     [

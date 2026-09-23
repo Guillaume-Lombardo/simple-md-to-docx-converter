@@ -612,7 +612,7 @@ jobs:
           CI_DOMAIN: ${{ matrix.domain }}
           MARKWEAVE_TOOLCHAIN_CACHE_DIRECTORY: ${{ runner.temp }}/markweave-toolchain
         run: |
-          if [[ "$CI_DOMAIN" == "document-engines" ]]; then
+          if [[ "$CI_DOMAIN" == "document-engines" || "$CI_DOMAIN" == "functional" ]]; then
             uv run python -m scripts.ci.engine_userns_gate -- \
               uv run python -m scripts.ci.run_domain "$CI_DOMAIN"
           else

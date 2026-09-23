@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { ApiError, type ApiTransport } from "../src/api/transport";
 import {
@@ -11,6 +12,8 @@ import {
   type ComposerPolicy,
 } from "../src/admin/composer-policy-api";
 import { AdminComposerPolicyWorkspace } from "../src/admin/composer-policy";
+import type { ComposerConnectionsApi } from "../src/composer/api";
+import { ComposerConnectionsWorkspace } from "../src/composer/connections";
 
 const policy: ComposerPolicy = {
   mode: "delegated",
@@ -44,6 +47,98 @@ function deferred<T>() {
   });
   return { promise, resolve, reject };
 }
+
+test("LLM setup keeps policy, connection, and credential labels bound to unique inputs", async () => {
+  const admin = {
+    active: true,
+    effective_idle_minutes: 30,
+    id: "00000000-0000-4000-8000-000000000001",
+    password_change_required: false,
+    role: "admin" as const,
+    username: "Admin",
+  };
+  const connection = {
+    allowed_user_ids: [],
+    authorized: true,
+    client_certificate_present: false,
+    credential_present: true,
+    enabled: false,
+    endpoint: "https://llm.example/v1",
+    etag: '"connection-1"',
+    id: "00000000-0000-4000-8000-000000000100",
+    identity_mode: "shared" as const,
+    internal_ca_present: false,
+    name: "Shared model",
+    permitted_models: ["small-model"],
+    scope: "instance" as const,
+    selected_model: "small-model",
+    status: "ready" as const,
+    status_message: null,
+  };
+  const connectionsApi = {
+    capabilities: vi.fn().mockResolvedValue({
+      instance_connections_manageable: true,
+      maximum_upload_bytes: 1_000_000,
+      personal_connections_allowed: true,
+      status: "ready",
+      status_message: null,
+    }),
+    connections: vi
+      .fn()
+      .mockResolvedValue([
+        connection,
+        { ...connection, id: "00000000-0000-4000-8000-000000000101" },
+      ]),
+    personalPermissions: vi.fn().mockResolvedValue([]),
+  };
+  render(
+    <>
+      <AdminComposerPolicyWorkspace
+        api={
+          policyApi({
+            get: vi.fn().mockResolvedValue({ ...policy, enabled: true }),
+          }) as unknown as AdminComposerPolicyApi
+        }
+        expire={vi.fn()}
+      />
+      <ComposerConnectionsWorkspace
+        api={connectionsApi as unknown as ComposerConnectionsApi}
+        expire={vi.fn()}
+        user={admin}
+      />
+    </>,
+  );
+
+  const addForm = (
+    await screen.findByRole("heading", {
+      name: "Add a connection",
+    })
+  ).closest("form");
+  expect(addForm).not.toBeNull();
+  const policyEndpoint = screen.getByRole("textbox", {
+    name: "OpenAI-compatible endpoint URL",
+  });
+  const connectionEndpoint = within(addForm!).getByRole("textbox", {
+    name: /^Endpoint URL$/,
+  });
+  expect(policyEndpoint).not.toBe(connectionEndpoint);
+
+  const labeledInputs = Array.from(
+    document.querySelectorAll<HTMLInputElement>("input[id]"),
+  );
+  expect(new Set(labeledInputs.map((input) => input.id)).size).toBe(
+    labeledInputs.length,
+  );
+  const apiKeys = Array.from(
+    document.querySelectorAll<HTMLInputElement>('input[name="api_key"]'),
+  );
+  expect(apiKeys).toHaveLength(3);
+  for (const input of [policyEndpoint, connectionEndpoint, ...apiKeys]) {
+    const label = input.closest("label");
+    expect(label?.htmlFor).toBe(input.id);
+    expect(document.getElementById(input.id)).toBe(input);
+  }
+});
 
 test("policy API uses exact admin paths, CSRF, and policy revision", async () => {
   const transport = { json: vi.fn().mockResolvedValue(policy) };

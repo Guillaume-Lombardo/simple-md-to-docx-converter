@@ -216,6 +216,7 @@ export function AdminComposerPolicyWorkspace({
                 onSubmit={(event) => void resolve(event)}
               >
                 <TextField
+                  id="admin-policy-endpoint"
                   label="OpenAI-compatible endpoint URL"
                   name="endpoint"
                   type="url"

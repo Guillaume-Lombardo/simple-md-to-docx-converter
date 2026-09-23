@@ -4,6 +4,7 @@ import {
   type FormEvent,
   useCallback,
   useEffect,
+  useId,
   useRef,
   useState,
 } from "react";
@@ -428,11 +429,13 @@ function ConnectionForm({
 }
 
 function SecretFields() {
+  const apiKeyId = useId();
   return (
     <fieldset className="grid gap-3 rounded-control border border-muted p-3">
       <legend>Write-only credentials</legend>
       <TextField
         autoComplete="off"
+        id={apiKeyId}
         label="API key"
         name="api_key"
         type="password"
