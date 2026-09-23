@@ -11,7 +11,10 @@ import pytest
 from PIL import Image
 
 from markweave.conversion.archive import ApprovedResource
-from markweave.conversion.engine_launcher import isolated_engine_command
+from markweave.conversion.engine_launcher import (
+    ENGINE_UNAVAILABLE_EXIT_STATUS,
+    isolated_engine_command,
+)
 from markweave.conversion.errors import ConversionError, ConversionErrorCode
 from markweave.conversion.images import ImageLimits, normalize_image
 from markweave.conversion.pandoc import PandocConfig, PandocDocxConverter
@@ -218,6 +221,23 @@ def test_unavailable_pandoc_has_stable_content_free_error(
         converter(tmp_path).convert(ApprovedMarkdown("secret document"), minimal_docx())
     assert captured.value.code is ConversionErrorCode.PANDOC_UNAVAILABLE
     assert str(captured.value) == "Pandoc is unavailable."
+
+
+@pytest.mark.unit
+def test_launcher_missing_pandoc_exit_is_unavailable_and_content_free(
+    tmp_path: Path, mocker
+) -> None:
+    process = mocker.Mock()
+    process.wait.return_value = ENGINE_UNAVAILABLE_EXIT_STATUS
+    mocker.patch("markweave.conversion.pandoc.subprocess.Popen", return_value=process)
+
+    with pytest.raises(ConversionError) as captured:
+        converter(tmp_path).convert(ApprovedMarkdown("secret document"), minimal_docx())
+
+    assert captured.value.code is ConversionErrorCode.PANDOC_UNAVAILABLE
+    assert str(captured.value) == "Pandoc is unavailable."
+    assert "secret document" not in str(captured.value)
+    process.wait.assert_called_once()
 
 
 @pytest.mark.unit

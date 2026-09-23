@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from pytest_mock import MockerFixture
 
+from markweave.conversion.engine_launcher import ENGINE_UNAVAILABLE_EXIT_STATUS
 from markweave.templates import engines
 from markweave.templates.engines import (
     TemplateActivationContext,
@@ -154,6 +155,26 @@ def test_run_normalizes_start_exit_and_timeout_failures(
         popen.assert_called_once()
     if case.wait_error is not None:
         terminate.assert_called_once_with(process, 0.5)
+
+
+def test_launcher_missing_template_engine_exit_is_unavailable_and_content_free(
+    mocker: MockerFixture, tmp_path: Path
+) -> None:
+    process = mocker.Mock()
+    process.wait.return_value = ENGINE_UNAVAILABLE_EXIT_STATUS
+    mocker.patch.object(engines.subprocess, "Popen", return_value=process)
+    config = TemplateEngineConfig("engine", "soffice", 1.0, 0.5, tmp_path)
+
+    with pytest.raises(TemplateValidationError) as captured:
+        engines._run(
+            ("engine", "--secret-document"), tmp_path, {"PATH": "/private/path"}, config
+        )
+
+    assert captured.value.code is TemplateValidationErrorCode.ENGINE_UNAVAILABLE
+    assert str(captured.value) == "Template validation engine is unavailable."
+    assert "secret-document" not in str(captured.value)
+    assert "/private/path" not in str(captured.value)
+    process.wait.assert_called_once_with(timeout=1.0)
 
 
 def test_run_success_uses_shell_free_isolated_process(
