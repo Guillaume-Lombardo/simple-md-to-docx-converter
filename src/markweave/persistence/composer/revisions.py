@@ -22,20 +22,24 @@ from markweave.composer.revisions import (
     ComposerNotFoundError,
     ComposerRevision,
     RevisionSnapshot,
+    direct_publish_lineage,
 )
 from markweave.persistence.composer.audit import SYSTEM_ACTOR_ID, record_content_audit
 from markweave.persistence.composer.common import (
     DEFAULT_PAGE_LIMIT,
+    PageOrder,
     owned_draft,
     source_from_json,
     source_json,
     utc,
     validate_page,
+    validate_page_order,
 )
 from markweave.persistence.errors import PersistenceError
 from markweave.persistence.schema import (
     ComposerArtifactRow,
     ComposerDraftRow,
+    ComposerProposalRow,
     ComposerRevisionRow,
 )
 from markweave.persistence.sql import serialize_sqlite_write
@@ -137,11 +141,17 @@ class _SqlComposerRevisions:
         snapshot: RevisionSnapshot,
         artifacts: tuple[ArtifactContent, ...],
         restored_from_revision_id: UUID | None = None,
+        approved_proposal_id: UUID | None = None,
     ) -> ComposerRevision:
         if not idempotency_key or len(idempotency_key) > _MAX_IDEMPOTENCY_KEY_LENGTH:
             raise ValueError("Revision idempotency key is invalid")
         kinds = {artifact.kind for artifact in artifacts}
-        if kinds not in ({"download", "preview"}, {"source", "download", "preview"}):
+        if kinds not in (
+            {"download", "preview"},
+            {"source", "download", "preview"},
+            {"download", "preview", "traceability"},
+            {"source", "download", "preview", "traceability"},
+        ):
             raise ValueError("Matching download and preview artifacts are required")
         if len(kinds) != len(artifacts):
             raise ValueError("Duplicate Composer artifact kind")
@@ -151,6 +161,7 @@ class _SqlComposerRevisions:
         now = self._clock()
         token = self._new_id()
         pairs: list[tuple[ArtifactContent, UUID]] = []
+        approved_draft_content: str | None = None
         try:
             with Session(self._engine) as database, database.begin():
                 serialize_sqlite_write(database, self._engine)
@@ -174,6 +185,120 @@ class _SqlComposerRevisions:
                         return _revision(database, existing)
                     raise ComposerConflictError("Revision publication is in progress")
                 self._require_etag(draft, if_match)
+                if snapshot.operation == "publish_draft":
+                    parent = (
+                        database.get(ComposerRevisionRow, draft.current_revision_id)
+                        if draft.current_revision_id is not None
+                        else None
+                    )
+                    try:
+                        approved_content = draft.content.encode("utf-8")
+                    except UnicodeEncodeError:
+                        raise ComposerConflictError(
+                            "Current Markdown content is invalid"
+                        ) from None
+                    asset_source = next(
+                        (
+                            artifact
+                            for artifact in artifacts
+                            if artifact.kind == "source"
+                        ),
+                        None,
+                    )
+                    if (
+                        draft.source_reference != source_json(snapshot.source)
+                        or snapshot.source.media_type
+                        not in {"text/markdown", "application/zip"}
+                        or not draft.content.strip()
+                        or snapshot.approved_values
+                        != json.dumps({"content": draft.content}, ensure_ascii=False)
+                        or snapshot.provenance != "human:direct"
+                        or snapshot.template_reference is not None
+                        or snapshot.model_identity is not None
+                        or snapshot.render_options
+                        != direct_publish_lineage(
+                            UUID(parent.id) if parent else None,
+                            parent.model_identity if parent else None,
+                            parent.render_options if parent else None,
+                        )
+                        or approved_proposal_id is not None
+                        or restored_from_revision_id is not None
+                        or any(
+                            artifact.media_type != "text/markdown"
+                            or artifact.content != approved_content
+                            for artifact in artifacts
+                            if artifact.kind in {"download", "preview"}
+                        )
+                        or (
+                            snapshot.source.media_type == "application/zip"
+                            and (
+                                asset_source is None
+                                or asset_source.media_type != "application/zip"
+                                or hashlib.sha256(asset_source.content).hexdigest()
+                                != snapshot.source.sha256
+                            )
+                        )
+                        or (
+                            snapshot.source.media_type == "text/markdown"
+                            and asset_source is not None
+                        )
+                    ):
+                        raise ComposerConflictError(
+                            "Current Markdown draft changed before publication"
+                        )
+                if approved_proposal_id is not None:
+                    proposal_asset = next(
+                        (
+                            artifact
+                            for artifact in artifacts
+                            if artifact.kind == "source"
+                        ),
+                        None,
+                    )
+                    proposal = database.scalar(
+                        select(ComposerProposalRow)
+                        .where(
+                            ComposerProposalRow.id == str(approved_proposal_id),
+                            ComposerProposalRow.draft_id == str(draft_id),
+                        )
+                        .with_for_update()
+                    )
+                    if (
+                        proposal is None
+                        or proposal.state not in {"accepted", "edited"}
+                        or proposal.decided_value is None
+                        or draft.version != proposal.base_version + 2
+                        or snapshot.approved_values
+                        != json.dumps(
+                            {"content": proposal.decided_value}, ensure_ascii=False
+                        )
+                        or snapshot.operation
+                        != f"publish_proposal:{approved_proposal_id}"
+                        or any(
+                            artifact.media_type != "text/markdown"
+                            or artifact.content
+                            != proposal.decided_value.encode("utf-8")
+                            for artifact in artifacts
+                            if artifact.kind in {"download", "preview"}
+                        )
+                        or (
+                            snapshot.source.media_type == "application/zip"
+                            and (
+                                proposal_asset is None
+                                or proposal_asset.media_type != "application/zip"
+                                or hashlib.sha256(proposal_asset.content).hexdigest()
+                                != snapshot.source.sha256
+                            )
+                        )
+                        or (
+                            snapshot.source.media_type == "text/markdown"
+                            and proposal_asset is not None
+                        )
+                    ):
+                        raise ComposerConflictError(
+                            "Composer proposal requires review again"
+                        )
+                    approved_draft_content = proposal.decided_value
                 pending = database.scalar(
                     select(ComposerRevisionRow.id).where(
                         ComposerRevisionRow.draft_id == str(draft_id),
@@ -262,6 +387,8 @@ class _SqlComposerRevisions:
                 reserved.publication_token = None
                 reserved.lease_expires_at = None
                 draft.current_revision_id = reserved.id
+                if approved_draft_content is not None:
+                    draft.content = approved_draft_content
                 draft.version += 1
                 draft.updated_at = self._clock()
                 record_content_audit(
@@ -319,6 +446,25 @@ class _SqlComposerRevisions:
         except SQLAlchemyError:
             raise PersistenceError from None
 
+    def find_revision_by_key(
+        self, owner_id: UUID, draft_id: UUID, idempotency_key: str
+    ) -> ComposerRevision | None:
+        """Recover a committed publication after its linking response was lost."""
+
+        try:
+            with Session(self._engine) as database:
+                owned_draft(database, owner_id, draft_id)
+                row = database.scalar(
+                    select(ComposerRevisionRow).where(
+                        ComposerRevisionRow.draft_id == str(draft_id),
+                        ComposerRevisionRow.idempotency_key == idempotency_key,
+                        ComposerRevisionRow.publication_state == "published",
+                    )
+                )
+                return _revision(database, row) if row is not None else None
+        except SQLAlchemyError:
+            raise PersistenceError from None
+
     def list_revisions(
         self,
         owner_id: UUID,
@@ -326,8 +472,10 @@ class _SqlComposerRevisions:
         *,
         limit: int = DEFAULT_PAGE_LIMIT,
         offset: int = 0,
+        order: PageOrder = "asc",
     ) -> tuple[ComposerRevision, ...]:
         validate_page(limit, offset)
+        validate_page_order(order)
         try:
             with Session(self._engine) as database:
                 owned_draft(database, owner_id, draft_id)
@@ -339,7 +487,14 @@ class _SqlComposerRevisions:
                             ComposerRevisionRow.draft_id == str(draft_id),
                             ComposerRevisionRow.publication_state == "published",
                         )
-                        .order_by(ComposerRevisionRow.number, ComposerRevisionRow.id)
+                        .order_by(
+                            ComposerRevisionRow.number.desc()
+                            if order == "desc"
+                            else ComposerRevisionRow.number.asc(),
+                            ComposerRevisionRow.id.desc()
+                            if order == "desc"
+                            else ComposerRevisionRow.id.asc(),
+                        )
                         .limit(limit)
                         .offset(offset)
                     )

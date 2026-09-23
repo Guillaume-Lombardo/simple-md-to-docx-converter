@@ -50,6 +50,8 @@ export function TemplatesWorkspace({
   user: EffectiveUser;
 }) {
   const fence = useRef(new RequestFence());
+  const managementIntent = useRef(0);
+  const activeOperationScope = useRef<"management" | "library" | null>(null);
   const expireSession = useStableVoidCallback(expire);
   const [templates, setTemplates] = useState<TemplateResponse[]>([]);
   const [context, setContext] =
@@ -141,7 +143,9 @@ export function TemplatesWorkspace({
   }
 
   async function manage(template: TemplateResponse): Promise<void> {
+    const intent = ++managementIntent.current;
     const request = fence.current.startRead();
+    activeOperationScope.current = "management";
     setLoading(true);
     setError(undefined);
     try {
@@ -149,7 +153,11 @@ export function TemplatesWorkspace({
         template.id,
         request.controller.signal,
       );
-      if (!fence.current.current(request.generation)) return;
+      if (
+        !fence.current.current(request.generation) ||
+        managementIntent.current !== intent
+      )
+        return;
       if (!snapshot) {
         setManaged(undefined);
         setError(
@@ -159,7 +167,11 @@ export function TemplatesWorkspace({
       }
       setManaged(snapshot);
     } catch (reason) {
-      if (!fence.current.current(request.generation)) return;
+      if (
+        !fence.current.current(request.generation) ||
+        managementIntent.current !== intent
+      )
+        return;
       setError(
         administrationError(
           reason,
@@ -168,7 +180,10 @@ export function TemplatesWorkspace({
         ),
       );
     } finally {
-      if (fence.current.current(request.generation)) setLoading(false);
+      if (fence.current.current(request.generation)) {
+        setLoading(false);
+        activeOperationScope.current = null;
+      }
     }
   }
 
@@ -176,9 +191,12 @@ export function TemplatesWorkspace({
     action: (signal: AbortSignal) => Promise<unknown>,
     success: string,
     afterReload?: () => void,
+    scope: "management" | "library" = "library",
   ): Promise<boolean> {
     const request = fence.current.startMutation();
     if (!request) return false;
+    activeOperationScope.current = scope;
+    const selectedIntent = managementIntent.current;
     setPending(true);
     setError(undefined);
     setNotice(undefined);
@@ -207,6 +225,7 @@ export function TemplatesWorkspace({
           if (!fence.current.finishMutation(request.generation)) return false;
           setPending(false);
           setConfirmation(undefined);
+          if (managementIntent.current !== selectedIntent) return false;
           if (!latest) {
             setManaged(undefined);
             setError(
@@ -221,6 +240,7 @@ export function TemplatesWorkspace({
         } catch (refreshReason) {
           if (!fence.current.finishMutation(request.generation)) return false;
           setPending(false);
+          if (managementIntent.current !== selectedIntent) return false;
           setManaged(undefined);
           setError(
             administrationError(
@@ -242,6 +262,9 @@ export function TemplatesWorkspace({
         ),
       );
       return false;
+    } finally {
+      if (fence.current.current(request.generation))
+        activeOperationScope.current = null;
     }
   }
 
@@ -251,6 +274,7 @@ export function TemplatesWorkspace({
   ): Promise<void> {
     const request = fence.current.startMutation();
     if (!request) return;
+    activeOperationScope.current = versionId ? "management" : "library";
     setPending(true);
     setError(undefined);
     setNotice(undefined);
@@ -274,6 +298,9 @@ export function TemplatesWorkspace({
           "The template could not be downloaded. Try again.",
         ),
       );
+    } finally {
+      if (fence.current.current(request.generation))
+        activeOperationScope.current = null;
     }
   }
 
@@ -539,6 +566,8 @@ export function TemplatesWorkspace({
                     signal,
                   ),
                 "Template details updated.",
+                undefined,
+                "management",
               )
             }
           />
@@ -562,6 +591,8 @@ export function TemplatesWorkspace({
                       signal,
                     ),
                   "Template content replaced.",
+                  undefined,
+                  "management",
                 )
               }
             />
@@ -596,6 +627,8 @@ export function TemplatesWorkspace({
                               signal,
                             ),
                           `Version ${version.number} restored as a new version.`,
+                          undefined,
+                          "management",
                         )
                       }
                       type="button"
@@ -624,7 +657,20 @@ export function TemplatesWorkspace({
                 Delete template permanently
               </button>
             )}
-            <button onClick={() => setManaged(undefined)} type="button">
+            <button
+              onClick={() => {
+                managementIntent.current += 1;
+                if (activeOperationScope.current === "management") {
+                  fence.current.dispose();
+                  activeOperationScope.current = null;
+                  setPending(false);
+                  setLoading(false);
+                }
+                setConfirmation(undefined);
+                setManaged(undefined);
+              }}
+              type="button"
+            >
               Close management
             </button>
           </div>
@@ -657,6 +703,8 @@ export function TemplatesWorkspace({
                 confirmation === "delete"
                   ? "Template deleted."
                   : "Template archived.",
+                undefined,
+                "management",
               );
             }}
             type="button"

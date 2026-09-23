@@ -19,6 +19,7 @@ from markweave.persistence.composer import (
     ComposerModelStep,
     SqlComposerModelStepRepository,
 )
+from markweave.persistence.composer.questions import ComposerQuestion
 from tests.settings import template_settings
 
 
@@ -229,3 +230,93 @@ def test_global_model_step_capacity_returns_configured_retry_without_content(
     assert response.json()["error"]["code"] == "COMPOSER_CAPACITY_EXHAUSTED"
     assert private_text not in response.text
     assert "Retry-After" in documented
+
+
+@pytest.mark.unit
+def test_question_reads_and_answer_work_without_model_runner(
+    mocker: MockerFixture,
+) -> None:
+    client, _runner, repository = _client(mocker, enabled=False)
+    step = _step()
+    now = datetime.now(UTC)
+    question = ComposerQuestion(
+        id=UUID(int=99),
+        draft_id=step.draft_id,
+        model_step_id=step.id,
+        base_version=3,
+        state="pending",
+        text="What is the missing date?",
+        answer_message_id=None,
+        answer_content=None,
+        created_at=now,
+        answered_at=None,
+    )
+    repository.list_questions.return_value = (question,)
+    repository.get_question.return_value = question
+    repository.answer_question.return_value = (question, '"5"')
+    base = f"/api/v1/composer/drafts/{step.draft_id}/questions"
+    with client:
+        listed = client.get(f"{base}?order=desc&limit=1&offset=2")
+        invalid_order = client.get(f"{base}?order=random")
+        fetched = client.get(f"{base}/{question.id}")
+        missing = client.post(
+            f"{base}/{question.id}/answer",
+            json={"content": "Tomorrow"},
+            headers={"X-CSRF-Token": "csrf"},
+        )
+        answered = client.post(
+            f"{base}/{question.id}/answer",
+            json={"content": "Tomorrow"},
+            headers={
+                "If-Match": '"4"',
+                "Idempotency-Key": "answer-1",
+                "X-CSRF-Token": "csrf",
+            },
+        )
+    assert listed.status_code == fetched.status_code == answered.status_code == 200
+    assert invalid_order.status_code == 422
+    assert missing.status_code == 428
+    assert listed.json()["questions"][0]["id"] == str(question.id)
+    repository.list_questions.assert_called_once_with(
+        step.owner_id, step.draft_id, limit=1, offset=2, order="desc"
+    )
+    assert fetched.json()["text"] == question.text
+    assert answered.headers["ETag"] == '"5"'
+    repository.answer_question.assert_called_once_with(
+        step.owner_id,
+        step.draft_id,
+        question.id,
+        content="Tomorrow",
+        if_match='"4"',
+        idempotency_key="answer-1",
+    )
+
+
+@pytest.mark.unit
+def test_question_step_intent_and_answer_link_are_passed_to_runner(
+    mocker: MockerFixture,
+) -> None:
+    client, runner, _repository = _client(mocker)
+    step = _step()
+    runner.start.return_value = step
+    with client:
+        response = client.post(
+            f"/api/v1/composer/drafts/{step.draft_id}/model-steps",
+            json={
+                "connection_id": str(step.connection_id),
+                "approved_endpoint": step.approved_endpoint,
+                "approved_model": step.model,
+                "content": "What should be clarified?",
+                "max_output_tokens": 8,
+                "intent": "question",
+                "answered_question_id": str(UUID(int=99)),
+            },
+            headers={
+                "If-Match": '"3"',
+                "Idempotency-Key": "model-step-question",
+                "X-CSRF-Token": "csrf",
+            },
+        )
+    assert response.status_code == 202
+    assert runner.start.call_args.args[2].intent == "question"
+    assert runner.start.call_args.args[2].answered_question_id == UUID(int=99)

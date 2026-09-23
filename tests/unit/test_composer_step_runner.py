@@ -56,6 +56,52 @@ def _input() -> ModelStepInput:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("completion", "published"),
+    [
+        ("Which audience should this document address?", True),
+        ("Here is a complete replacement.", False),
+        ("Replace the body with this text?", False),
+        ("What date?\nWhat audience?", False),
+        ("- What date?", False),
+        ("What date? What audience?", False),
+        ("What " + "date " * 110 + "?", False),
+    ],
+)
+def test_question_intent_publishes_only_one_plain_question(
+    mocker: MockerFixture, completion: str, published: bool
+) -> None:
+    repository = mocker.Mock(spec=SqlComposerModelStepRepository)
+    connection = mocker.Mock(spec=ConnectionService)
+    step = replace(_step(), intent="question")
+    repository.start_model_step.return_value = (step, True)
+    repository.get_model_step.return_value = step
+    connection.chat.return_value = {"choices": [{"message": {"content": completion}}]}
+    done = Event()
+    repository.finish_model_step.side_effect = lambda *_args, **_kwargs: done.set()
+    repository.fail_model_step.side_effect = lambda *_args, **_kwargs: done.set()
+    runner = ComposerStepRunner(
+        repository, connection, maximum_active=1, lease=timedelta(seconds=2)
+    )
+    actor = ConnectionActor(UUID(int=2), is_admin=False, can_manage_personal=True)
+    runner.start(actor, step.draft_id, replace(_input(), intent="question"))
+    assert done.wait(1)
+    runner.close()
+    if published:
+        assert (
+            repository.finish_model_step.call_args.kwargs["proposed_value"]
+            == completion
+        )
+        repository.fail_model_step.assert_not_called()
+    else:
+        repository.finish_model_step.assert_not_called()
+        assert (
+            repository.fail_model_step.call_args.kwargs["error_code"]
+            == "provider_invalid"
+        )
+
+
+@pytest.mark.unit
 def test_cancelled_in_flight_result_never_reaches_proposal_gate(
     mocker: MockerFixture,
 ) -> None:

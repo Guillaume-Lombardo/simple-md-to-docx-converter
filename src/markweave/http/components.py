@@ -29,6 +29,7 @@ from markweave.config import (
     Settings,
     StorageProfile,
 )
+from markweave.conversion.runtime_manifest import COMPONENT_VERSIONS
 from markweave.http.composer_step_runner import ComposerStepRunner
 from markweave.jobs.ports import JobRepository
 from markweave.jobs.runner import (
@@ -196,6 +197,7 @@ class AppComponents:
             maintenance=self.retention,
             monotonic_clock=monotonic_clock,
             metrics=self.metrics,
+            runtime_component_versions=COMPONENT_VERSIONS,
         )
 
     def build_external_worker_loop(

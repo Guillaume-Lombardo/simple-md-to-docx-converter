@@ -2,10 +2,11 @@
 
 import hashlib
 import json
-from typing import Annotated
+from dataclasses import asdict
+from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Response
+from fastapi import APIRouter, Depends, Header, Query, Response
 
 from markweave.auth.models import Role, User
 from markweave.composer.connections import ConnectionActor
@@ -17,11 +18,15 @@ from markweave.http.composer_errors import (
 from markweave.http.composer_schemas import (
     ComposerModelStepCreateRequest,
     ComposerModelStepResponse,
+    ComposerQuestionAnswerRequest,
+    ComposerQuestionListResponse,
+    ComposerQuestionResponse,
 )
 from markweave.http.composer_step_runner import ModelStepInput
 from markweave.http.dependencies import HttpDependencies
 from markweave.http.errors import capacity_error_responses, error_responses
 from markweave.persistence.composer import ComposerModelStep
+from markweave.persistence.composer.questions import ComposerQuestion
 
 _MAXIMUM_IDEMPOTENCY_KEY_CHARACTERS = 128
 _FIRST_VISIBLE_ASCII = 33
@@ -37,10 +42,17 @@ def _response(step: ComposerModelStep) -> ComposerModelStepResponse:
         base_version=step.base_version,
         status=step.status,
         proposal_id=step.proposal_id,
+        intent="question" if step.intent == "question" else "proposal",
+        answered_question_id=step.answered_question_id,
+        question_id=step.question_id,
         error_code=step.error_code,
         created_at=step.created_at,
         updated_at=step.updated_at,
     )
+
+
+def _question_response(question: ComposerQuestion) -> ComposerQuestionResponse:
+    return ComposerQuestionResponse.model_validate(asdict(question))
 
 
 def _require_headers(
@@ -128,9 +140,90 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:
                 content=payload.content,
                 max_output_tokens=payload.max_output_tokens,
                 payload_digest=digest,
+                intent=payload.intent,
+                answered_question_id=payload.answered_question_id,
             ),
         )
         return _response(step)
+
+    @router.get(
+        "/api/v1/composer/drafts/{draft_id}/questions",
+        response_model=ComposerQuestionListResponse,
+        tags=["composer"],
+        responses=error_responses(401, 403, 404, 422, 503),
+    )
+    def list_questions(  # noqa: PLR0913, PLR0917 - explicit FastAPI page fields
+        draft_id: UUID,
+        response: Response,
+        user: Annotated[User, Depends(dependencies.current_user)],
+        limit: Annotated[int, Query(ge=1, le=100)] = 50,
+        offset: Annotated[int, Query(ge=0, le=2_147_483_647)] = 0,
+        order: Literal["asc", "desc"] = "asc",
+    ) -> ComposerQuestionListResponse:
+        store = dependencies.components.composer_model_step_repository
+        if store is None:
+            raise ComposerUnavailableError
+        response.headers["Cache-Control"] = "private, no-store"
+        questions = store.list_questions(
+            user.id, draft_id, limit=limit, offset=offset, order=order
+        )
+        return ComposerQuestionListResponse(
+            questions=tuple(_question_response(item) for item in questions),
+            limit=limit,
+            offset=offset,
+        )
+
+    @router.get(
+        "/api/v1/composer/drafts/{draft_id}/questions/{question_id}",
+        response_model=ComposerQuestionResponse,
+        tags=["composer"],
+        responses=error_responses(401, 403, 404, 503),
+    )
+    def get_question(
+        draft_id: UUID,
+        question_id: UUID,
+        response: Response,
+        user: Annotated[User, Depends(dependencies.current_user)],
+    ) -> ComposerQuestionResponse:
+        store = dependencies.components.composer_model_step_repository
+        if store is None:
+            raise ComposerUnavailableError
+        response.headers["Cache-Control"] = "private, no-store"
+        return _question_response(store.get_question(user.id, draft_id, question_id))
+
+    @router.post(
+        "/api/v1/composer/drafts/{draft_id}/questions/{question_id}/answer",
+        response_model=ComposerQuestionResponse,
+        tags=["composer"],
+        responses=error_responses(401, 403, 404, 412, 422, 428, 503),
+    )
+    def answer_question(  # noqa: PLR0913, PLR0917 - explicit HTTP preconditions
+        draft_id: UUID,
+        question_id: UUID,
+        payload: ComposerQuestionAnswerRequest,
+        response: Response,
+        user: Annotated[User, Depends(dependencies.mutation_actor)],
+        if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+        idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+    ) -> ComposerQuestionResponse:
+        store = dependencies.components.composer_model_step_repository
+        if store is None:
+            raise ComposerUnavailableError
+        limit = dependencies.settings.composer_maximum_request_bytes
+        if limit is None or len(payload.content.encode("utf-8")) > limit:
+            raise ComposerRequestError
+        etag, key = _require_headers(if_match, idempotency_key)
+        question, new_etag = store.answer_question(
+            user.id,
+            draft_id,
+            question_id,
+            content=payload.content,
+            if_match=etag,
+            idempotency_key=key,
+        )
+        response.headers["ETag"] = new_etag
+        response.headers["Cache-Control"] = "private, no-store"
+        return _question_response(question)
 
     @router.get(
         "/api/v1/composer/drafts/{draft_id}/model-steps/{step_id}",

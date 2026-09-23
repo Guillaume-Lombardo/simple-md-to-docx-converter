@@ -75,6 +75,7 @@ class WorkerRuntime:
     monotonic_clock: Callable[[], float] = monotonic
     maintenance: MaintenanceCleaner | None = None
     metrics: OperationalMetrics | None = None
+    runtime_component_versions: tuple[tuple[str, str], ...] | None = None
 
 
 class ConversionWorker:
@@ -101,7 +102,9 @@ class ConversionWorker:
             policy.lease_seconds,
             policy.max_job_duration_seconds,
         )
-        self._execution = JobExecutionService(runtime.processor)
+        self._execution = JobExecutionService(
+            runtime.processor, runtime.runtime_component_versions
+        )
         self._failures = JobFailureService(
             runtime.repository,
             self._worker_id,

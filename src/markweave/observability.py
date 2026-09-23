@@ -96,6 +96,7 @@ _LOG_ERROR_CODES = frozenset(
         "invalid_pdf",
         "template_integrity",
         "source_integrity",
+        "runtime_version_mismatch",
         "resource_budget_exceeded",
         "authentication_failed",
         "transport_failure",

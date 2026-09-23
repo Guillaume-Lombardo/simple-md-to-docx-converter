@@ -1,15 +1,23 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import {
   type ChangeEvent,
   type DragEvent,
   type FormEvent,
   useEffect,
+  useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
 import { Alert, AppShell } from "../../components/primitives";
 import { useAuth } from "../auth/context";
+import {
+  ownerStorageEpoch,
+  readReversionInputs,
+  writeReversionInputs,
+} from "../conversion/persistence";
 import {
   isCancellable,
   ReversionController,
@@ -34,6 +42,13 @@ export function ReversionWorkspace({
   controller?: ReversionController;
 }) {
   const { controller: auth, state: authState } = useAuth();
+  const ownerId =
+    authState.phase === "authenticated" ? authState.user.id : null;
+  const storageEpoch = useMemo(
+    () => (ownerId ? ownerStorageEpoch(ownerId) : null),
+    [ownerId],
+  );
+  const router = useRouter();
   const [controller] = useState(
     () => supplied ?? new ReversionController(undefined, () => auth.expire()),
   );
@@ -42,12 +57,91 @@ export function ReversionWorkspace({
     controller.snapshot,
     controller.snapshot,
   );
+  const { source, options, active } = state;
+  const activeJobId = active?.id;
   const [dragging, setDragging] = useState(false);
+  const [restored, setRestored] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [readError, setReadError] = useState(false);
+  const [reading, setReading] = useState(false);
+  const [readAttempt, setReadAttempt] = useState(0);
+  const [storageError, setStorageError] = useState(false);
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  const initialInputVersion = useRef(0);
 
   useEffect(() => {
-    void controller.load();
-    return () => controller.dispose();
-  }, [controller]);
+    if (!ownerId) return;
+    let current = true;
+    void (async () => {
+      await controller.load();
+      if (!current) return;
+      initialInputVersion.current = controller.inputVersion();
+      setLoaded(true);
+    })();
+    return () => {
+      current = false;
+      controller.dispose();
+    };
+  }, [controller, ownerId]);
+
+  useEffect(() => {
+    if (!loaded || !ownerId) return;
+    let current = true;
+    void (async () => {
+      try {
+        const saved = await readReversionInputs(ownerId);
+        if (!current) return;
+        if (saved) controller.restoreInputs(saved, initialInputVersion.current);
+        setReadError(false);
+        setRestored(true);
+      } catch {
+        if (current) setReadError(true);
+      } finally {
+        if (current) setReading(false);
+      }
+    })();
+    return () => {
+      current = false;
+    };
+  }, [controller, loaded, ownerId, readAttempt]);
+
+  useEffect(() => {
+    if (!restored || !ownerId || storageEpoch === null) return;
+    saveQueue.current = saveQueue.current
+      .catch(() => undefined)
+      .then(() =>
+        writeReversionInputs(
+          ownerId,
+          { source, options, activeJobId },
+          storageEpoch,
+        ),
+      )
+      .then(
+        () => setStorageError(false),
+        () => setStorageError(true),
+      );
+  }, [restored, ownerId, storageEpoch, source, options, activeJobId]);
+
+  async function openComposer(create: () => Promise<string | undefined>) {
+    if (!ownerId) return;
+    if (!restored && state.source) return;
+    try {
+      await saveQueue.current;
+      if (restored && storageEpoch !== null) {
+        await writeReversionInputs(
+          ownerId,
+          { source, options, activeJobId },
+          storageEpoch,
+        );
+        setStorageError(false);
+      }
+    } catch {
+      setStorageError(true);
+      if (state.source) return;
+    }
+    const id = await create();
+    if (id) router.push(`/composer?draft=${encodeURIComponent(id)}`);
+  }
 
   if (authState.phase !== "authenticated") return null;
   const extensionHint = state.extensions.join(", ");
@@ -61,7 +155,9 @@ export function ReversionWorkspace({
       current="Revert"
       user={authState.user}
       pending={authState.pending}
-      onLogout={() => void auth.logout()}
+      onLogout={() => {
+        void auth.logout();
+      }}
     >
       <header className="space-y-2">
         <div className="flex flex-wrap items-center gap-3">
@@ -77,6 +173,28 @@ export function ReversionWorkspace({
           and no document is sent to a hosted fallback service.
         </p>
       </header>
+      {readError && (
+        <Alert tone="danger">
+          Saved browser inputs could not be loaded. Your current selection is
+          still available. Try loading them again before opening Composer.
+          <button
+            disabled={reading}
+            onClick={() => {
+              setReading(true);
+              setReadAttempt((value) => value + 1);
+            }}
+            type="button"
+          >
+            {reading ? "Loading saved inputs…" : "Try loading saved inputs"}
+          </button>
+        </Alert>
+      )}
+      {storageError && state.source && (
+        <Alert tone="danger">
+          Your selected document could not be saved in this browser. Free
+          browser storage and choose the file again before opening Composer.
+        </Alert>
+      )}
       {state.phase === "loading" && (
         <p aria-live="polite">Loading supported document types…</p>
       )}
@@ -238,6 +356,28 @@ export function ReversionWorkspace({
               >
                 {state.submitting ? "Submitting document…" : "Start conversion"}
               </button>
+              {state.source && (
+                <div className="space-y-2">
+                  <button
+                    disabled={
+                      state.composerPending || storageError || !restored
+                    }
+                    onClick={() =>
+                      void openComposer(() => controller.createComposerDraft())
+                    }
+                    type="button"
+                  >
+                    {state.composerPending
+                      ? "Creating Composer draft…"
+                      : "Open selected source in Composer"}
+                  </button>
+                  <p className="text-sm text-muted">
+                    Composer accepts DOCX, PPTX, and PDF sources. Opening one
+                    saves an unchanged copy as a draft. Office editing is not
+                    yet available.
+                  </p>
+                </div>
+              )}
               {state.notice && <p aria-live="polite">{state.notice}</p>}
             </form>
           </section>
@@ -263,17 +403,33 @@ export function ReversionWorkspace({
                 </button>
               )}
               {state.active?.state === "succeeded" && (
-                <button
-                  className="primary-button w-full"
-                  type="button"
-                  onClick={() =>
-                    void controller.download().then((download) => {
-                      if (download) saveReversionDownload(download);
-                    })
-                  }
-                >
-                  Download result
-                </button>
+                <>
+                  <button
+                    className="primary-button w-full"
+                    type="button"
+                    onClick={() =>
+                      void controller.download().then((download) => {
+                        if (download) saveReversionDownload(download);
+                      })
+                    }
+                  >
+                    Download result
+                  </button>
+                  <button
+                    disabled={
+                      state.composerPending ||
+                      ((storageError || !restored) && Boolean(state.source))
+                    }
+                    onClick={() =>
+                      void openComposer(() => controller.handoffActiveResult())
+                    }
+                    type="button"
+                  >
+                    {state.composerPending
+                      ? "Creating Composer draft…"
+                      : "Open Markdown result in Composer"}
+                  </button>
+                </>
               )}
             </section>
             <section aria-labelledby="recent-reversions">

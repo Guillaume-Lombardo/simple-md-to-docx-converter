@@ -134,6 +134,7 @@ def build_template_conversion_worker(  # noqa: PLR0913
     maintenance: MaintenanceCleaner | None = None,
     monotonic_clock: Callable[[], float] = monotonic,
     metrics: OperationalMetrics | None = None,
+    runtime_component_versions: tuple[tuple[str, str], ...] | None = None,
 ) -> ConversionWorker:
     """Compose a worker that cannot bypass frozen-template resolution."""
     return ConversionWorker(
@@ -146,6 +147,7 @@ def build_template_conversion_worker(  # noqa: PLR0913
             monotonic_clock=monotonic_clock,
             maintenance=maintenance,
             metrics=metrics,
+            runtime_component_versions=runtime_component_versions,
         ),
         policy=policy,
     )

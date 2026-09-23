@@ -117,14 +117,21 @@ models and `POST /api/v1/composer/connections/{id}/test` uses the same server-si
 TLS, credential, and request bounds as production calls. Operators configure destination and
 address allowlists; document text cannot supply an endpoint.
 
-`POST /api/v1/composer/drafts` accepts multipart `source` (`.md`, `.docx`, `.pptx`, or `.pdf`),
+`POST /api/v1/composer/drafts` accepts multipart `source` (`.md`, `.zip`, `.docx`, `.pptx`, or `.pdf`),
 optional `title`, and optional `content`. The backend scans the exact uploaded bytes before
-validation or persistence. `POST /api/v1/composer/drafts/from-conversion/{job_id}` copies an
+validation or persistence. ZIP packages use the conversion archive's bounded validation,
+unambiguous Markdown entrypoint, and image checks; the original scanned package remains the
+source of record. `POST /api/v1/composer/drafts/from-conversion/{job_id}` copies an
 authorized conversion result through the scanner and retains its exact job/result/digest origin;
-the original job remains unchanged. `GET /api/v1/composer/drafts` and `GET/PUT
+the original job remains unchanged. `POST /api/v1/composer/drafts/from-reversion/{job_id}`
+does the same for an owner-authorized successful 2md result, accepting plain Markdown or its
+canonical Markdown-and-assets ZIP package. Both handoffs scan the exact result bytes before
+Composer persistence, preserve the immutable origin IDs and digest, and leave the original job
+untouched. `GET /api/v1/composer/drafts` and `GET/PUT
 /api/v1/composer/drafts/{id}` access owner drafts. Saving requires `If-Match`. Message and
 proposal subroutes retain owner conversation and proposal decisions; a decision may accept, edit,
-or reject but cannot silently overwrite a newer draft version. Message creation requires both
+or reject but cannot silently overwrite a newer draft version. A proposal also becomes stale when
+the draft changes between its creation and human decision. Message creation requires both
 `If-Match` and an `Idempotency-Key` for safe retries. Draft/history reads remain
 available during provider outage or connection disablement.
 
@@ -134,7 +141,8 @@ selected model, then supplies the same `approved_endpoint` and `approved_model` 
 `content`, `connection_id`, and `max_output_tokens`. The request requires the current draft
 `If-Match` and an `Idempotency-Key`; retries with changed content or preconditions fail. The
 response contains a step ID and content-free state. `GET .../model-steps/{step_id}` reads its
-owner-scoped state from the shared database, including a pending proposal ID after completion.
+owner-scoped state from the shared database, including `intent`, a pending `proposal_id`, or
+an assistant `question_id` after completion.
 `DELETE .../model-steps/{step_id}` durably cancels an in-flight step from any replica. A cancelled,
 stale, unauthorized, or invalid result cannot create a proposal; a successful result creates only
 a pending proposal for human review. A pending proposal holds no execution slot while awaiting a
@@ -146,26 +154,101 @@ If another authorized test occupies the transport after a model step has already
 the durable step ends as `failed` with safe `capacity_exhausted` and no proposal; retry with a new
 idempotency key when capacity returns. Operational metrics expose active local steps, bounded
 durations, failures, saturation, retries, and startup recovery without content labels.
-The T90 Composer chat will use this server foundation for interactive conversation and cancellation.
+For missing information, pass `intent: "question"` to the same bounded model-step route. A
+successful completion must be one plain question of at most 500 characters; invalid prose or
+edit-shaped output fails the step with safe `provider_invalid`. The completed step creates a
+durable pending question and releases its execution slot. `GET
+/api/v1/composer/drafts/{id}/questions` and `GET .../questions/{question_id}` read owner-scoped
+questions during provider outage, including stable question text, model-step ID, state, and the
+linked answer message ID and content after answering. `POST .../questions/{question_id}/answer`
+accepts `{ "content": "..." }` with the current draft `If-Match` and an `Idempotency-Key`; it
+atomically appends one user message and changes the question from `pending` to `answered`,
+returning the new draft ETag. A stale answer or second different answer fails. The user may
+explicitly start a fresh bounded model step with `answered_question_id` at the exact answered
+draft version. This link is persisted on the new step; an already running or completed resume
+cannot be duplicated, and any later human draft edit prevents stale model output publication.
 
 `POST /api/v1/composer/drafts/{id}/revisions/from-source` captures the exact scanned source as
-download and preview artifacts. This source capture does not render later draft edits; its frozen
+download and preview artifacts. For ZIP packages, the download is the original ZIP and the
+preview is its validated Markdown entrypoint. This source capture does not render later draft edits; its frozen
 values describe the original source bytes. It requires `If-Match` and an `Idempotency-Key`.
+For a 2md ZIP result, source capture extracts the bounded `document.md` entry from the
+previously validated immutable package while retaining its complete ZIP as the download.
+`POST /api/v1/composer/drafts/{id}/proposals/{proposal_id}/publish` takes a human-accepted or
+human-edited Markdown proposal and publishes its exact decided text as a new immutable revision.
+It requires the current draft `If-Match` and an `Idempotency-Key`. Rejected, pending, stale, empty,
+oversized, and native Office publication attempts fail without changing the current revision.
+For Markdown-and-assets ZIP drafts, the approved Markdown becomes matching preview/download
+artifacts while the original scanned ZIP remains an immutable `source` artifact.
+For proposals from a model step, publication checks the completed step and freezes its model
+identity in the revision. Publication also advances saved draft text atomically, so the next
+human edit starts from the accepted content.
+This operation treats the approved proposal as complete Markdown content; it does not execute
+model-supplied tools or modify native Office files.
+`POST /api/v1/composer/drafts/{id}/revisions/from-draft` publishes the exact current saved
+Markdown text with `If-Match` and `Idempotency-Key`, without a provider call. It supports plain
+Markdown and validated Markdown-and-assets ZIP drafts. ZIP publication retains the original
+scanned package as a separate immutable `source` artifact alongside matching Markdown
+`download` and `preview` artifacts. This operation never substitutes the original source
+content for a later human edit. Human publication records the prior approved revision ID and
+earlier model receipt as lineage in `render_options`; its own `model_identity` remains null so
+the human edit is not attributed to the model. That lineage follows later generated revisions.
+
+`POST /api/v1/composer/drafts/{id}/revisions/{approved_revision_id}/generations` accepts
+`{ "output": "docx"|"pdf"|"pptx", "template_id": null,
+"template_version_id": null, "presentation_dialect": null, "slide_level": null }`
+with `If-Match` and `Idempotency-Key`. The source must be the current approved Markdown
+revision. Template ID and version must be supplied together; the existing conversion service
+checks that the version is usable for the chosen output. Presentation options apply to PPTX.
+The route freezes exact approved Markdown, source assets, selected template version, options,
+and component versions before queueing the existing durable conversion job. It returns `202`
+with generation ID, job ID, status, frozen option metadata, and `publishable`; retrying the same
+key recovers the same generation. If submission was interrupted before its job was attached,
+retry uses the persisted options and rejects a changed runtime component version before sending
+a new job. Publication checks the job's frozen version and option receipt. For ZIP sources, it
+builds and scans a bounded package from
+the approved Markdown and validated original images, excluding a reverse-conversion manifest.
+No model call occurs during generation.
+The conversion worker also checks the queued job's component manifest against its own qualified
+runtime before any document engine runs. An ordinary conversion or Composer generation queued
+before an incompatible upgrade fails with `runtime_version_mismatch`; no result is published,
+and the caller can submit a fresh request with a new idempotency key. Existing successful results
+remain available. This fence needs no database migration.
+
+`GET /api/v1/composer/drafts/{id}/generations?limit=20&offset=0` returns newest-first
+`{ "generations": [...], "limit": 20, "offset": 0 }` for refresh or lost-response recovery.
+`GET .../generations/{generation_id}` reads current job status; `DELETE` cancels the linked
+job. A succeeded generation reports `publishable` only while its approved source revision and
+draft version remain current. `POST .../generations/{generation_id}/publish` requires fresh
+`If-Match` and `Idempotency-Key`, verifies the successful owner-bound job and exact result, and
+copies its result bytes into a new native revision. Matching `download` and `preview` artifacts
+share those bytes; PDF revisions retain the traceability JSON artifact and ZIP sources retain
+their original `source` artifact. The revision preserves approved Markdown values and model
+identity and records source revision, job, input/result digests, template, and options. Failed,
+cancelled, expired, or stale generations leave the prior revision intact.
 `GET /api/v1/composer/drafts/{id}/revisions` lists immutable published revisions; `GET
 .../revisions/{revision_id}` reads one, and `GET
-.../revisions/{revision_id}/artifacts/{download|preview}` returns bytes from that exact revision.
+.../revisions/{revision_id}/artifacts/{source|download|preview|traceability}` returns bytes
+from that exact revision when that artifact kind exists.
+`GET .../revisions/{revision_id}/diff?from_revision_id={prior_id}` reports complete bounded
+line changes for two owned Markdown downloads or frozen approved Markdown associated with a
+generated native revision. Its `scope` distinguishes artifact text from approved source text;
+`metadata_changes` separately names output, template, presentation option, or component version
+changes. Native Office structure is not semantically diffed. Safety bounds return an explicit
+`unavailable` reason, and line numbers are one-based with no partial changes.
 `POST .../revisions/{revision_id}/restore` with `If-Match` and `Idempotency-Key` makes a new
-copy-forward revision with matching artifacts and no provider call. These contracts provide the
-durable foundation for later generated revisions and native Office/PDF previews; deterministic
-renderer-based regeneration is delivered with typed templates in T91.
+copy-forward revision with matching artifacts and no provider call.
 
 All Composer responses with private data are non-cacheable. Unknown or other users' drafts and
 revisions return the same not-found behavior. Provider failures use sanitized errors and leave
 retained drafts, revisions, and existing exports available. Connection, personal-permission,
-draft, message, proposal, and revision lists accept `limit` (1–100, default 50) and `offset`
+draft, message, proposal, revision, and generation lists accept `limit` (1–100, default 50) and `offset`
 (nonnegative) and return both in the response for bounded pagination.
-Draft and revision lists return compact metadata; fetch one ID to read complete draft text or
-frozen revision values.
+Message, proposal, question, and revision lists also accept `order=asc|desc` (default `asc`).
+Use `order=desc&limit=100&offset=0` to retrieve the newest bounded page, then increase
+`offset` for older pages. Equal timestamps use ID as a stable tie-break; revisions use
+their unique number then ID. Invalid orders return 422. Draft and revision lists return
+compact metadata; fetch one ID to read complete draft text or frozen revision values.
 
 ## Templates
 

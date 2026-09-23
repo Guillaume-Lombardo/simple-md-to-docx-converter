@@ -34,9 +34,9 @@ def test_lock_preserves_the_audited_npm_package_versions_and_integrities() -> No
     serialized = "\n".join(
         f"{name}@{version}" for name, version in sorted(package_versions)
     )
-    assert len(package_versions) == 610
+    assert len(package_versions) == 669
     assert hashlib.sha256(serialized.encode()).hexdigest() == (
-        "472524d7c110193275295a9edaadc0bd5492a9d073af47ecc8b433b3daf78a93"
+        "63112b57c34922c8edb2377779240913005457405655281b041af6b45a0f712f"
     )
     assert hashlib.sha256(
         Path("toolchain/document-engines/package-lock.json").read_bytes()
@@ -70,8 +70,13 @@ def test_frontend_container_uses_frozen_root_workspace_and_pruned_graph() -> Non
         "pnpm install --frozen-lockfile --ignore-scripts --filter @markweave/web...",
         "pnpm --filter @markweave/web deploy --prod --legacy",
         "/opt/markweave-web-production/node_modules",
+        "COPY web/scripts ./web/scripts",
+        "COPY --from=build --chown=1001:0 /opt/app-root/src/web/public ./public",
     ):
         assert contract in containerfile
+    assert containerfile.index("COPY web/scripts ./web/scripts") < containerfile.index(
+        "RUN pnpm --filter @markweave/web run build"
+    )
     runtime = containerfile.split("FROM ${RUNTIME_IMAGE} AS runtime", 1)[1]
     assert "corepack" not in runtime.casefold()
     assert "pnpm" not in runtime.casefold()

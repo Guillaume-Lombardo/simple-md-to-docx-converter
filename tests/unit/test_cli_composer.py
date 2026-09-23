@@ -53,7 +53,10 @@ def _model_step(**overrides: object) -> dict[str, object]:
         "model_identity": "small-model",
         "base_version": 2,
         "status": "running",
+        "intent": "proposal",
         "proposal_id": None,
+        "question_id": None,
+        "answered_question_id": None,
         "error_code": None,
         "created_at": "2026-09-23T00:00:00Z",
         "updated_at": "2026-09-23T00:00:00Z",
@@ -924,6 +927,31 @@ def test_draft_upload_handoff_save_and_pagination_use_owner_http_only(
     assert calls[4].args[1].endswith("?offset=3&limit=7")
 
 
+def test_reverse_result_handoff_uses_owner_http_route(remote) -> None:
+    _profile, _constructor, client = remote
+    client.request.return_value = ConversionHttpResponse(201, {"id": DRAFT_ID})
+    assert (
+        main(
+            (
+                "composer",
+                "drafts",
+                "handoff-reversion",
+                CONNECTION_ID,
+                "--title",
+                "Reversed document",
+            )
+        )
+        == 0
+    )
+    call = client.request.call_args
+    assert call.args == (
+        "POST",
+        f"/api/v1/composer/drafts/from-reversion/{CONNECTION_ID}",
+    )
+    assert json.loads(call.kwargs["body"]) == {"title": "Reversed document"}
+    assert call.kwargs["csrf"] is True
+
+
 def test_draft_upload_uses_server_limit_and_fails_closed_when_missing(
     remote, tmp_path, capsys
 ) -> None:
@@ -1361,6 +1389,13 @@ def test_model_step_start_rejects_echoed_text_in_model_identity(
         {"status": "private-content"},
         {"status": "failed", "error_code": "private_content"},
         {"status": "completed", "proposal_id": "private-content"},
+        {"status": "completed", "intent": "question", "question_id": "private-content"},
+        {
+            "status": "completed",
+            "intent": "question",
+            "question_id": STEP_ID,
+            "proposal_id": PROPOSAL_ID,
+        },
         {"status": "running", "proposal_id": PROPOSAL_ID},
     ),
 )
@@ -1381,6 +1416,7 @@ def test_model_step_rejects_content_bearing_or_inconsistent_status_fields(
     "fields",
     (
         {"status": "completed", "proposal_id": PROPOSAL_ID},
+        {"status": "completed", "intent": "question", "question_id": STEP_ID},
         {"status": "failed", "error_code": "provider_invalid"},
         {"status": "failed", "error_code": "capacity_exhausted"},
     ),
@@ -1391,6 +1427,10 @@ def test_model_step_accepts_valid_terminal_metadata(remote, capsys, fields) -> N
     assert main(("--json", "composer", "model-steps", "status", DRAFT_ID, STEP_ID)) == 0
     step = json.loads(capsys.readouterr().out)["model_step"]
     assert step["status"] == fields["status"]
+    if fields.get("intent") == "question":
+        assert step["intent"] == "question"
+        assert step["question_id"] == STEP_ID
+        assert step["proposal_id"] is None
 
 
 def test_model_step_status_and_cancel_use_owner_paths_without_model_service(
@@ -1561,6 +1601,38 @@ def test_revision_capture_listing_download_and_restore_preserve_exact_artifact(
     )
 
 
+def test_revision_publish_draft_uses_current_etag_and_idempotency(
+    remote, capsys
+) -> None:
+    _profile, _constructor, client = remote
+    client.request.return_value = ConversionHttpResponse(
+        201, {"id": REVISION_ID, "number": 2, "operation": "publish_draft"}
+    )
+    assert (
+        main(
+            (
+                "composer",
+                "revisions",
+                "publish-draft",
+                DRAFT_ID,
+                "--etag",
+                '"3"',
+                "--idempotency-key",
+                "saved-1",
+            )
+        )
+        == 0
+    )
+    capsys.readouterr()
+    call = client.request.call_args
+    assert call.args == (
+        "POST",
+        f"/api/v1/composer/drafts/{DRAFT_ID}/revisions/from-draft",
+    )
+    assert call.kwargs["headers"]["If-Match"] == '"3"'
+    assert call.kwargs["headers"]["Idempotency-Key"] == "saved-1"
+
+
 def test_draft_proposal_and_revision_show_commands_use_exact_owner_paths(
     remote, capsys
 ) -> None:
@@ -1580,6 +1652,61 @@ def test_draft_proposal_and_revision_show_commands_use_exact_owner_paths(
         f"/api/v1/composer/drafts/{DRAFT_ID}/proposals/{PROPOSAL_ID}",
         f"/api/v1/composer/drafts/{DRAFT_ID}/revisions/{REVISION_ID}",
     ]
+
+
+def test_proposal_publish_and_exact_revision_diff_use_http_preconditions(
+    remote, capsys
+) -> None:
+    _profile, _constructor, client = remote
+    revision = {"id": REVISION_ID, "number": 2, "operation": "publish_proposal"}
+    comparison = {"status": "available", "changes": []}
+    client.request.side_effect = (
+        ConversionHttpResponse(201, revision),
+        ConversionHttpResponse(200, comparison),
+    )
+    assert (
+        main(
+            (
+                "composer",
+                "proposals",
+                "publish",
+                DRAFT_ID,
+                PROPOSAL_ID,
+                "--etag",
+                '"4"',
+                "--idempotency-key",
+                "approved-1",
+            )
+        )
+        == 0
+    )
+    assert (
+        main(
+            (
+                "composer",
+                "revisions",
+                "diff",
+                DRAFT_ID,
+                REVISION_ID,
+                "--from-revision",
+                REVISION_ID,
+            )
+        )
+        == 0
+    )
+    capsys.readouterr()
+    publish, diff = client.request.call_args_list
+    assert publish.args == (
+        "POST",
+        f"/api/v1/composer/drafts/{DRAFT_ID}/proposals/{PROPOSAL_ID}/publish",
+    )
+    assert publish.kwargs["headers"]["If-Match"] == '"4"'
+    assert publish.kwargs["headers"]["Idempotency-Key"] == "approved-1"
+    assert diff.args == (
+        "GET",
+        f"/api/v1/composer/drafts/{DRAFT_ID}/revisions/{REVISION_ID}/diff?"
+        f"from_revision_id={REVISION_ID}",
+    )
 
 
 def test_invalid_pagination_and_edited_proposal_fail_before_http(

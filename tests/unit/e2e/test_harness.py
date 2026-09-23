@@ -346,15 +346,122 @@ def test_every_final_image_container_monitor_inherits_owned_directory() -> None:
         if line.lstrip().startswith("podman run")
     ]
 
-    assert len(podman_runs) == 17
+    assert len(podman_runs) == 18
     assert all(
-        '"$temporary_directory" "$temporary_directory_identity"' in lines[index - 1]
+        any(
+            '"$temporary_directory" "$temporary_directory_identity"' in line
+            for line in lines[max(0, index - 3) : index]
+        )
         for index in podman_runs
     )
     assert 'rm -f -- "$repository/oom"' not in runner
     removal_index = runner.index("if ! e2e_remove_harness_directory")
     worktree_index = runner.index("if ! e2e_require_worktree_state_unchanged")
     assert removal_index < worktree_index
+
+
+@pytest.mark.unit
+def test_browser_driver_has_its_own_bounded_cgroup_and_current_backend_network() -> (
+    None
+):
+    runner = RUNNER.read_text(encoding="utf-8")
+    browser = runner.split("run_browser_test() {", 1)[1].split(
+        "\nstart_production_router() {", 1
+    )[0]
+    shared = runner.split("application_volumes=(", 1)[1].split(
+        "\napplication_mode=serve", 1
+    )[0]
+    assert (
+        "--memory=768m"
+        in runner.split("hardened_runtime=(", 1)[1].split("\nrun_browser_test() {", 1)[
+            0
+        ]
+    )
+    assert 'app_memory_limit="$(podman inspect "$backend_container"' in browser
+    assert 'podman exec "$backend_container" cat /sys/fs/cgroup/memory.max' in browser
+    assert '"$app_memory_limit" != 805306368' in browser
+    assert '--network "container:$backend_container"' in browser
+    assert "--memory=2g --cpus=2 --pids-limit=512 --shm-size=256m" in browser
+    assert "timeout --signal=TERM --kill-after=15s 25m" in browser
+    assert '--entrypoint /bin/sh "$image"' in browser
+    assert "--read-only --cap-drop=all --security-opt=no-new-privileges" in browser
+    assert '--security-opt="seccomp=$seccomp_profile"' in browser
+    assert '"$test_file" =~ ^/e2e/browser-[a-z0-9-]+\\.test\\.mjs$' in browser
+    assert "runner_memory_max=%s" in browser
+    assert "application_memory_max=%s" in browser
+    assert "runner_memory_peak=%s" in browser
+    assert "/sys/fs/cgroup/memory.events" in browser
+    assert (
+        'printf "runner_memory_peak=%s\\n" "$peak" >> "$evidence" || receipt_failed=1'
+        in browser
+    )
+    assert (
+        'cat /sys/fs/cgroup/memory.events >> "$evidence" || receipt_failed=1' in browser
+    )
+    assert 'if [ "$result" -eq 0 ]; then exit 1; fi' in browser
+    assert 'exit "$result"' in browser
+    assert 'podman rm --force "$browser_runner_name"' in browser
+    assert (
+        'podman rm --force "$browser_runner_name"'
+        in runner.split("cleanup() {", 1)[1].split("\ntrap cleanup EXIT", 1)[0]
+    )
+    assert (
+        '"$browser_runner_name"'
+        in runner.split("refuse_existing_resources() {", 1)[1].split(
+            "\nwait_for_url() {", 1
+        )[0]
+    )
+    for mount in (
+        "/e2e:ro,z",
+        "/node_modules:ro,z",
+        "/evidence:rw,z",
+        "/browser-artifacts:rw,z",
+        "/browser-session:rw,z",
+    ):
+        assert mount in browser and mount in shared
+    assert "/data:" not in browser
+    assert "/run/secrets/" not in browser
+    assert '"$test_file" == /e2e/browser-next-composer-real.test.mjs' in browser
+    assert '"$test_file" == /e2e/browser-next-composer-resilience.test.mjs' in browser
+    assert browser.count("/run/composer-e2e-client.key:ro,z") == 1
+    assert 'run_browser_test "$expiry_application_name"' in runner
+    assert runner.count('run_browser_test "$application_name"') == 28
+    assert runner.count('run_browser_test "$expiry_application_name"') == 2
+    assert runner.count("node --test") == 1
+    assert "node --test /e2e/browser-" not in runner
+
+
+@pytest.mark.unit
+def test_repeated_browser_phases_reserve_distinct_cgroup_receipts(
+    tmp_path: Path,
+) -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    reservation = (
+        "reserve_browser_cgroup_receipt() {"
+        + runner.split("reserve_browser_cgroup_receipt() {", 1)[1].split(
+            "\nrun_browser_test() {", 1
+        )[0]
+    )
+    (tmp_path / "browser-artifacts").mkdir()
+    script = (
+        'temporary_directory="$1"\n'
+        + reservation
+        + "\nreserve_browser_cgroup_receipt browser-next-composer-resilience\n"
+        + "reserve_browser_cgroup_receipt browser-next-composer-resilience\n"
+        + "reserve_browser_cgroup_receipt browser-next-reversion\n"
+    )
+    result = subprocess.run(
+        ["bash", "-c", script, "browser-receipts", str(tmp_path)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout.splitlines() == [
+        "/browser-artifacts/browser-next-composer-resilience-cgroup-001.txt",
+        "/browser-artifacts/browser-next-composer-resilience-cgroup-002.txt",
+        "/browser-artifacts/browser-next-reversion-cgroup-001.txt",
+    ]
+    assert len(list((tmp_path / "browser-artifacts").glob("*.reserved"))) == 3
 
 
 @pytest.mark.unit
@@ -372,7 +479,7 @@ def test_composer_final_image_provider_and_restore_preserve_harness_guards() -> 
     assert '--network "$network_name"' in provider_block
     assert '--user "$runtime_uid:0" --read-only' in provider_block
     assert "--cap-drop=all --security-opt=no-new-privileges" in provider_block
-    assert '--volume "$composer_provider_directory:/provider:ro,Z"' in provider_block
+    assert '--volume "$composer_provider_directory:/provider:ro,z"' in provider_block
 
     restore = runner.split("restore_composer_snapshot() {", 1)[1].split(
         "\nkill_backend_and_reconnect_router() {", 1
@@ -387,12 +494,24 @@ def test_composer_final_image_provider_and_restore_preserve_harness_guards() -> 
         'start_production_router "$application_name"'
     )
 
-    composer_browser = runner.index("/e2e/browser-next-composer-real.test.mjs")
+    composer_browser = runner.index(
+        'run_browser_test "$application_name" /e2e/browser-next-composer-real.test.mjs'
+    )
+    pairing_browser = runner.index(
+        "/e2e/browser-next-composer-pairing.test.mjs", composer_browser
+    )
     restore_call = runner.index("\nrestore_composer_snapshot\n")
     restored_browser = runner.index(
         "MARKWEAVE_E2E_COMPOSER_PHASE=restored-backup", restore_call
     )
-    assert provider_start < composer_browser < restore_call < restored_browser
+    assert (
+        provider_start
+        < composer_browser
+        < pairing_browser
+        < restore_call
+        < restored_browser
+    )
+    assert runner.count("/e2e/browser-next-composer-pairing.test.mjs") == 1
 
 
 @pytest.mark.unit
@@ -437,6 +556,7 @@ def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
     assert runner.count('kill_backend_and_reconnect_router "$application_name"') == 1
     assert runner.count('start_production_router "$expiry_application_name"') == 1
     provisioning = runner.index("/e2e/browser-provisioning-restart.test.mjs")
+    provisioning_end = runner.index("/e2e/browser-recovery-checkpoint.test.mjs")
     first_router = runner.index(
         'start_production_router "$application_name"',
         runner.index("application_mode=serve"),
@@ -444,7 +564,7 @@ def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
     assert first_router < provisioning
     assert (
         "MARKWEAVE_E2E_BASE_URL=http://localhost:3100"
-        in runner[first_router:provisioning]
+        in runner[provisioning:provisioning_end]
     )
     assert (
         'start_production_router "$application_name" http://127.0.0.1:1 \\\n'
@@ -771,7 +891,7 @@ def test_runner_invokes_next_conversion_browser_in_both_profile_matrix() -> None
         "/e2e/browser-next-conversion-restart-prepare.test.mjs", admission_index
     )
     preparation_command_index = runner.rindex(
-        "podman exec", admission_index, preparation_index
+        'run_browser_test "$application_name"', admission_index, preparation_index
     )
     restarted_router_index = runner.index(
         'restart_backend_and_router "$application_name"', preparation_index
@@ -794,8 +914,8 @@ def test_runner_invokes_next_conversion_browser_in_both_profile_matrix() -> None
     assert preparation_index < restarted_router_index < recovery_index
     preparation = runner[preparation_command_index:restarted_router_index]
     assert (
-        '"$application_name" node --test \\\n'
-        "  /e2e/browser-next-conversion-restart-prepare.test.mjs\n" in preparation
+        'run_browser_test "$application_name" '
+        "/e2e/browser-next-conversion-restart-prepare.test.mjs" in preparation
     )
     assert (
         runner.index("/e2e/browser-next-auth.test.mjs")
@@ -872,9 +992,11 @@ def test_runner_invokes_next_administration_with_restored_policy_evidence(
     )
     invocation = runner[recovery_index:expiry_index]
     assert (
-        'podman exec \\\n  "$application_name" node --test '
+        'run_browser_test "$application_name" '
         "/e2e/browser-next-admin-cookie.test.mjs\n"
-        "podman exec \\\n  --env MARKWEAVE_E2E_PROFILE=" in invocation
+        'run_browser_test "$application_name" '
+        "/e2e/browser-next-admin.test.mjs \\\n"
+        "  --env MARKWEAVE_E2E_PROFILE=" in invocation
     )
     assert (
         "--env MARKWEAVE_E2E_CHECKPOINT_USER_IDLE_MINUTES="

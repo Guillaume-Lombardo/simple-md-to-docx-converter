@@ -20,6 +20,7 @@ from fastapi import (
 from starlette.concurrency import run_in_threadpool
 
 from markweave.auth.models import Role, User
+from markweave.conversion.runtime_manifest import COMPONENT_VERSIONS
 from markweave.http.dependencies import HttpDependencies
 from markweave.http.errors import error_responses
 from markweave.http.responses import conversion_response, template_response
@@ -40,15 +41,6 @@ from markweave.observability import CORRELATION_HEADER, CORRELATION_STATE_KEY
 from markweave.persistence.errors import PersistenceError
 from markweave.presentations.models import PresentationDialect, PresentationOptions
 from markweave.templates.models import TemplateKind, TemplateSelectionSource
-from markweave.version import VERSION
-
-COMPONENT_VERSIONS = (
-    ("chromium", "151.0.7922.173"),
-    ("libreoffice", "26.2.5.2"),
-    ("md-converter", VERSION),
-    ("mermaid-cli", "11.16.0"),
-    ("pandoc", "3.10.2"),
-)
 
 _RESULT_EXTENSIONS = {
     JobOutput.DOCX: "docx",

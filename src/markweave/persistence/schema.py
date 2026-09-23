@@ -1049,6 +1049,9 @@ class ComposerSourceRow(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    kind: Mapped[str] = mapped_column(
+        String(24), nullable=False, server_default="upload"
+    )
     owner_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
@@ -1175,7 +1178,12 @@ class ComposerModelStepRow(Base):
     payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
     state: Mapped[str] = mapped_column(String(16), nullable=False)
+    intent: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="proposal"
+    )
+    answered_question_id: Mapped[str | None] = mapped_column(String(36))
     proposal_id: Mapped[str | None] = mapped_column(String(36))
+    question_id: Mapped[str | None] = mapped_column(String(36))
     safe_error_code: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
@@ -1198,6 +1206,97 @@ Index(
     ComposerModelStepRow.draft_id,
     ComposerModelStepRow.created_at,
     ComposerModelStepRow.id,
+)
+
+
+class ComposerQuestionRow(Base):
+    """One assistant-generated question and its single linked human answer."""
+
+    __tablename__ = "composer_questions"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('pending', 'answered')", name="ck_composer_question_state"
+        ),
+        UniqueConstraint("model_step_id", name="uq_composer_question_model_step"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    draft_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("composer_drafts.id", ondelete="CASCADE"), nullable=False
+    )
+    model_step_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("composer_model_steps.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    base_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    text: Mapped[str] = mapped_column(String(), nullable=False)
+    answer_message_id: Mapped[str | None] = mapped_column(String(36))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+Index(
+    "ix_composer_questions_history",
+    ComposerQuestionRow.draft_id,
+    ComposerQuestionRow.created_at,
+    ComposerQuestionRow.id,
+)
+
+
+class ComposerGenerationRow(Base):
+    """Durable link from one approved Markdown revision to a conversion job."""
+
+    __tablename__ = "composer_generations"
+    __table_args__ = (
+        UniqueConstraint(
+            "draft_id", "idempotency_key", name="uq_composer_generation_idempotency"
+        ),
+        UniqueConstraint("job_id", name="uq_composer_generation_job"),
+        CheckConstraint(
+            "output IN ('docx', 'pdf', 'pptx')", name="ck_composer_generation_output"
+        ),
+        CheckConstraint(
+            "expected_draft_version > 0", name="ck_composer_generation_version"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    draft_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("composer_drafts.id", ondelete="CASCADE"), nullable=False
+    )
+    owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    source_revision_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("composer_revisions.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    expected_draft_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    approved_markdown_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    input_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    output: Mapped[str] = mapped_column(String(16), nullable=False)
+    template_id: Mapped[str | None] = mapped_column(String(36))
+    template_version_id: Mapped[str | None] = mapped_column(String(36))
+    presentation_options: Mapped[str | None] = mapped_column(String())
+    component_versions: Mapped[str] = mapped_column(String(), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    job_id: Mapped[str | None] = mapped_column(String(36))
+    result_revision_id: Mapped[str | None] = mapped_column(String(36))
+    publication_key: Mapped[str | None] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+Index(
+    "ix_composer_generations_history",
+    ComposerGenerationRow.draft_id,
+    ComposerGenerationRow.created_at,
+    ComposerGenerationRow.id,
 )
 
 

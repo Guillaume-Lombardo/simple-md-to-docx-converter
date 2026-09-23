@@ -10,7 +10,7 @@ from threading import Event, Lock, Thread
 from typing import NotRequired, TypedDict
 from uuid import UUID
 
-from markweave.conversion.errors import ConversionError
+from markweave.conversion.errors import ConversionError, ConversionErrorCode
 from markweave.jobs.errors import JobLeaseLostError, JobProcessingCancelled
 from markweave.jobs.models import (
     ConversionJob,
@@ -254,6 +254,7 @@ class JobExecutionService:
     """Execute a processor while preserving unexpected failures for the owner thread."""
 
     processor: JobProcessor
+    runtime_component_versions: tuple[tuple[str, str], ...] | None = None
 
     def execute(
         self,
@@ -263,6 +264,14 @@ class JobExecutionService:
         progress: Callable[[JobStep, int], None],
     ) -> ProcessingOutcome:
         try:
+            if (
+                self.runtime_component_versions is not None
+                and job.component_versions != self.runtime_component_versions
+            ):
+                raise ConversionError(
+                    ConversionErrorCode.RUNTIME_VERSION_MISMATCH,
+                    "Queued conversion requires a matching runtime version.",
+                )
             result = self.processor.process(
                 job,
                 cancelled=cancelled,

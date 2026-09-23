@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 
-function policy(nonce: string): string {
+function policy(nonce: string, composerParent: boolean): string {
   return [
     "default-src 'none'",
     "base-uri 'none'",
@@ -15,12 +15,16 @@ function policy(nonce: string): string {
     "font-src 'self'",
     "manifest-src 'self'",
     "worker-src 'none'",
+    ...(composerParent ? ["frame-src 'self'"] : []),
   ].join("; ");
 }
 
 export function proxy(request: NextRequest) {
+  // The exact opaque child emits its own nonce and stricter isolated policy.
+  if (request.nextUrl.pathname === "/composer-preview")
+    return NextResponse.next();
   const nonce = randomBytes(18).toString("base64");
-  const csp = policy(nonce);
+  const csp = policy(nonce, request.nextUrl.pathname === "/composer");
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-nonce", nonce);
   requestHeaders.set("Content-Security-Policy", csp);

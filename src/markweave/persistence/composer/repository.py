@@ -27,6 +27,7 @@ from markweave.composer.revisions import (
 from markweave.persistence.composer.audit import SYSTEM_ACTOR_ID, record_content_audit
 from markweave.persistence.composer.common import (
     DEFAULT_PAGE_LIMIT,
+    PageOrder,
     draft_from_row,
     message_from_row,
     owned_draft,
@@ -34,12 +35,15 @@ from markweave.persistence.composer.common import (
     source_json,
     utc,
     validate_page,
+    validate_page_order,
 )
+from markweave.persistence.composer.generations import _SqlComposerGenerations
 from markweave.persistence.composer.revisions import _SqlComposerRevisions
 from markweave.persistence.errors import PersistenceError
 from markweave.persistence.schema import (
     ComposerArtifactRow,
     ComposerDraftRow,
+    ComposerGenerationRow,
     ComposerMessageRow,
     ComposerProposalRow,
     ComposerRevisionRow,
@@ -55,7 +59,7 @@ from markweave.storage import (
 )
 
 
-class SqlComposerRepository(_SqlComposerRevisions):
+class SqlComposerRepository(_SqlComposerRevisions, _SqlComposerGenerations):
     """One contract for SQLite/files and PostgreSQL/S3 Composer records."""
 
     def __init__(
@@ -89,6 +93,7 @@ class SqlComposerRepository(_SqlComposerRevisions):
         if source.owner_id != owner_id or source.kind not in {
             "upload",
             "conversion_result",
+            "reversion_result",
         }:
             raise ComposerNotFoundError("Composer source does not exist")
         now = self._clock()
@@ -107,6 +112,7 @@ class SqlComposerRepository(_SqlComposerRevisions):
                     or row.sha256 != source.sha256
                     or row.scan_receipt != source.scan_receipt
                     or row.media_type != source.media_type
+                    or row.kind != source.kind
                     or row.origin_job_id
                     != (str(source.origin_job_id) if source.origin_job_id else None)
                     or row.origin_result_object_id
@@ -154,6 +160,7 @@ class SqlComposerRepository(_SqlComposerRevisions):
         origin_job_id: UUID | None = None,
         origin_result_object_id: UUID | None = None,
         origin_result_sha256: str | None = None,
+        source_kind: str | None = None,
     ) -> ComposerDraft:
         """Reserve a hidden scanned upload, then expose source and draft together."""
 
@@ -162,8 +169,11 @@ class SqlComposerRepository(_SqlComposerRevisions):
         source_id, token = self._new_id(), self._new_id()
         now = self._clock()
         sha256 = hashlib.sha256(source_bytes).hexdigest()
+        kind = source_kind or (
+            "conversion_result" if origin_job_id is not None else "upload"
+        )
         source = SourceReference(
-            "conversion_result" if origin_job_id is not None else "upload",
+            kind,
             source_id,
             owner_id,
             sha256,
@@ -180,6 +190,7 @@ class SqlComposerRepository(_SqlComposerRevisions):
                 database.add(
                     ComposerSourceRow(
                         id=str(source_id),
+                        kind=kind,
                         owner_id=str(owner_id),
                         sha256=sha256,
                         size=len(source_bytes),
@@ -434,6 +445,11 @@ class SqlComposerRepository(_SqlComposerRevisions):
                         )
                     )
                     database.execute(
+                        delete(ComposerGenerationRow).where(
+                            ComposerGenerationRow.draft_id == draft_id
+                        )
+                    )
+                    database.execute(
                         delete(ComposerRevisionRow).where(
                             ComposerRevisionRow.draft_id == draft_id
                         )
@@ -491,7 +507,7 @@ class SqlComposerRepository(_SqlComposerRevisions):
                     if row is None:
                         continue
                     source = SourceReference(
-                        "conversion_result" if row.origin_job_id else "upload",
+                        row.kind,
                         UUID(row.id),
                         UUID(row.owner_id),
                         row.sha256,
@@ -691,8 +707,10 @@ class SqlComposerRepository(_SqlComposerRevisions):
         *,
         limit: int = DEFAULT_PAGE_LIMIT,
         offset: int = 0,
+        order: PageOrder = "asc",
     ) -> tuple[ComposerMessage, ...]:
         validate_page(limit, offset)
+        validate_page_order(order)
         try:
             with Session(self._engine) as database:
                 owned_draft(database, owner_id, draft_id)
@@ -701,7 +719,14 @@ class SqlComposerRepository(_SqlComposerRevisions):
                     for row in database.scalars(
                         select(ComposerMessageRow)
                         .where(ComposerMessageRow.draft_id == str(draft_id))
-                        .order_by(ComposerMessageRow.created_at, ComposerMessageRow.id)
+                        .order_by(
+                            ComposerMessageRow.created_at.desc()
+                            if order == "desc"
+                            else ComposerMessageRow.created_at.asc(),
+                            ComposerMessageRow.id.desc()
+                            if order == "desc"
+                            else ComposerMessageRow.id.asc(),
+                        )
                         .limit(limit)
                         .offset(offset)
                     )
@@ -813,6 +838,10 @@ class SqlComposerRepository(_SqlComposerRevisions):
                         return proposal_from_row(proposal)
                     raise ComposerConflictError("Proposal was already decided")
                 self._require_etag(draft, if_match)
+                if draft.version != proposal.base_version + 1:
+                    raise ComposerConflictError(
+                        "Composer proposal requires review again"
+                    )
                 proposal.state = state.value
                 proposal.decided_value = final_value
                 proposal.decided_at = self._clock()
@@ -861,8 +890,10 @@ class SqlComposerRepository(_SqlComposerRevisions):
         *,
         limit: int = DEFAULT_PAGE_LIMIT,
         offset: int = 0,
+        order: PageOrder = "asc",
     ) -> tuple[ComposerProposal, ...]:
         validate_page(limit, offset)
+        validate_page_order(order)
         try:
             with Session(self._engine) as database:
                 owned_draft(database, owner_id, draft_id)
@@ -872,7 +903,12 @@ class SqlComposerRepository(_SqlComposerRevisions):
                         select(ComposerProposalRow)
                         .where(ComposerProposalRow.draft_id == str(draft_id))
                         .order_by(
-                            ComposerProposalRow.created_at, ComposerProposalRow.id
+                            ComposerProposalRow.created_at.desc()
+                            if order == "desc"
+                            else ComposerProposalRow.created_at.asc(),
+                            ComposerProposalRow.id.desc()
+                            if order == "desc"
+                            else ComposerProposalRow.id.asc(),
                         )
                         .limit(limit)
                         .offset(offset)

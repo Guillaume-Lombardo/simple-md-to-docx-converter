@@ -96,12 +96,106 @@ async function waitForSlowCall(ca, previous) {
   assert.fail("The model step did not reach the HTTPS provider");
 }
 
+async function verifyHeldGenerationCancellation(page, profile) {
+  const source = `# Held Composer generation ${profile}\n\nKeep this approved text.\n`;
+  const created = await request(
+    page,
+    "POST",
+    "/api/v1/composer/drafts",
+    source,
+  );
+  assert.equal(created.status, 201, created.text);
+  const path = `/api/v1/composer/drafts/${created.json.id}`;
+  const captured = await request(
+    page,
+    "POST",
+    `${path}/revisions/from-source`,
+    undefined,
+    undefined,
+    {
+      "If-Match": created.json.etag,
+      "Idempotency-Key": `held-source-${profile}-${Date.now()}`,
+    },
+  );
+  assert.equal(captured.status, 201, captured.text);
+  await page.goto(`${baseURL}/composer?draft=${created.json.id}`, {
+    waitUntil: "networkidle",
+  });
+  const generate = page.getByRole("button", { name: "Generate DOCX" });
+  await generate.waitFor();
+  const accepted = page.waitForResponse(
+    (response) =>
+      /\/revisions\/[^/]+\/generations$/.test(
+        new URL(response.url()).pathname,
+      ) &&
+      response.request().method() === "POST" &&
+      response.status() === 202,
+  );
+  await generate.click();
+  const generation = await (await accepted).json();
+  assert.equal(generation.status, "queued");
+  assert.equal(typeof generation.source_revision_id, "string");
+  const approvedSource = await request(
+    page,
+    "GET",
+    `${path}/revisions/${generation.source_revision_id}`,
+  );
+  assert.equal(approvedSource.status, 200);
+  assert.equal(JSON.parse(approvedSource.json.approved_values).content, source);
+  await page.reload({ waitUntil: "networkidle" });
+  const recovered = await request(
+    page,
+    "GET",
+    `${path}/generations?limit=20&offset=0`,
+  );
+  assert.equal(recovered.status, 200);
+  assert.equal(
+    recovered.json.generations.filter((item) => item.id === generation.id)
+      .length,
+    1,
+  );
+  assert.equal(
+    recovered.json.generations.find((item) => item.id === generation.id)
+      ?.job_id,
+    generation.job_id,
+  );
+  await page.getByRole("button", { name: "Cancel generation" }).click();
+  await page.getByText("Generation cancellation requested.").waitFor();
+  const cancelled = await request(
+    page,
+    "GET",
+    `${path}/generations/${generation.id}`,
+  );
+  assert.equal(cancelled.status, 200);
+  assert.equal(cancelled.json.status, "cancelled");
+  const unchanged = await request(page, "GET", path);
+  assert.equal(unchanged.status, 200);
+  assert.equal(
+    unchanged.json.current_revision_id,
+    generation.source_revision_id,
+    "Cancellation must retain the exact approved source without publishing output",
+  );
+  const download = await request(
+    page,
+    "GET",
+    `${path}/revisions/${captured.json.id}/artifacts/download`,
+  );
+  assert.equal(download.status, 200);
+  assert.equal(download.text, source);
+}
+
 test("Composer retains exact owner artifacts through scanner outage and restore", async () => {
   const profile = process.env.MARKWEAVE_E2E_PROFILE;
   const phase = process.env.MARKWEAVE_E2E_COMPOSER_PHASE;
   assert.ok(profile === "standalone" || profile === "distributed");
   assert.ok(
-    ["scanner-unavailable", "restart", "restored-backup", "key-unavailable", "key-restored"].includes(phase),
+    [
+      "scanner-unavailable",
+      "restart",
+      "restored-backup",
+      "key-unavailable",
+      "key-restored",
+    ].includes(phase),
   );
   const statePath = process.env.MARKWEAVE_E2E_COMPOSER_STATE;
   assert.ok(statePath?.startsWith("/browser-session/composer-"));
@@ -109,6 +203,7 @@ test("Composer retains exact owner artifacts through scanner outage and restore"
     draftId,
     revisionId,
     restoredId,
+    generatedRevisions,
     connectionId,
     backupConnectionId,
     source,
@@ -134,7 +229,11 @@ test("Composer retains exact owner artifacts through scanner outage and restore"
     const draftPath = `/api/v1/composer/drafts/${draftId}`;
     const draft = await request(page, "GET", draftPath);
     assert.equal(draft.status, 200);
-    assert.equal(draft.json.current_revision_id, restoredId);
+    assert.deepEqual(
+      generatedRevisions?.map((item) => item.format),
+      ["docx", "pdf", "pptx"],
+    );
+    assert.equal(draft.json.current_revision_id, generatedRevisions.at(-1).id);
     for (const id of [revisionId, restoredId]) {
       const revision = await request(
         page,
@@ -150,8 +249,44 @@ test("Composer retains exact owner artifacts through scanner outage and restore"
       assert.equal(download.status, 200);
       assert.equal(download.text, source);
     }
+    for (const { id, format } of generatedRevisions) {
+      const published = await request(
+        page,
+        "GET",
+        `${draftPath}/revisions/${id}`,
+      );
+      assert.equal(published.status, 200);
+      assert.equal(published.json.operation.startsWith("generate:"), true);
+      assert.equal(
+        published.json.artifacts.some(
+          (artifact) =>
+            artifact.kind === "download" &&
+            artifact.media_type ===
+              {
+                docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                pdf: "application/pdf",
+                pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+              }[format],
+        ),
+        true,
+      );
+      assert.equal(
+        (
+          await request(
+            page,
+            "GET",
+            `${draftPath}/revisions/${id}/artifacts/download`,
+          )
+        ).status,
+        200,
+      );
+    }
     if (phase === "key-unavailable") {
-      const policy = await request(page, "GET", "/api/v1/admin/composer-policy");
+      const policy = await request(
+        page,
+        "GET",
+        "/api/v1/admin/composer-policy",
+      );
       assert.equal(policy.status, 503);
       const connection = await request(
         page,
@@ -454,6 +589,8 @@ test("Composer retains exact owner artifacts through scanner outage and restore"
         );
       }
     }
+    if (phase === "restart")
+      await verifyHeldGenerationCancellation(page, profile);
     await context.close();
   } finally {
     await browser.close();

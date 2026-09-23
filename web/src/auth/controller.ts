@@ -6,6 +6,7 @@ import {
   vChangeOwnPasswordApiV1PasswordPostResponse,
 } from "../api/generated/valibot.gen";
 import { ApiError, ApiTransport } from "../api/transport";
+import { clearOwnerDraftInputs, resumeOwnerDraftInputs } from "./local-drafts";
 
 export type AuthState =
   | { phase: "loading" }
@@ -111,22 +112,27 @@ export class AuthController {
         signal: controller.signal,
       });
       if (this.current(generation)) {
+        await clearOwnerDraftInputs(previous.user.id);
+        if (!this.current(generation)) return;
         this.operationPending = false;
         this.publish({ phase: "anonymous", pending: false });
       }
     } catch (error) {
       if (!this.current(generation) || isAbort(error)) return;
-      this.operationPending = false;
       if (
         error instanceof ApiError &&
         (error.status === 401 || error.code === "CSRF_MISSING")
       ) {
+        await clearOwnerDraftInputs(previous.user.id);
+        if (!this.current(generation)) return;
+        this.operationPending = false;
         this.publish({
           phase: "anonymous",
           pending: false,
           notice: SIGN_IN_AGAIN,
         });
       } else {
+        this.operationPending = false;
         this.publish({
           ...previous,
           pending: false,
@@ -154,6 +160,8 @@ export class AuthController {
         },
       );
       if (this.current(generation)) {
+        await clearOwnerDraftInputs(previous.user.id);
+        if (!this.current(generation)) return;
         this.operationPending = false;
         this.publish({
           phase: "anonymous",
@@ -163,11 +171,13 @@ export class AuthController {
       }
     } catch (error) {
       if (!this.current(generation) || isAbort(error)) return;
-      this.operationPending = false;
       if (
         error instanceof ApiError &&
         (error.status === 401 || error.code === "CSRF_MISSING")
       ) {
+        await clearOwnerDraftInputs(previous.user.id);
+        if (!this.current(generation)) return;
+        this.operationPending = false;
         this.publish({
           phase: "anonymous",
           pending: false,
@@ -175,6 +185,7 @@ export class AuthController {
         });
         return;
       }
+      this.operationPending = false;
       const errorMessage =
         error instanceof ApiError &&
         error.code === "PASSWORD_CONFIRMATION_INVALID"
@@ -188,6 +199,7 @@ export class AuthController {
 
   expire(): void {
     if (this.state.phase === "anonymous" && !this.state.pending) return;
+    if (hasUser(this.state)) void clearOwnerDraftInputs(this.state.user.id);
     this.dispose();
     this.publish({
       phase: "anonymous",
@@ -219,6 +231,7 @@ export class AuthController {
     )
       throw new TypeError("Invalid authenticated user response");
     const effectiveUser = user as EffectiveUser;
+    resumeOwnerDraftInputs(user.id);
     this.publish({
       phase: user.password_change_required ? "restricted" : "authenticated",
       user: effectiveUser,

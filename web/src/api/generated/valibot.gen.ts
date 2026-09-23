@@ -208,10 +208,12 @@ export const vComposerMessageListResponse = v.object({
  * Exact user-approved text for one bounded model proposal attempt.
  */
 export const vComposerModelStepCreateRequest = v.object({
+    answered_question_id: v.nullish(v.pipe(v.string(), v.uuid())),
     approved_endpoint: v.pipe(v.string(), v.minLength(1)),
     approved_model: v.pipe(v.string(), v.minLength(1)),
     connection_id: v.pipe(v.string(), v.uuid()),
     content: v.pipe(v.string(), v.minLength(1)),
+    intent: v.optional(v.picklist(['proposal', 'question']), 'proposal'),
     max_output_tokens: v.pipe(v.number(), v.integer(), v.gtValue(0))
 });
 
@@ -219,14 +221,17 @@ export const vComposerModelStepCreateRequest = v.object({
  * ComposerModelStepResponse
  */
 export const vComposerModelStepResponse = v.object({
+    answered_question_id: v.nullable(v.pipe(v.string(), v.uuid())),
     base_version: v.pipe(v.number(), v.integer()),
     connection_id: v.pipe(v.string(), v.uuid()),
     created_at: v.pipe(v.string(), v.isoTimestamp()),
     draft_id: v.pipe(v.string(), v.uuid()),
     error_code: v.nullable(v.string()),
     id: v.pipe(v.string(), v.uuid()),
+    intent: v.picklist(['proposal', 'question']),
     model_identity: v.string(),
     proposal_id: v.nullable(v.pipe(v.string(), v.uuid())),
+    question_id: v.nullable(v.pipe(v.string(), v.uuid())),
     status: v.string(),
     updated_at: v.pipe(v.string(), v.isoTimestamp())
 });
@@ -271,6 +276,64 @@ export const vComposerProposalListResponse = v.object({
     limit: v.pipe(v.number(), v.integer()),
     offset: v.pipe(v.number(), v.integer()),
     proposals: v.array(vComposerProposalResponse)
+});
+
+/**
+ * ComposerQuestionAnswerRequest
+ */
+export const vComposerQuestionAnswerRequest = v.object({
+    content: v.pipe(v.string(), v.minLength(1))
+});
+
+/**
+ * ComposerQuestionResponse
+ */
+export const vComposerQuestionResponse = v.object({
+    answer_content: v.nullable(v.string()),
+    answer_message_id: v.nullable(v.pipe(v.string(), v.uuid())),
+    answered_at: v.nullable(v.pipe(v.string(), v.isoTimestamp())),
+    base_version: v.pipe(v.number(), v.integer()),
+    created_at: v.pipe(v.string(), v.isoTimestamp()),
+    draft_id: v.pipe(v.string(), v.uuid()),
+    id: v.pipe(v.string(), v.uuid()),
+    model_step_id: v.pipe(v.string(), v.uuid()),
+    state: v.picklist(['pending', 'answered']),
+    text: v.string()
+});
+
+/**
+ * ComposerQuestionListResponse
+ */
+export const vComposerQuestionListResponse = v.object({
+    limit: v.pipe(v.number(), v.integer()),
+    offset: v.pipe(v.number(), v.integer()),
+    questions: v.array(vComposerQuestionResponse)
+});
+
+/**
+ * ComposerRevisionDiffChange
+ */
+export const vComposerRevisionDiffChange = v.object({
+    after_end: v.pipe(v.number(), v.integer()),
+    after_start: v.pipe(v.number(), v.integer()),
+    after_text: v.string(),
+    before_end: v.pipe(v.number(), v.integer()),
+    before_start: v.pipe(v.number(), v.integer()),
+    before_text: v.string(),
+    kind: v.string()
+});
+
+/**
+ * ComposerRevisionDiffResponse
+ */
+export const vComposerRevisionDiffResponse = v.object({
+    changes: v.array(vComposerRevisionDiffChange),
+    from_revision_id: v.pipe(v.string(), v.uuid()),
+    metadata_changes: v.optional(v.array(v.string()), []),
+    reason: v.nullable(v.string()),
+    scope: v.optional(v.picklist(['artifact', 'approved_markdown']), 'artifact'),
+    status: v.string(),
+    to_revision_id: v.pipe(v.string(), v.uuid())
 });
 
 /**
@@ -599,6 +662,53 @@ export const vBodyPreviewPresentationApiV1PresentationPlanPost = v.object({
     dialect: v.optional(vPresentationDialect, 'auto'),
     slide_level: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(6)), 2),
     source: v.string()
+});
+
+/**
+ * ComposerGenerationCreateRequest
+ */
+export const vComposerGenerationCreateRequest = v.object({
+    output: v.picklist([
+        'docx',
+        'pdf',
+        'pptx'
+    ]),
+    presentation_dialect: v.nullish(vPresentationDialect),
+    slide_level: v.nullish(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(6))),
+    template_id: v.nullish(v.pipe(v.string(), v.uuid())),
+    template_version_id: v.nullish(v.pipe(v.string(), v.uuid()))
+});
+
+/**
+ * ComposerGenerationResponse
+ */
+export const vComposerGenerationResponse = v.object({
+    created_at: v.pipe(v.string(), v.isoTimestamp()),
+    draft_id: v.pipe(v.string(), v.uuid()),
+    id: v.pipe(v.string(), v.uuid()),
+    job_id: v.nullable(v.pipe(v.string(), v.uuid())),
+    output: v.picklist([
+        'docx',
+        'pdf',
+        'pptx'
+    ]),
+    presentation_dialect: v.nullable(vPresentationDialect),
+    publishable: v.boolean(),
+    result_revision_id: v.nullable(v.pipe(v.string(), v.uuid())),
+    slide_level: v.nullable(v.pipe(v.number(), v.integer())),
+    source_revision_id: v.pipe(v.string(), v.uuid()),
+    status: v.string(),
+    template_id: v.nullable(v.pipe(v.string(), v.uuid())),
+    template_version_id: v.nullable(v.pipe(v.string(), v.uuid()))
+});
+
+/**
+ * ComposerGenerationListResponse
+ */
+export const vComposerGenerationListResponse = v.object({
+    generations: v.array(vComposerGenerationResponse),
+    limit: v.pipe(v.number(), v.integer()),
+    offset: v.pipe(v.number(), v.integer())
 });
 
 /**
@@ -1303,6 +1413,21 @@ export const vHandoffConversionApiV1ComposerDraftsFromConversionJobIdPostPath = 
  */
 export const vHandoffConversionApiV1ComposerDraftsFromConversionJobIdPostResponse = vComposerDraftResponse;
 
+export const vHandoffReversionApiV1ComposerDraftsFromReversionJobIdPostBody = vComposerHandoffRequest;
+
+export const vHandoffReversionApiV1ComposerDraftsFromReversionJobIdPostHeaders = v.object({
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vHandoffReversionApiV1ComposerDraftsFromReversionJobIdPostPath = v.object({
+    job_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vHandoffReversionApiV1ComposerDraftsFromReversionJobIdPostResponse = vComposerDraftResponse;
+
 export const vGetDraftApiV1ComposerDraftsDraftIdGetPath = v.object({
     draft_id: v.pipe(v.string(), v.uuid())
 });
@@ -1328,13 +1453,68 @@ export const vSaveDraftApiV1ComposerDraftsDraftIdPutPath = v.object({
  */
 export const vSaveDraftApiV1ComposerDraftsDraftIdPutResponse = vComposerDraftResponse;
 
+export const vListGenerationsApiV1ComposerDraftsDraftIdGenerationsGetPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid())
+});
+
+export const vListGenerationsApiV1ComposerDraftsDraftIdGenerationsGetQuery = v.object({
+    limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100)), 50),
+    offset: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(2147483647)), 0)
+});
+
+/**
+ * Successful Response
+ */
+export const vListGenerationsApiV1ComposerDraftsDraftIdGenerationsGetResponse = vComposerGenerationListResponse;
+
+export const vCancelGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdDeleteHeaders = v.object({
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vCancelGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdDeletePath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid()),
+    generation_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vCancelGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdDeleteResponse = vComposerGenerationResponse;
+
+export const vGetGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdGetPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid()),
+    generation_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vGetGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdGetResponse = vComposerGenerationResponse;
+
+export const vPublishGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdPublishPostHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'Idempotency-Key': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vPublishGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdPublishPostPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid()),
+    generation_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vPublishGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdPublishPostResponse = vComposerRevisionResponse;
+
 export const vListMessagesApiV1ComposerDraftsDraftIdMessagesGetPath = v.object({
     draft_id: v.pipe(v.string(), v.uuid())
 });
 
 export const vListMessagesApiV1ComposerDraftsDraftIdMessagesGetQuery = v.object({
     limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100)), 50),
-    offset: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(2147483647)), 0)
+    offset: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(2147483647)), 0),
+    order: v.optional(v.picklist(['asc', 'desc']), 'asc')
 });
 
 /**
@@ -1406,7 +1586,8 @@ export const vListProposalsApiV1ComposerDraftsDraftIdProposalsGetPath = v.object
 
 export const vListProposalsApiV1ComposerDraftsDraftIdProposalsGetQuery = v.object({
     limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100)), 50),
-    offset: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(2147483647)), 0)
+    offset: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(2147483647)), 0),
+    order: v.optional(v.picklist(['asc', 'desc']), 'asc')
 });
 
 /**
@@ -1441,19 +1622,94 @@ export const vDecideProposalApiV1ComposerDraftsDraftIdProposalsProposalIdDecisio
  */
 export const vDecideProposalApiV1ComposerDraftsDraftIdProposalsProposalIdDecisionPostResponse = vComposerProposalResponse;
 
+export const vPublishProposalApiV1ComposerDraftsDraftIdProposalsProposalIdPublishPostHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'Idempotency-Key': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vPublishProposalApiV1ComposerDraftsDraftIdProposalsProposalIdPublishPostPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid()),
+    proposal_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vPublishProposalApiV1ComposerDraftsDraftIdProposalsProposalIdPublishPostResponse = vComposerRevisionResponse;
+
+export const vListQuestionsApiV1ComposerDraftsDraftIdQuestionsGetPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid())
+});
+
+export const vListQuestionsApiV1ComposerDraftsDraftIdQuestionsGetQuery = v.object({
+    limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100)), 50),
+    offset: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(2147483647)), 0),
+    order: v.optional(v.picklist(['asc', 'desc']), 'asc')
+});
+
+/**
+ * Successful Response
+ */
+export const vListQuestionsApiV1ComposerDraftsDraftIdQuestionsGetResponse = vComposerQuestionListResponse;
+
+export const vGetQuestionApiV1ComposerDraftsDraftIdQuestionsQuestionIdGetPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid()),
+    question_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vGetQuestionApiV1ComposerDraftsDraftIdQuestionsQuestionIdGetResponse = vComposerQuestionResponse;
+
+export const vAnswerQuestionApiV1ComposerDraftsDraftIdQuestionsQuestionIdAnswerPostBody = vComposerQuestionAnswerRequest;
+
+export const vAnswerQuestionApiV1ComposerDraftsDraftIdQuestionsQuestionIdAnswerPostHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'Idempotency-Key': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vAnswerQuestionApiV1ComposerDraftsDraftIdQuestionsQuestionIdAnswerPostPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid()),
+    question_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vAnswerQuestionApiV1ComposerDraftsDraftIdQuestionsQuestionIdAnswerPostResponse = vComposerQuestionResponse;
+
 export const vListRevisionsApiV1ComposerDraftsDraftIdRevisionsGetPath = v.object({
     draft_id: v.pipe(v.string(), v.uuid())
 });
 
 export const vListRevisionsApiV1ComposerDraftsDraftIdRevisionsGetQuery = v.object({
     limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100)), 50),
-    offset: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(2147483647)), 0)
+    offset: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(2147483647)), 0),
+    order: v.optional(v.picklist(['asc', 'desc']), 'asc')
 });
 
 /**
  * Successful Response
  */
 export const vListRevisionsApiV1ComposerDraftsDraftIdRevisionsGetResponse = vComposerRevisionListResponse;
+
+export const vPublishDraftApiV1ComposerDraftsDraftIdRevisionsFromDraftPostHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'Idempotency-Key': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vPublishDraftApiV1ComposerDraftsDraftIdRevisionsFromDraftPostPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vPublishDraftApiV1ComposerDraftsDraftIdRevisionsFromDraftPostResponse = vComposerRevisionResponse;
 
 export const vCaptureSourceApiV1ComposerDraftsDraftIdRevisionsFromSourcePostHeaders = v.object({
     'If-Match': v.nullish(v.string()),
@@ -1486,6 +1742,20 @@ export const vReadArtifactApiV1ComposerDraftsDraftIdRevisionsRevisionIdArtifacts
     kind: v.string()
 });
 
+export const vDiffRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdDiffGetPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid()),
+    revision_id: v.pipe(v.string(), v.uuid())
+});
+
+export const vDiffRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdDiffGetQuery = v.object({
+    from_revision_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vDiffRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdDiffGetResponse = vComposerRevisionDiffResponse;
+
 export const vRestoreRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdRestorePostHeaders = v.object({
     'If-Match': v.nullish(v.string()),
     'Idempotency-Key': v.nullish(v.string()),
@@ -1501,6 +1771,24 @@ export const vRestoreRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdRestor
  * Successful Response
  */
 export const vRestoreRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdRestorePostResponse = vComposerRevisionResponse;
+
+export const vCreateGenerationApiV1ComposerDraftsDraftIdRevisionsSourceRevisionIdGenerationsPostBody = vComposerGenerationCreateRequest;
+
+export const vCreateGenerationApiV1ComposerDraftsDraftIdRevisionsSourceRevisionIdGenerationsPostHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'Idempotency-Key': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vCreateGenerationApiV1ComposerDraftsDraftIdRevisionsSourceRevisionIdGenerationsPostPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid()),
+    source_revision_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vCreateGenerationApiV1ComposerDraftsDraftIdRevisionsSourceRevisionIdGenerationsPostResponse = vComposerGenerationResponse;
 
 export const vListPersonalPermissionsApiV1ComposerPersonalPermissionsGetQuery = v.object({
     limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100)), 50),

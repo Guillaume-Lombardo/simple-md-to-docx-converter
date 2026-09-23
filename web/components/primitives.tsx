@@ -41,7 +41,7 @@ export function AppShell({
       <header className="border-b bg-surface">
         <nav
           aria-label="Primary"
-          className="mx-auto flex max-w-5xl items-center gap-6 p-4"
+          className="mx-auto flex max-w-5xl flex-wrap items-center gap-4 p-4"
         >
           <span className="flex shrink-0 items-center gap-2">
             <Image
@@ -62,6 +62,39 @@ export function AppShell({
               </sub>
             </span>
           </span>
+          <div
+            aria-label="Workspace"
+            className="flex shrink-0 items-center gap-2 rounded-control border border-muted p-1"
+            role="group"
+          >
+            <Link
+              aria-current={
+                ["Convert", "Presentations", "Revert"].includes(current)
+                  ? "page"
+                  : undefined
+              }
+              className="rounded-control px-2 py-1 text-accent underline-offset-4 hover:underline"
+              href="/convert"
+            >
+              Convert
+            </Link>
+            <span aria-hidden="true" className="text-muted">
+              |
+            </span>
+            {user && !user.password_change_required ? (
+              <Link
+                aria-current={current === "Composer" ? "page" : undefined}
+                className="rounded-control px-2 py-1 text-accent underline-offset-4 hover:underline"
+                href="/composer"
+              >
+                Composer
+              </Link>
+            ) : (
+              <span aria-disabled="true" className="px-2 py-1 text-muted">
+                Composer
+              </span>
+            )}
+          </div>
           <Link
             aria-current={current === "Convert" ? "page" : undefined}
             className="text-accent underline-offset-4 hover:underline"

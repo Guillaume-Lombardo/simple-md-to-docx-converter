@@ -49,6 +49,7 @@ from markweave.broker.workspace_protocol import (
     WorkspaceStageReceipt,
     WorkspaceStageRequest,
 )
+from markweave.conversion.runtime_manifest import COMPONENT_VERSIONS
 from markweave.http.components import build_components
 from markweave.jobs.models import (
     ConversionJob,
@@ -480,7 +481,7 @@ def test_production_components_keep_forward_live_across_unix_broker_reconnect(
             None,
             None,
             JobOutput.DOCX,
-            (("markweave", "0.6.1"),),
+            COMPONENT_VERSIONS,
             sha256(source).hexdigest(),
             None,
             NOW,

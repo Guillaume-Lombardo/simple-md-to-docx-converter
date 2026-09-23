@@ -10,8 +10,29 @@ import {
   ReversionWorkspace,
   saveReversionDownload,
 } from "../src/reversion/workspace";
+import {
+  readReversionInputs,
+  writeReversionInputs,
+  type SavedReversionInputs,
+} from "../src/conversion/persistence";
 
-afterEach(() => vi.restoreAllMocks());
+const push = vi.fn();
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
+vi.mock("../src/conversion/persistence", () => ({
+  ownerStorageEpoch: vi.fn().mockReturnValue(0),
+  resumeOwnerStorage: vi.fn(),
+  readConversionInputs: vi.fn().mockResolvedValue(undefined),
+  writeConversionInputs: vi.fn().mockResolvedValue(undefined),
+  readReversionInputs: vi.fn().mockResolvedValue(undefined),
+  writeReversionInputs: vi.fn().mockResolvedValue(undefined),
+  clearConversionInputs: vi.fn().mockResolvedValue(undefined),
+}));
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.mocked(readReversionInputs).mockReset().mockResolvedValue(undefined);
+  vi.mocked(writeReversionInputs).mockReset().mockResolvedValue(undefined);
+});
 
 const user = {
   active: true,
@@ -446,4 +467,306 @@ test("download saving defers object URL revocation", () => {
   expect(revokeObjectURL).not.toHaveBeenCalled();
   deferred[0]!();
   expect(revokeObjectURL).toHaveBeenCalledWith("blob:deferred");
+});
+
+test("selected Office source explicitly creates a scanned Composer draft", async () => {
+  push.mockReset();
+  const draftId = "00000000-0000-4000-8000-000000000301";
+  const multipartWithMetadata = vi.fn().mockResolvedValue({
+    data: { id: draftId },
+    location: `/api/v1/composer/drafts/${draftId}`,
+    status: 201,
+  });
+  renderWorkspace({
+    json: vi
+      .fn()
+      .mockResolvedValueOnce(capabilities)
+      .mockResolvedValueOnce({ items: [], limit: 10, offset: 0, total: 0 }),
+    multipartWithMetadata,
+  });
+  const source = new File(["office bytes"], "report.docx");
+  fireEvent.change(await screen.findByLabelText(/Source document/), {
+    target: { files: [source] },
+  });
+  expect(screen.getByText(/Office editing is not yet available/)).toBeVisible();
+  await vi.waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "Open selected source in Composer" }),
+    ).toBeEnabled(),
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Open selected source in Composer" }),
+  );
+  await vi.waitFor(() =>
+    expect(push).toHaveBeenCalledWith(`/composer?draft=${draftId}`),
+  );
+  expect(multipartWithMetadata).toHaveBeenCalledWith(
+    "/api/v1/composer/drafts",
+    expect.any(FormData),
+    expect.anything(),
+    expect.objectContaining({ csrf: true }),
+  );
+  expect(
+    (multipartWithMetadata.mock.calls[0]![1] as FormData).get("source"),
+  ).toBe(source);
+});
+
+test("completed Markdown result uses the owner-scoped reversion handoff", async () => {
+  push.mockReset();
+  const draftId = "00000000-0000-4000-8000-000000000302";
+  const jsonWithMetadata = vi.fn().mockResolvedValue({
+    data: { id: draftId },
+    location: `/api/v1/composer/drafts/${draftId}`,
+    status: 201,
+  });
+  const download = vi.fn();
+  renderWorkspace({
+    json: vi
+      .fn()
+      .mockResolvedValueOnce(capabilities)
+      .mockResolvedValueOnce({
+        items: [reversionJob],
+        limit: 10,
+        offset: 0,
+        total: 1,
+      })
+      .mockResolvedValueOnce(reversionJob),
+    jsonWithMetadata,
+    download,
+  });
+  fireEvent.click(
+    await screen.findByRole("button", { name: /report.docx · succeeded/ }),
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Open Markdown result in Composer" }),
+  );
+  await vi.waitFor(() =>
+    expect(push).toHaveBeenCalledWith(`/composer?draft=${draftId}`),
+  );
+  expect(jsonWithMetadata).toHaveBeenCalledWith(
+    `/api/v1/composer/drafts/from-reversion/${reversionJob.id}`,
+    expect.anything(),
+    expect.objectContaining({
+      body: JSON.stringify({ title: null }),
+      csrf: true,
+      method: "POST",
+    }),
+  );
+  expect(download).not.toHaveBeenCalled();
+});
+
+test("selected PPTX and extraction settings return after Revert remounts", async () => {
+  let saved: SavedReversionInputs | undefined;
+  vi.mocked(readReversionInputs).mockImplementation(async () => saved);
+  vi.mocked(writeReversionInputs).mockImplementation(async (_owner, state) => {
+    saved = { ...state };
+  });
+  const json = () =>
+    vi
+      .fn()
+      .mockResolvedValueOnce(capabilities)
+      .mockResolvedValueOnce({ items: [], limit: 10, offset: 0, total: 0 });
+  const first = renderWorkspace({ json: json() });
+  const source = new File(["slides"], "deck.pptx");
+  fireEvent.change(await screen.findByLabelText(/Source document/), {
+    target: { files: [source] },
+  });
+  fireEvent.click(screen.getByLabelText("Marp Markdown"));
+  await vi.waitFor(() =>
+    expect(saved).toMatchObject({
+      source,
+      options: { extraction: "marp" },
+    }),
+  );
+  first.unmount();
+  renderWorkspace({ json: json() });
+  expect(
+    await screen.findByText("Selected deck.pptx (6 bytes)."),
+  ).toBeVisible();
+  expect(screen.getByLabelText("Marp Markdown")).toBeChecked();
+});
+
+test("unsupported Composer source remains selected and storage failure keeps it visible", async () => {
+  const multipartWithMetadata = vi.fn();
+  renderWorkspace({
+    json: vi
+      .fn()
+      .mockResolvedValueOnce({
+        ...capabilities,
+        format_families: [
+          { ...capabilities.format_families[0], extensions: [".docm"] },
+          capabilities.format_families[1],
+        ],
+      })
+      .mockResolvedValueOnce({ items: [], limit: 10, offset: 0, total: 0 }),
+    multipartWithMetadata,
+  });
+  fireEvent.change(await screen.findByLabelText(/Source document/), {
+    target: { files: [new File(["macro"], "report.docm")] },
+  });
+  await vi.waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "Open selected source in Composer" }),
+    ).toBeEnabled(),
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Open selected source in Composer" }),
+  );
+  expect(
+    await screen.findByText(/Composer accepts selected DOCX/),
+  ).toBeVisible();
+  expect(screen.getByText("Selected report.docm (5 bytes).")).toBeVisible();
+  expect(multipartWithMetadata).not.toHaveBeenCalled();
+});
+
+test("unsupported Composer format remains selected after leaving and returning to 2md", async () => {
+  let saved: SavedReversionInputs | undefined;
+  vi.mocked(readReversionInputs).mockImplementation(async () => saved);
+  vi.mocked(writeReversionInputs).mockImplementation(async (_owner, state) => {
+    saved = { ...state };
+  });
+  const available = {
+    ...capabilities,
+    format_families: [
+      { ...capabilities.format_families[0], extensions: [".docm"] },
+      capabilities.format_families[1],
+    ],
+  };
+  const json = () =>
+    vi
+      .fn()
+      .mockResolvedValueOnce(available)
+      .mockResolvedValueOnce({ items: [], limit: 10, offset: 0, total: 0 });
+  const first = renderWorkspace({ json: json() });
+  fireEvent.change(await screen.findByLabelText(/Source document/), {
+    target: { files: [new File(["macro"], "report.docm")] },
+  });
+  await vi.waitFor(() => expect(saved?.source?.name).toBe("report.docm"));
+  expect(screen.getByRole("link", { name: "Composer" })).toHaveAttribute(
+    "href",
+    "/composer",
+  );
+  first.unmount();
+  renderWorkspace({ json: json() });
+  expect(
+    await screen.findByText("Selected report.docm (5 bytes)."),
+  ).toBeVisible();
+  expect(
+    screen.getByRole("button", { name: "Open selected source in Composer" }),
+  ).toBeEnabled();
+});
+
+test("browser quota failure does not discard Revert's in-memory source", async () => {
+  vi.mocked(writeReversionInputs).mockRejectedValue(
+    new DOMException("quota", "QuotaExceededError"),
+  );
+  renderWorkspace({
+    json: vi
+      .fn()
+      .mockResolvedValueOnce(capabilities)
+      .mockResolvedValueOnce({ items: [], limit: 10, offset: 0, total: 0 }),
+  });
+  fireEvent.change(await screen.findByLabelText(/Source document/), {
+    target: { files: [new File(["office"], "report.pdf")] },
+  });
+  expect(
+    await screen.findByText(/could not be saved in this browser/),
+  ).toBeVisible();
+  expect(screen.getByText("Selected report.pdf (6 bytes).")).toBeVisible();
+  expect(
+    screen.getByRole("button", { name: "Open selected source in Composer" }),
+  ).toBeDisabled();
+});
+
+test("failed Revert input read never autosaves defaults and retries without replacing a new file", async () => {
+  let rejectRead!: (error: Error) => void;
+  let resolveRetry!: (value: SavedReversionInputs) => void;
+  vi.mocked(readReversionInputs)
+    .mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectRead = reject;
+        }),
+    )
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveRetry = resolve;
+        }),
+    );
+  renderWorkspace({
+    json: vi
+      .fn()
+      .mockResolvedValueOnce(capabilities)
+      .mockResolvedValueOnce({ items: [], limit: 10, offset: 0, total: 0 }),
+  });
+  const input = await screen.findByLabelText(/Source document/);
+  await vi.waitFor(() => expect(readReversionInputs).toHaveBeenCalledOnce());
+  const chosen = new File(["current"], "current.docx");
+  fireEvent.change(input, { target: { files: [chosen] } });
+  rejectRead(new Error("transient IndexedDB failure"));
+  expect(
+    await screen.findByText(/Saved browser inputs could not be loaded/),
+  ).toBeVisible();
+  expect(writeReversionInputs).not.toHaveBeenCalled();
+  expect(screen.getByText("Selected current.docx (7 bytes).")).toBeVisible();
+  expect(
+    screen.getByRole("button", { name: "Open selected source in Composer" }),
+  ).toBeDisabled();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Try loading saved inputs" }),
+  );
+  expect(
+    screen.getByText(/Saved browser inputs could not be loaded/),
+  ).toBeVisible();
+  resolveRetry({ source: new File(["old"], "old.pptx") });
+  await vi.waitFor(() => expect(writeReversionInputs).toHaveBeenCalled());
+  expect(
+    screen.queryByText(/Saved browser inputs could not be loaded/),
+  ).toBeNull();
+  expect(screen.getByText("Selected current.docx (7 bytes).")).toBeVisible();
+  expect(vi.mocked(writeReversionInputs).mock.lastCall?.[1].source).toBe(
+    chosen,
+  );
+});
+
+test("a recent reversion opened during a deferred read wins over saved history", async () => {
+  let resolveRead!: (value: SavedReversionInputs) => void;
+  vi.mocked(readReversionInputs).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        resolveRead = resolve;
+      }),
+  );
+  const json = vi
+    .fn()
+    .mockResolvedValueOnce(capabilities)
+    .mockResolvedValueOnce({
+      items: [reversionJob],
+      limit: 10,
+      offset: 0,
+      total: 1,
+    })
+    .mockResolvedValueOnce(reversionJob);
+  const { reversion } = renderWorkspace({ json });
+  const recent = await screen.findByRole("button", {
+    name: /report.docx · succeeded/,
+  });
+  await vi.waitFor(() => expect(readReversionInputs).toHaveBeenCalledOnce());
+  fireEvent.click(recent);
+  await vi.waitFor(() =>
+    expect(reversion.snapshot().active?.id).toBe(reversionJob.id),
+  );
+  resolveRead({
+    source: new File(["old"], "old.pptx"),
+    activeJobId: "00000000-0000-4000-8000-000000000999",
+  });
+  await vi.waitFor(() => expect(writeReversionInputs).toHaveBeenCalled());
+  expect(reversion.snapshot().active?.id).toBe(reversionJob.id);
+  expect(reversion.snapshot().source).toBeUndefined();
+  expect(json).not.toHaveBeenCalledWith(
+    "/api/v1/reversions/00000000-0000-4000-8000-000000000999",
+    expect.anything(),
+    expect.anything(),
+  );
 });

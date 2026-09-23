@@ -1,6 +1,12 @@
 import { AuthController } from "../src/auth/controller";
 import { ApiError, type ApiTransport } from "../src/api/transport";
 import type { UserResponse } from "../src/api/generated/types.gen";
+import { clearConversionInputs } from "../src/conversion/persistence";
+
+vi.mock("../src/conversion/persistence", () => ({
+  clearConversionInputs: vi.fn().mockResolvedValue(undefined),
+  resumeOwnerStorage: vi.fn(),
+}));
 
 const user = (overrides: Partial<UserResponse> = {}): UserResponse => ({
   active: true,
@@ -220,12 +226,17 @@ test("failed logout retains the principal and late responses cannot overwrite ne
     .mockRejectedValueOnce(new TypeError("network"));
   const controller = controllerWith(json);
   await controller.login("Alice", "password");
+  sessionStorage.setItem(`composer:content:${user().id}:draft`, "unsent edit");
   await controller.logout();
   expect(controller.snapshot()).toMatchObject({
     phase: "authenticated",
     error: "Sign-out failed. Try again.",
     pending: false,
   });
+  expect(sessionStorage.getItem(`composer:content:${user().id}:draft`)).toBe(
+    "unsent edit",
+  );
+  sessionStorage.clear();
 
   let resolveOld!: (value: unknown) => void;
   json
@@ -246,12 +257,22 @@ test("failed logout retains the principal and late responses cannot overwrite ne
 });
 
 test("successful logout revokes the visible session and expiry clears an active principal", async () => {
+  vi.mocked(clearConversionInputs).mockClear();
+  sessionStorage.setItem(`composer:message:${user().id}:draft`, "private text");
+  sessionStorage.setItem("composer:message:bob:draft", "other user's text");
   const json = vi
     .fn()
     .mockResolvedValueOnce({ csrf_token: "csrf", user: user() });
   const controller = controllerWith(json);
   await controller.login("Alice", "password");
   controller.expire();
+  expect(clearConversionInputs).toHaveBeenCalledWith(user().id);
+  expect(
+    sessionStorage.getItem(`composer:message:${user().id}:draft`),
+  ).toBeNull();
+  expect(sessionStorage.getItem("composer:message:bob:draft")).toBe(
+    "other user's text",
+  );
   expect(controller.snapshot()).toEqual({
     phase: "anonymous",
     pending: false,
@@ -261,8 +282,14 @@ test("successful logout revokes the visible session and expiry clears an active 
     .mockResolvedValueOnce({ csrf_token: "csrf", user: user() })
     .mockResolvedValueOnce(undefined);
   await controller.login("Alice", "password");
+  sessionStorage.setItem(`composer:title:${user().id}:draft`, "private title");
   await controller.logout();
+  expect(clearConversionInputs).toHaveBeenCalledWith(user().id);
+  expect(
+    sessionStorage.getItem(`composer:title:${user().id}:draft`),
+  ).toBeNull();
   expect(controller.snapshot()).toEqual({ phase: "anonymous", pending: false });
+  sessionStorage.clear();
 });
 
 test("subscribers receive changes and disposal aborts active requests", async () => {

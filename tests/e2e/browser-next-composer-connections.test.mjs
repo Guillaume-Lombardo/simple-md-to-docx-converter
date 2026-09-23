@@ -80,6 +80,7 @@ function installRoutes(page, identity, state) {
       await fulfill(route, {
         instance_connections_manageable: isAdmin,
         maximum_upload_bytes: 1000000,
+        maximum_output_tokens: null,
         personal_connections_allowed: isAdmin ? false : state.personalAllowed,
         status: !isAdmin && !state.personalAllowed ? "unauthorized" : "ready",
         status_message:
