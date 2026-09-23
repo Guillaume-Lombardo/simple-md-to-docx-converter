@@ -30,6 +30,8 @@ from tests.storage_contracts import (
     exercise_template_service_contract,
 )
 
+pytestmark = pytest.mark.light_coverage
+
 
 @pytest.mark.integration
 def test_sqlite_template_repository_contract_and_restart(tmp_path: Path) -> None:

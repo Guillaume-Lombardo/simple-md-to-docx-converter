@@ -280,7 +280,7 @@ test("Composer uses real final-image routing, TLS egress and durable owner revis
     await login(bobPage, bob.username, bob.password);
 
     await alicePage.goto(`${baseURL}/composer/connections`);
-    await alicePage.getByText("Composer status: unauthorized").waitFor();
+    await alicePage.getByText("Composer status: unconfigured").waitFor();
     assert.equal(
       await alicePage
         .getByRole("heading", { name: "Add a connection" })
@@ -303,6 +303,8 @@ test("Composer uses real final-image routing, TLS egress and durable owner revis
       "instance",
       ca,
     );
+    await alicePage.reload({ waitUntil: "networkidle" });
+    await alicePage.getByText("Composer status: unauthorized").waitFor();
     await testConnection(
       adminPage,
       adminConnection.card,

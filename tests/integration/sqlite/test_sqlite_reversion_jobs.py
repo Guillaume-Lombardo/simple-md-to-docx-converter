@@ -70,6 +70,8 @@ from tests.reversion_options_migration_contract import (
     exercise_reversion_options_migration,
 )
 
+pytestmark = pytest.mark.light_coverage
+
 REVERSION_MIGRATION = import_module(
     "markweave.persistence.migrations.versions.20260906_16_reversion_queue"
 )

@@ -26,7 +26,7 @@ from markweave.persistence.schema import (
 )
 from tests.integration.sqlite.test_composer_foundations import _artifacts, _repo
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
 
 
 def test_composer_mutations_are_visible_to_admin_without_values(tmp_path: Path) -> None:

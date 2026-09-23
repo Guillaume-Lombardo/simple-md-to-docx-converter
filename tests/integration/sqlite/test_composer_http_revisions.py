@@ -20,7 +20,7 @@ from markweave.persistence.sql import create_database_engine
 from markweave.storage import FilesystemObjectStore
 from tests.settings import template_settings
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
 
 
 def test_exact_revision_capture_download_restore_and_owner_fence(  # noqa: PLR0915 - one workflow

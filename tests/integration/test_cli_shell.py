@@ -10,7 +10,7 @@ import pytest
 
 from markweave.version import VERSION
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
 
 
 def test_installed_console_script_reports_version_and_login_argument_errors() -> None:

@@ -18,7 +18,7 @@ import pytest
 from markweave.cli.profiles import ProfileStore
 from markweave.cli.types import ConnectionProfile
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
 
 CONNECTION_ID = "00000000-0000-4000-8000-000000000101"
 DRAFT_ID = "00000000-0000-4000-8000-000000000303"

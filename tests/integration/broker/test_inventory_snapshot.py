@@ -19,7 +19,7 @@ from markweave.broker.models import (
     ReplayPosition,
 )
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
 
 KEY = bytes(range(32))
 PRINCIPAL = AuthenticatedPrincipal(UUID("10000000-0000-0000-0000-000000000001"))

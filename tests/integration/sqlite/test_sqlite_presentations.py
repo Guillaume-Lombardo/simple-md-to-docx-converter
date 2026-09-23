@@ -6,6 +6,8 @@ from markweave.persistence.migrations import upgrade_database
 from markweave.persistence.sql import managed_database_engine, standalone_database_url
 from tests.presentation_repository_contracts import exercise_presentation_repository
 
+pytestmark = pytest.mark.light_coverage
+
 
 @pytest.mark.light_coverage
 @pytest.mark.integration

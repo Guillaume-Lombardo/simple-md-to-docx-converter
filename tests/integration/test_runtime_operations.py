@@ -14,7 +14,7 @@ from markweave.runtime_diagnostics import run_runtime_diagnostics
 from markweave.runtime_migrations import migrate_configured_profile
 from tests.settings import template_settings
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
 
 
 def _settings(tmp_path: Path, **overrides: Any) -> Settings:

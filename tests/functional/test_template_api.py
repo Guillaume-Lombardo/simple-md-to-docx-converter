@@ -12,7 +12,7 @@ from markweave.malware import TrustingUploadScanner
 from tests.settings import template_settings
 from tests.unit.test_template_validation import _docx
 
-pytestmark = pytest.mark.functional
+pytestmark = [pytest.mark.functional, pytest.mark.light_coverage]
 
 
 def _client(tmp_path: Path) -> TestClient:

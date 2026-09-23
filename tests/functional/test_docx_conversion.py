@@ -7,6 +7,8 @@ import pytest
 from markweave.conversion.service import DocxConversionService
 from markweave.conversion.validation import ApprovedMarkdown
 
+pytestmark = pytest.mark.light_coverage
+
 
 class RecordingConverter:
     def __init__(self) -> None:

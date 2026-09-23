@@ -57,7 +57,7 @@ from markweave.storage import (
     ObjectStoreError,
 )
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
 
 
 def _users(engine: Engine) -> tuple:

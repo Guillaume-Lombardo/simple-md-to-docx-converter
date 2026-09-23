@@ -22,6 +22,8 @@ from markweave.persistence.sql import create_database_engine, standalone_databas
 from markweave.retention import DataRetentionPolicy, RetentionService
 from markweave.storage import FilesystemObjectStore, ObjectKey, ObjectScope
 
+pytestmark = pytest.mark.light_coverage
+
 
 @pytest.mark.integration
 def test_retention_preserves_current_and_ten_newest_and_traces_audit_cleanup(

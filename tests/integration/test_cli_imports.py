@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
 
 
 def test_cli_help_and_version_do_not_import_server_or_optional_backends() -> None:

@@ -180,6 +180,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
             "detect": 5,
             "light": 20,
             "python-tests": 20,
+            "python-distributed-coverage": 20,
             "python-coverage": 5,
             "domain-plan": 5,
             "heavy": 45,
@@ -215,6 +216,9 @@ READ_ONLY_WORKFLOW_POLICIES = {
             ),
             "python-tests": frozenset(
                 {"name", "runs-on", "timeout-minutes", "strategy", "steps"}
+            ),
+            "python-distributed-coverage": frozenset(
+                {"name", "runs-on", "timeout-minutes", "services", "env", "steps"}
             ),
             "python-coverage": frozenset(
                 {"name", "needs", "runs-on", "timeout-minutes", "steps"}
@@ -364,7 +368,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
             ): "${{ always() && matrix.domain == 'container' }}",
             ("mutation", "Retain mutation evidence"): "${{ always() }}",
         },
-        canonical_digest="161b64127c1e23e2efbfad37e8c08eef63d801a325974e5c5078ca9f5fb91107",
+        canonical_digest="33c286f26b59c087ea17d02ea6e8b815fb808ff8c048bf33df1ff4b3f60d746c",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -823,6 +827,7 @@ def _validate_light_sharding(workflow: Mapping[str, Any]) -> list[str]:
     """Require exhaustive shards and same-attempt coverage before the final gate."""
     jobs = _mapping(workflow.get("jobs")) or {}
     tests = _mapping(jobs.get("python-tests")) or {}
+    distributed = _mapping(jobs.get("python-distributed-coverage")) or {}
     coverage = _mapping(jobs.get("python-coverage")) or {}
     gate = _mapping(jobs.get("gate")) or {}
     errors = []
@@ -832,7 +837,10 @@ def _validate_light_sharding(workflow: Mapping[str, Any]) -> list[str]:
         "matrix": {"shard": [0, 1]},
     }:
         errors.append("light Python tests must run both complementary shards")
-    if coverage.get("needs") != "python-tests" or gate.get("needs") != [
+    if coverage.get("needs") != [
+        "python-tests",
+        "python-distributed-coverage",
+    ] or gate.get("needs") != [
         "detect",
         "light",
         "python-tests",
@@ -841,7 +849,43 @@ def _validate_light_sharding(workflow: Mapping[str, Any]) -> list[str]:
         "heavy",
         "mutation",
     ]:
-        errors.append("light coverage and final gate must require every shard")
+        errors.append(
+            "Python coverage must require both shards and distributed storage"
+        )
+    heavy = _mapping(jobs.get("heavy")) or {}
+    heavy_services = _mapping(heavy.get("services")) or {}
+    distributed_services = _mapping(distributed.get("services")) or {}
+    if distributed.get("env") != heavy.get("env") or set(distributed_services) != {
+        "postgres",
+        "rustfs",
+    }:
+        errors.append("distributed coverage must reuse the pinned storage services")
+    for name in ("postgres", "rustfs"):
+        reference = _mapping(heavy_services.get(name)) or {}
+        candidate = _mapping(distributed_services.get(name)) or {}
+        reference_image = reference.get("image")
+        candidate_image = candidate.get("image")
+        if (
+            not isinstance(reference_image, str)
+            or not isinstance(candidate_image, str)
+            or "@sha256:" not in candidate_image
+            or candidate_image not in reference_image
+            or {key: value for key, value in candidate.items() if key != "image"}
+            != {key: value for key, value in reference.items() if key != "image"}
+        ):
+            errors.append(f"distributed coverage {name} must match the pinned service")
+    if [
+        step.get("name") for step in _job_steps(workflow, "python-distributed-coverage")
+    ] != [
+        "Check out reviewed source",
+        "Set up Python 3.14",
+        "Set up uv",
+        "Synchronize locked dependencies",
+        "Prepare the RustFS test bucket",
+        "Run distributed storage coverage",
+        "Retain distributed coverage",
+    ]:
+        errors.append("distributed coverage must run the complete storage cohort")
     contracts = [
         (
             "python-tests",
@@ -859,6 +903,27 @@ def _validate_light_sharding(workflow: Mapping[str, Any]) -> list[str]:
                 "include-hidden-files": True,
                 "if-no-files-found": "error",
                 "retention-days": 1,
+            },
+        ),
+        (
+            "python-distributed-coverage",
+            "Retain distributed coverage",
+            "with",
+            {
+                "name": "distributed-coverage-${{ github.run_attempt }}",
+                "path": ".coverage",
+                "include-hidden-files": True,
+                "if-no-files-found": "error",
+                "retention-days": 1,
+            },
+        ),
+        (
+            "python-coverage",
+            "Download distributed coverage",
+            "with",
+            {
+                "name": "distributed-coverage-${{ github.run_attempt }}",
+                "path": "artifacts/distributed-coverage",
             },
         ),
     ]
@@ -910,12 +975,24 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             "-p scripts.ci.light_sharding --light-shard-count=2 "
             '--light-shard-index="$SHARD_INDEX" --cov-fail-under=0 --cov-report='
         ),
-        ("python-coverage", "Combine complete light coverage"): (
+        ("python-distributed-coverage", "Prepare the RustFS test bucket"): (
+            "uv run python -m scripts.ci.prepare_s3_test_bucket"
+        ),
+        ("python-distributed-coverage", "Run distributed storage coverage"): (
+            "uv run pytest tests/integration/postgres tests/integration/s3 "
+            "tests/integration/test_local_test_services_lifecycle.py "
+            '-m "requires_postgres or requires_s3" '
+            "-p no:scripts.ci.pytest_branch_coverage "
+            "--cov-fail-under=0 --cov-report="
+        ),
+        ("python-coverage", "Combine complete Python coverage"): (
             "set -euo pipefail\n"
             "test -s artifacts/light-coverage/0/.coverage\n"
             "test -s artifacts/light-coverage/1/.coverage\n"
+            "test -s artifacts/distributed-coverage/.coverage\n"
             "uv run coverage combine artifacts/light-coverage/0/.coverage "
-            "artifacts/light-coverage/1/.coverage\n"
+            "artifacts/light-coverage/1/.coverage "
+            "artifacts/distributed-coverage/.coverage\n"
             "uv run coverage json -o coverage.json --fail-under=90\n"
         ),
         ("python-coverage", "Enforce application branch-only coverage"): (
@@ -1061,6 +1138,7 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
                 cache_writes.append(options["save-cache"])
     if cache_writes != [
         TRUSTED_CACHE_WRITE.removeprefix("save-cache: "),
+        False,
         False,
         False,
         TRUSTED_CACHE_WRITE.removeprefix("save-cache: "),

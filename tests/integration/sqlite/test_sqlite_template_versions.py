@@ -47,7 +47,7 @@ from markweave.templates.service import TemplateRecoveryPolicy, TemplateService
 from markweave.templates.validation import ValidatedTemplate
 from tests.sqlite_compatibility import enforce_sqlite_334_update_grammar
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
 
 
 class _PreferenceWriteRace:

@@ -17,7 +17,7 @@ from markweave.recovery_manifest import RecoveryError
 from markweave.storage import FilesystemObjectStore, ObjectKey, ObjectScope
 from tests.integration.sqlite.test_composer_foundations import _repo
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
 
 
 def test_standalone_restore_verifies_composer_source_and_exact_revision(

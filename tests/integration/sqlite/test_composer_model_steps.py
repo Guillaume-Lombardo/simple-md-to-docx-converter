@@ -39,7 +39,7 @@ from markweave.retention import (
 )
 from markweave.storage import FilesystemObjectStore, ObjectStore
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
 
 _PAYLOAD = hashlib.sha256(b"approved exact request").hexdigest()
 _ENDPOINT = "https://model.internal/v1"

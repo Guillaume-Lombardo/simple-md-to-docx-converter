@@ -29,7 +29,7 @@ from markweave.persistence.schema import (
 from markweave.persistence.sql import create_database_engine
 from markweave.storage import FilesystemObjectStore
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
 
 
 def _setup(tmp_path: Path) -> tuple[Engine, UUID, UUID, UUID]:

@@ -44,6 +44,8 @@ from tests.job_repository_contracts import TEMPLATE_ID, TEMPLATE_VERSION_ID
 from tests.settings import template_settings
 from tests.template_records import publish_template_pair
 
+pytestmark = pytest.mark.light_coverage
+
 NOW = datetime(2026, 8, 24, tzinfo=UTC)
 COMPONENTS = (("md-converter", "0.1.0"),)
 

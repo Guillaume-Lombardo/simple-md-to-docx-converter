@@ -15,7 +15,7 @@ from markweave.cli.main import main
 from markweave.cli.profiles import ProfileStore
 from markweave.cli.types import ConnectionProfile
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
 
 TEMPLATE_ID = "11111111-1111-4111-8111-111111111111"
 VERSION_ID = "22222222-2222-4222-8222-222222222222"

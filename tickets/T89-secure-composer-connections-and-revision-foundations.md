@@ -61,6 +61,22 @@ T88.
   times out, so remote capacity/rollback checks and matched deployment remain pending. Real LiteLLM
   qualification belongs to T93. T89 remains In Progress; no image, deployment, or release acceptance
   is claimed.
+- 2026-09-23: Ready PR [#267](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/267)
+  published reviewed source `a5988e223a5d6abcdbd5d1faf8d0eb15e510b3f8`; its first hosted
+  [CI run 35813722349](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/35813722349)
+  failed Python coverage and both final-image E2E profiles. The two light artifacts covered only
+  86.78% of application branches; the local canonical and changed-line gates had passed at 90.35%
+  and 90.64%, respectively. Both E2E profiles stopped at a test expectation of `unauthorized`
+  before any connection existed, when the defined initial state is `unconfigured`. All other
+  substantive CI jobs passed; the aggregate gate failed as expected. Independently reviewed
+  corrective source now checks `unconfigured` initially and
+  `unauthorized` after an ungranted instance connection exists. It retains the two disjoint light
+  shards and adds an unconditional PostgreSQL/S3 coverage producer with a third same-attempt raw
+  artifact; the 90% total, branch, and changed-line thresholds are unchanged. The corrected
+  no-Podman cohort passes 178 selected local-boundary tests and 315 CI validation/selection tests;
+  a simulation combining authentic CI shard artifacts with the additional real-boundary tests
+  passes the official branch and changed-line checkers at 90.33% and 90.64%. The corrective commit
+  and hosted rerun are pending; neither final-image profile nor docker-box deployment is accepted.
 
 ## Synchronization
 

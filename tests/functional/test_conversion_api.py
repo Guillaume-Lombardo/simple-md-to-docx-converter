@@ -26,6 +26,8 @@ from markweave.templates.models import (
 )
 from tests.settings import template_settings
 
+pytestmark = pytest.mark.light_coverage
+
 
 def login(client: TestClient, username: str, password: str) -> dict[str, Any]:
     response = client.post(

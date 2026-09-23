@@ -26,7 +26,7 @@ from markweave.persistence.sql import managed_database_engine, standalone_databa
 from markweave.storage import ObjectKey, ObjectScope
 from tests.settings import template_settings
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
 
 
 @pytest.fixture
