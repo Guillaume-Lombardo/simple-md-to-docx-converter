@@ -222,7 +222,13 @@ engine test is skipped only through its registered marker and must never be repo
 frontend and policy checks. The Python suite keeps the exact `unit or light_coverage`
 selection but runs in two separate jobs. A stable SHA-256 of each pytest function identity (excluding generated parameter IDs)
 assigns all its cases to exactly one partition; neither job installs document engines.
-The normal local test commands remain unchanged.
+The marker also selects local SQLite, filesystem, loopback HTTP/TLS, and functional
+boundary tests. A separate, always-run coverage job uses the pinned PostgreSQL and
+RustFS services to run the `storage-distributed` test selection. This job runs for
+every pull request, even when affected-domain selection omits the heavier storage
+suite. Both light shards have a 25-minute job bound, measured against the expanded
+cohort while preserving the same two-partition selection. The normal local test
+commands remain unchanged.
 
 To reproduce a partition, use index `0` or `1` and a distinct coverage data file:
 
@@ -234,16 +240,16 @@ COVERAGE_FILE=.coverage.shard0 uv run pytest -m 'unit or light_coverage' \
 ```
 
 The zero threshold applies only to incomplete partition data. `CI / Python coverage`
-requires both successful jobs and both nonempty artifacts from the same workflow run
-and attempt, combines raw coverage, and enforces the original 90% total, branch-only
-and changed-line thresholds. `CI / gate` requires rapid checks, both partitions,
-combined coverage and all selected heavy domains. Coverage artifacts expire after
-one day. After a failure, rerun **all jobs** so that both partition artifacts belong
-to the new attempt; rerunning only one partition or the aggregator fails closed
-instead of accepting data from an older attempt.
+requires both successful partitions and the distributed coverage job. It checks all
+three nonempty raw artifacts from the same workflow attempt before combining them
+and enforcing the unchanged 90% total, branch-only, and changed-line thresholds.
+`CI / gate` requires rapid checks, both partitions, combined coverage, and all
+selected heavy domains. Coverage artifacts expire after one day. After a failure,
+rerun **all jobs** so all three artifacts belong to the new attempt; rerunning only
+one producer or the aggregator fails closed instead of accepting older data.
 
 
-The partition and aggregation jobs restore the existing lock-keyed `uv` cache but
+The partition, distributed, and aggregation jobs restore the existing lock-keyed `uv` cache but
 never save it. The trusted main light job populates it. The frontend restores only
 `web/.next/cache`, keyed by the pinned Node version, dependency lock hash and commit,
 with reuse restricted to the same runtime/dependency prefix. Only trusted main pushes

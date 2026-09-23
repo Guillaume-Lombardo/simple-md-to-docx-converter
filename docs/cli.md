@@ -12,6 +12,7 @@ markweave [--json] [--non-interactive] [--timeout SECONDS] COMMAND
 login | logout | whoami | password change
 convert | jobs {list,show,wait,cancel,download,manifest,reverse}
 templates {list,search,show,create,download,update,replace,archive,delete,versions,version-download,restore,preferred,fallback}
+composer {capabilities,connections,personal-permissions,drafts,messages,model-steps,proposals,revisions}
 users {list,create,activate,deactivate,reset-password,require-password-change}
 audit | health {live,ready,metrics}
 serve | worker | doctor | migrate
@@ -29,6 +30,12 @@ only its result to stdout. Expected command errors write one safe error to stder
 they never include a traceback. Unexpected failures are reduced to the stable
 `internal_error` message. The CLI does not print secrets, passwords, session
 values, or profile contents.
+
+Composer connection setup accepts private credential file paths, including multiline
+PEM material. Revision downloads validate the revision identity and `nosniff`
+response headers before replacing a local file. See
+[Administration CLI](administration-cli.md#composer-connections) for the full command
+forms and security rules.
 
 | Exit status | Meaning |
 | --- | --- |

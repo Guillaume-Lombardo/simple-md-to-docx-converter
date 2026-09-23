@@ -105,6 +105,24 @@ export type BodyCreateConversionApiV1ConversionsPost = {
 };
 
 /**
+ * Body_create_draft_api_v1_composer_drafts_post
+ */
+export type BodyCreateDraftApiV1ComposerDraftsPost = {
+    /**
+     * Content
+     */
+    content?: string | null;
+    /**
+     * Source
+     */
+    source: Blob | File;
+    /**
+     * Title
+     */
+    title?: string | null;
+};
+
+/**
  * Body_create_reversion_api_v1_reversions_post
  */
 export type BodyCreateReversionApiV1ReversionsPost = {
@@ -173,6 +191,698 @@ export type BodyReplaceTemplateApiV1TemplatesTemplateIdContentPut = {
      * Expected Fonts
      */
     expected_fonts: Array<string>;
+};
+
+/**
+ * ComposerArtifactResponse
+ */
+export type ComposerArtifactResponse = {
+    /**
+     * Kind
+     */
+    kind: string;
+    /**
+     * Media Type
+     */
+    media_type: string;
+    /**
+     * Sha256
+     */
+    sha256: string;
+    /**
+     * Size
+     */
+    size: number;
+};
+
+/**
+ * ComposerAvailabilityState
+ */
+export type ComposerAvailabilityState = 'unconfigured' | 'disabled' | 'unauthorized' | 'ready' | 'outage';
+
+/**
+ * ComposerCapabilitiesResponse
+ */
+export type ComposerCapabilitiesResponse = {
+    /**
+     * Instance Connections Manageable
+     */
+    instance_connections_manageable: boolean;
+    /**
+     * Maximum Credential Bytes
+     */
+    maximum_credential_bytes: number | null;
+    /**
+     * Maximum Model Request Bytes
+     */
+    maximum_model_request_bytes: number | null;
+    /**
+     * Maximum Output Tokens
+     */
+    maximum_output_tokens: number | null;
+    /**
+     * Maximum Upload Bytes
+     */
+    maximum_upload_bytes: number | null;
+    /**
+     * Personal Connections Allowed
+     */
+    personal_connections_allowed: boolean;
+    status: ComposerAvailabilityState;
+    /**
+     * Status Message
+     */
+    status_message: string | null;
+};
+
+/**
+ * ComposerDraftListResponse
+ */
+export type ComposerDraftListResponse = {
+    /**
+     * Drafts
+     */
+    drafts: Array<ComposerDraftSummaryResponse>;
+    /**
+     * Limit
+     */
+    limit: number;
+    /**
+     * Offset
+     */
+    offset: number;
+};
+
+/**
+ * ComposerDraftResponse
+ */
+export type ComposerDraftResponse = {
+    /**
+     * Content
+     */
+    content: string;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Current Revision Id
+     */
+    current_revision_id: string | null;
+    /**
+     * Etag
+     */
+    etag: string;
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Source Kind
+     */
+    source_kind: string;
+    /**
+     * Source Media Type
+     */
+    source_media_type: string;
+    /**
+     * Title
+     */
+    title: string;
+    /**
+     * Updated At
+     */
+    updated_at: string;
+    /**
+     * Version
+     */
+    version: number;
+};
+
+/**
+ * ComposerDraftSummaryResponse
+ */
+export type ComposerDraftSummaryResponse = {
+    /**
+     * Current Revision Id
+     */
+    current_revision_id: string | null;
+    /**
+     * Etag
+     */
+    etag: string;
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Source Kind
+     */
+    source_kind: string;
+    /**
+     * Source Media Type
+     */
+    source_media_type: string;
+    /**
+     * Title
+     */
+    title: string;
+    /**
+     * Updated At
+     */
+    updated_at: string;
+    /**
+     * Version
+     */
+    version: number;
+};
+
+/**
+ * ComposerDraftUpdateRequest
+ */
+export type ComposerDraftUpdateRequest = {
+    /**
+     * Content
+     */
+    content: string;
+    /**
+     * Title
+     */
+    title: string;
+};
+
+/**
+ * ComposerHandoffRequest
+ */
+export type ComposerHandoffRequest = {
+    /**
+     * Title
+     */
+    title?: string | null;
+};
+
+/**
+ * ComposerMessageCreateRequest
+ */
+export type ComposerMessageCreateRequest = {
+    /**
+     * Content
+     */
+    content: string;
+};
+
+/**
+ * ComposerMessageListResponse
+ */
+export type ComposerMessageListResponse = {
+    /**
+     * Limit
+     */
+    limit: number;
+    /**
+     * Messages
+     */
+    messages: Array<ComposerMessageResponse>;
+    /**
+     * Offset
+     */
+    offset: number;
+};
+
+/**
+ * ComposerMessageResponse
+ */
+export type ComposerMessageResponse = {
+    /**
+     * Content
+     */
+    content: string;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Draft Id
+     */
+    draft_id: string;
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Role
+     */
+    role: string;
+};
+
+/**
+ * ComposerModelStepCreateRequest
+ *
+ * Exact user-approved text for one bounded model proposal attempt.
+ */
+export type ComposerModelStepCreateRequest = {
+    /**
+     * Approved Endpoint
+     */
+    approved_endpoint: string;
+    /**
+     * Approved Model
+     */
+    approved_model: string;
+    /**
+     * Connection Id
+     */
+    connection_id: string;
+    /**
+     * Content
+     */
+    content: string;
+    /**
+     * Max Output Tokens
+     */
+    max_output_tokens: number;
+};
+
+/**
+ * ComposerModelStepResponse
+ */
+export type ComposerModelStepResponse = {
+    /**
+     * Base Version
+     */
+    base_version: number;
+    /**
+     * Connection Id
+     */
+    connection_id: string;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Draft Id
+     */
+    draft_id: string;
+    /**
+     * Error Code
+     */
+    error_code: string | null;
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Model Identity
+     */
+    model_identity: string;
+    /**
+     * Proposal Id
+     */
+    proposal_id: string | null;
+    /**
+     * Status
+     */
+    status: string;
+    /**
+     * Updated At
+     */
+    updated_at: string;
+};
+
+/**
+ * ComposerProposalDecision
+ */
+export type ComposerProposalDecision = 'accepted' | 'edited' | 'rejected';
+
+/**
+ * ComposerProposalDecisionRequest
+ */
+export type ComposerProposalDecisionRequest = {
+    /**
+     * Decided Value
+     */
+    decided_value?: string | null;
+    state: ComposerProposalDecision;
+};
+
+/**
+ * ComposerProposalListResponse
+ */
+export type ComposerProposalListResponse = {
+    /**
+     * Limit
+     */
+    limit: number;
+    /**
+     * Offset
+     */
+    offset: number;
+    /**
+     * Proposals
+     */
+    proposals: Array<ComposerProposalResponse>;
+};
+
+/**
+ * ComposerProposalResponse
+ */
+export type ComposerProposalResponse = {
+    /**
+     * Base Version
+     */
+    base_version: number;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Decided At
+     */
+    decided_at: string | null;
+    /**
+     * Decided By
+     */
+    decided_by: string | null;
+    /**
+     * Decided Value
+     */
+    decided_value: string | null;
+    /**
+     * Draft Id
+     */
+    draft_id: string;
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Proposed Value
+     */
+    proposed_value: string;
+    /**
+     * Provenance
+     */
+    provenance: string;
+    /**
+     * State
+     */
+    state: string;
+};
+
+/**
+ * ComposerRevisionListResponse
+ */
+export type ComposerRevisionListResponse = {
+    /**
+     * Limit
+     */
+    limit: number;
+    /**
+     * Offset
+     */
+    offset: number;
+    /**
+     * Revisions
+     */
+    revisions: Array<ComposerRevisionSummaryResponse>;
+};
+
+/**
+ * ComposerRevisionResponse
+ */
+export type ComposerRevisionResponse = {
+    /**
+     * Approved Values
+     */
+    approved_values: string;
+    /**
+     * Artifacts
+     */
+    artifacts: Array<ComposerArtifactResponse>;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Draft Id
+     */
+    draft_id: string;
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Model Identity
+     */
+    model_identity: string | null;
+    /**
+     * Number
+     */
+    number: number;
+    /**
+     * Operation
+     */
+    operation: string;
+    /**
+     * Provenance
+     */
+    provenance: string;
+    /**
+     * Render Options
+     */
+    render_options: string;
+    /**
+     * Restored From Revision Id
+     */
+    restored_from_revision_id: string | null;
+    /**
+     * Source Sha256
+     */
+    source_sha256: string;
+    /**
+     * Template Reference
+     */
+    template_reference: string | null;
+};
+
+/**
+ * ComposerRevisionSummaryResponse
+ */
+export type ComposerRevisionSummaryResponse = {
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Draft Id
+     */
+    draft_id: string;
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Model Identity
+     */
+    model_identity: string | null;
+    /**
+     * Number
+     */
+    number: number;
+    /**
+     * Operation
+     */
+    operation: string;
+    /**
+     * Provenance
+     */
+    provenance: string;
+    /**
+     * Restored From Revision Id
+     */
+    restored_from_revision_id: string | null;
+};
+
+/**
+ * ConnectionCreateRequest
+ */
+export type ConnectionCreateRequest = {
+    /**
+     * Allowed User Ids
+     */
+    allowed_user_ids?: Array<string>;
+    /**
+     * Enabled
+     */
+    enabled?: boolean;
+    /**
+     * Endpoint
+     */
+    endpoint: string;
+    identity_mode: ConnectionIdentityMode;
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Permitted Models
+     */
+    permitted_models?: Array<string>;
+    scope: ConnectionScope;
+    /**
+     * Selected Model
+     */
+    selected_model?: string | null;
+};
+
+/**
+ * ConnectionIdentityMode
+ */
+export type ConnectionIdentityMode = 'shared' | 'individual';
+
+/**
+ * ConnectionListResponse
+ */
+export type ConnectionListResponse = {
+    /**
+     * Connections
+     */
+    connections: Array<ConnectionResponse>;
+    /**
+     * Limit
+     */
+    limit: number;
+    /**
+     * Offset
+     */
+    offset: number;
+};
+
+/**
+ * ConnectionModelsResponse
+ */
+export type ConnectionModelsResponse = {
+    /**
+     * Models
+     */
+    models: Array<string>;
+};
+
+/**
+ * ConnectionResponse
+ */
+export type ConnectionResponse = {
+    /**
+     * Allowed User Ids
+     */
+    allowed_user_ids: Array<string>;
+    /**
+     * Authorized
+     */
+    authorized: boolean;
+    /**
+     * Client Certificate Present
+     */
+    client_certificate_present: boolean;
+    /**
+     * Credential Present
+     */
+    credential_present: boolean;
+    /**
+     * Enabled
+     */
+    enabled: boolean;
+    /**
+     * Endpoint
+     */
+    endpoint: string;
+    /**
+     * Etag
+     */
+    etag: string;
+    /**
+     * Id
+     */
+    id: string;
+    identity_mode: ConnectionIdentityMode;
+    /**
+     * Internal Ca Present
+     */
+    internal_ca_present: boolean;
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Permitted Models
+     */
+    permitted_models: Array<string>;
+    scope: ConnectionScope;
+    /**
+     * Selected Model
+     */
+    selected_model: string | null;
+    status: ComposerAvailabilityState;
+    /**
+     * Status Message
+     */
+    status_message: string | null;
+};
+
+/**
+ * ConnectionScope
+ */
+export type ConnectionScope = 'instance' | 'personal';
+
+/**
+ * ConnectionTestRequest
+ */
+export type ConnectionTestRequest = {
+    /**
+     * Model
+     */
+    model?: string | null;
+};
+
+/**
+ * ConnectionTestResponse
+ */
+export type ConnectionTestResponse = {
+    status: ComposerAvailabilityState;
+    /**
+     * Status Message
+     */
+    status_message: string | null;
+};
+
+/**
+ * ConnectionUpdateRequest
+ */
+export type ConnectionUpdateRequest = {
+    /**
+     * Allowed User Ids
+     */
+    allowed_user_ids?: Array<string> | null;
+    /**
+     * Enabled
+     */
+    enabled?: boolean | null;
+    /**
+     * Endpoint
+     */
+    endpoint?: string | null;
+    /**
+     * Name
+     */
+    name?: string | null;
+    /**
+     * Permitted Models
+     */
+    permitted_models?: Array<string> | null;
+    /**
+     * Selected Model
+     */
+    selected_model?: string | null;
 };
 
 /**
@@ -297,6 +1007,32 @@ export type ConversionResponse = {
      * Updated At
      */
     updated_at: string;
+};
+
+/**
+ * CredentialWriteRequest
+ */
+export type CredentialWriteRequest = {
+    /**
+     * Api Key
+     */
+    api_key?: null;
+    /**
+     * Client Certificate
+     */
+    client_certificate?: null;
+    /**
+     * Client Private Key
+     */
+    client_private_key?: null;
+    /**
+     * Internal Ca
+     */
+    internal_ca?: null;
+    /**
+     * Revoke
+     */
+    revoke?: boolean;
 };
 
 /**
@@ -494,6 +1230,56 @@ export type PasswordResetRequest = {
      * Password Change Required
      */
     password_change_required?: boolean;
+};
+
+/**
+ * PersonalPermissionListResponse
+ */
+export type PersonalPermissionListResponse = {
+    /**
+     * Limit
+     */
+    limit: number;
+    /**
+     * Offset
+     */
+    offset: number;
+    /**
+     * Permissions
+     */
+    permissions: Array<PersonalPermissionResponse>;
+};
+
+/**
+ * PersonalPermissionResponse
+ */
+export type PersonalPermissionResponse = {
+    /**
+     * Allowed
+     */
+    allowed: boolean;
+    /**
+     * Etag
+     */
+    etag: string;
+    /**
+     * User Id
+     */
+    user_id: string;
+    /**
+     * Username
+     */
+    username: string;
+};
+
+/**
+ * PersonalPermissionUpdateRequest
+ */
+export type PersonalPermissionUpdateRequest = {
+    /**
+     * Allowed
+     */
+    allowed: boolean;
 };
 
 /**
@@ -1101,6 +1887,32 @@ export type ValidationError = {
     type: string;
 };
 
+/**
+ * CredentialWriteRequest
+ */
+export type CredentialWriteRequestWritable = {
+    /**
+     * Api Key
+     */
+    api_key?: string | null;
+    /**
+     * Client Certificate
+     */
+    client_certificate?: string | null;
+    /**
+     * Client Private Key
+     */
+    client_private_key?: string | null;
+    /**
+     * Internal Ca
+     */
+    internal_ca?: string | null;
+    /**
+     * Revoke
+     */
+    revoke?: boolean;
+};
+
 export type GetSessionPolicyApiV1AdminSessionPolicyGetData = {
     body?: never;
     path?: never;
@@ -1454,6 +2266,1626 @@ export type ListAuditRecordsApiV1AuditGetResponses = {
 };
 
 export type ListAuditRecordsApiV1AuditGetResponse = ListAuditRecordsApiV1AuditGetResponses[keyof ListAuditRecordsApiV1AuditGetResponses];
+
+export type CapabilitiesApiV1ComposerCapabilitiesGetData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/composer/capabilities';
+};
+
+export type CapabilitiesApiV1ComposerCapabilitiesGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type CapabilitiesApiV1ComposerCapabilitiesGetError = CapabilitiesApiV1ComposerCapabilitiesGetErrors[keyof CapabilitiesApiV1ComposerCapabilitiesGetErrors];
+
+export type CapabilitiesApiV1ComposerCapabilitiesGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ComposerCapabilitiesResponse;
+};
+
+export type CapabilitiesApiV1ComposerCapabilitiesGetResponse = CapabilitiesApiV1ComposerCapabilitiesGetResponses[keyof CapabilitiesApiV1ComposerCapabilitiesGetResponses];
+
+export type ListConnectionsApiV1ComposerConnectionsGetData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Limit
+         */
+        limit?: number;
+        /**
+         * Offset
+         */
+        offset?: number;
+    };
+    url: '/api/v1/composer/connections';
+};
+
+export type ListConnectionsApiV1ComposerConnectionsGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type ListConnectionsApiV1ComposerConnectionsGetError = ListConnectionsApiV1ComposerConnectionsGetErrors[keyof ListConnectionsApiV1ComposerConnectionsGetErrors];
+
+export type ListConnectionsApiV1ComposerConnectionsGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ConnectionListResponse;
+};
+
+export type ListConnectionsApiV1ComposerConnectionsGetResponse = ListConnectionsApiV1ComposerConnectionsGetResponses[keyof ListConnectionsApiV1ComposerConnectionsGetResponses];
+
+export type CreateConnectionApiV1ComposerConnectionsPostData = {
+    body: ConnectionCreateRequest;
+    headers?: {
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/composer/connections';
+};
+
+export type CreateConnectionApiV1ComposerConnectionsPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type CreateConnectionApiV1ComposerConnectionsPostError = CreateConnectionApiV1ComposerConnectionsPostErrors[keyof CreateConnectionApiV1ComposerConnectionsPostErrors];
+
+export type CreateConnectionApiV1ComposerConnectionsPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: ConnectionResponse;
+};
+
+export type CreateConnectionApiV1ComposerConnectionsPostResponse = CreateConnectionApiV1ComposerConnectionsPostResponses[keyof CreateConnectionApiV1ComposerConnectionsPostResponses];
+
+export type RevokeConnectionApiV1ComposerConnectionsConnectionIdDeleteData = {
+    body?: never;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Connection Id
+         */
+        connection_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/connections/{connection_id}';
+};
+
+export type RevokeConnectionApiV1ComposerConnectionsConnectionIdDeleteErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type RevokeConnectionApiV1ComposerConnectionsConnectionIdDeleteError = RevokeConnectionApiV1ComposerConnectionsConnectionIdDeleteErrors[keyof RevokeConnectionApiV1ComposerConnectionsConnectionIdDeleteErrors];
+
+export type RevokeConnectionApiV1ComposerConnectionsConnectionIdDeleteResponses = {
+    /**
+     * Successful Response
+     */
+    200: ConnectionResponse;
+};
+
+export type RevokeConnectionApiV1ComposerConnectionsConnectionIdDeleteResponse = RevokeConnectionApiV1ComposerConnectionsConnectionIdDeleteResponses[keyof RevokeConnectionApiV1ComposerConnectionsConnectionIdDeleteResponses];
+
+export type GetConnectionApiV1ComposerConnectionsConnectionIdGetData = {
+    body?: never;
+    path: {
+        /**
+         * Connection Id
+         */
+        connection_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/connections/{connection_id}';
+};
+
+export type GetConnectionApiV1ComposerConnectionsConnectionIdGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type GetConnectionApiV1ComposerConnectionsConnectionIdGetError = GetConnectionApiV1ComposerConnectionsConnectionIdGetErrors[keyof GetConnectionApiV1ComposerConnectionsConnectionIdGetErrors];
+
+export type GetConnectionApiV1ComposerConnectionsConnectionIdGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ConnectionResponse;
+};
+
+export type GetConnectionApiV1ComposerConnectionsConnectionIdGetResponse = GetConnectionApiV1ComposerConnectionsConnectionIdGetResponses[keyof GetConnectionApiV1ComposerConnectionsConnectionIdGetResponses];
+
+export type UpdateConnectionApiV1ComposerConnectionsConnectionIdPatchData = {
+    body: ConnectionUpdateRequest;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Connection Id
+         */
+        connection_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/connections/{connection_id}';
+};
+
+export type UpdateConnectionApiV1ComposerConnectionsConnectionIdPatchErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type UpdateConnectionApiV1ComposerConnectionsConnectionIdPatchError = UpdateConnectionApiV1ComposerConnectionsConnectionIdPatchErrors[keyof UpdateConnectionApiV1ComposerConnectionsConnectionIdPatchErrors];
+
+export type UpdateConnectionApiV1ComposerConnectionsConnectionIdPatchResponses = {
+    /**
+     * Successful Response
+     */
+    200: ConnectionResponse;
+};
+
+export type UpdateConnectionApiV1ComposerConnectionsConnectionIdPatchResponse = UpdateConnectionApiV1ComposerConnectionsConnectionIdPatchResponses[keyof UpdateConnectionApiV1ComposerConnectionsConnectionIdPatchResponses];
+
+export type WriteCredentialsApiV1ComposerConnectionsConnectionIdCredentialsPutData = {
+    body: CredentialWriteRequestWritable;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Connection Id
+         */
+        connection_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/connections/{connection_id}/credentials';
+};
+
+export type WriteCredentialsApiV1ComposerConnectionsConnectionIdCredentialsPutErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type WriteCredentialsApiV1ComposerConnectionsConnectionIdCredentialsPutError = WriteCredentialsApiV1ComposerConnectionsConnectionIdCredentialsPutErrors[keyof WriteCredentialsApiV1ComposerConnectionsConnectionIdCredentialsPutErrors];
+
+export type WriteCredentialsApiV1ComposerConnectionsConnectionIdCredentialsPutResponses = {
+    /**
+     * Successful Response
+     */
+    200: ConnectionResponse;
+};
+
+export type WriteCredentialsApiV1ComposerConnectionsConnectionIdCredentialsPutResponse = WriteCredentialsApiV1ComposerConnectionsConnectionIdCredentialsPutResponses[keyof WriteCredentialsApiV1ComposerConnectionsConnectionIdCredentialsPutResponses];
+
+export type DiscoverModelsApiV1ComposerConnectionsConnectionIdModelsGetData = {
+    body?: never;
+    path: {
+        /**
+         * Connection Id
+         */
+        connection_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/connections/{connection_id}/models';
+};
+
+export type DiscoverModelsApiV1ComposerConnectionsConnectionIdModelsGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The upstream service returned an invalid response
+     */
+    502: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type DiscoverModelsApiV1ComposerConnectionsConnectionIdModelsGetError = DiscoverModelsApiV1ComposerConnectionsConnectionIdModelsGetErrors[keyof DiscoverModelsApiV1ComposerConnectionsConnectionIdModelsGetErrors];
+
+export type DiscoverModelsApiV1ComposerConnectionsConnectionIdModelsGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ConnectionModelsResponse;
+};
+
+export type DiscoverModelsApiV1ComposerConnectionsConnectionIdModelsGetResponse = DiscoverModelsApiV1ComposerConnectionsConnectionIdModelsGetResponses[keyof DiscoverModelsApiV1ComposerConnectionsConnectionIdModelsGetResponses];
+
+export type TestConnectionApiV1ComposerConnectionsConnectionIdTestPostData = {
+    body: ConnectionTestRequest;
+    headers?: {
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Connection Id
+         */
+        connection_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/connections/{connection_id}/test';
+};
+
+export type TestConnectionApiV1ComposerConnectionsConnectionIdTestPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The upstream service returned an invalid response
+     */
+    502: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type TestConnectionApiV1ComposerConnectionsConnectionIdTestPostError = TestConnectionApiV1ComposerConnectionsConnectionIdTestPostErrors[keyof TestConnectionApiV1ComposerConnectionsConnectionIdTestPostErrors];
+
+export type TestConnectionApiV1ComposerConnectionsConnectionIdTestPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: ConnectionTestResponse;
+};
+
+export type TestConnectionApiV1ComposerConnectionsConnectionIdTestPostResponse = TestConnectionApiV1ComposerConnectionsConnectionIdTestPostResponses[keyof TestConnectionApiV1ComposerConnectionsConnectionIdTestPostResponses];
+
+export type ListDraftsApiV1ComposerDraftsGetData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Limit
+         */
+        limit?: number;
+        /**
+         * Offset
+         */
+        offset?: number;
+    };
+    url: '/api/v1/composer/drafts';
+};
+
+export type ListDraftsApiV1ComposerDraftsGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type ListDraftsApiV1ComposerDraftsGetError = ListDraftsApiV1ComposerDraftsGetErrors[keyof ListDraftsApiV1ComposerDraftsGetErrors];
+
+export type ListDraftsApiV1ComposerDraftsGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ComposerDraftListResponse;
+};
+
+export type ListDraftsApiV1ComposerDraftsGetResponse = ListDraftsApiV1ComposerDraftsGetResponses[keyof ListDraftsApiV1ComposerDraftsGetResponses];
+
+export type CreateDraftApiV1ComposerDraftsPostData = {
+    body: BodyCreateDraftApiV1ComposerDraftsPost;
+    headers?: {
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/composer/drafts';
+};
+
+export type CreateDraftApiV1ComposerDraftsPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type CreateDraftApiV1ComposerDraftsPostError = CreateDraftApiV1ComposerDraftsPostErrors[keyof CreateDraftApiV1ComposerDraftsPostErrors];
+
+export type CreateDraftApiV1ComposerDraftsPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: ComposerDraftResponse;
+};
+
+export type CreateDraftApiV1ComposerDraftsPostResponse = CreateDraftApiV1ComposerDraftsPostResponses[keyof CreateDraftApiV1ComposerDraftsPostResponses];
+
+export type HandoffConversionApiV1ComposerDraftsFromConversionJobIdPostData = {
+    body: ComposerHandoffRequest;
+    headers?: {
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Job Id
+         */
+        job_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/from-conversion/{job_id}';
+};
+
+export type HandoffConversionApiV1ComposerDraftsFromConversionJobIdPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * The request conflicts with current state
+     */
+    409: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type HandoffConversionApiV1ComposerDraftsFromConversionJobIdPostError = HandoffConversionApiV1ComposerDraftsFromConversionJobIdPostErrors[keyof HandoffConversionApiV1ComposerDraftsFromConversionJobIdPostErrors];
+
+export type HandoffConversionApiV1ComposerDraftsFromConversionJobIdPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: ComposerDraftResponse;
+};
+
+export type HandoffConversionApiV1ComposerDraftsFromConversionJobIdPostResponse = HandoffConversionApiV1ComposerDraftsFromConversionJobIdPostResponses[keyof HandoffConversionApiV1ComposerDraftsFromConversionJobIdPostResponses];
+
+export type GetDraftApiV1ComposerDraftsDraftIdGetData = {
+    body?: never;
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}';
+};
+
+export type GetDraftApiV1ComposerDraftsDraftIdGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type GetDraftApiV1ComposerDraftsDraftIdGetError = GetDraftApiV1ComposerDraftsDraftIdGetErrors[keyof GetDraftApiV1ComposerDraftsDraftIdGetErrors];
+
+export type GetDraftApiV1ComposerDraftsDraftIdGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ComposerDraftResponse;
+};
+
+export type GetDraftApiV1ComposerDraftsDraftIdGetResponse = GetDraftApiV1ComposerDraftsDraftIdGetResponses[keyof GetDraftApiV1ComposerDraftsDraftIdGetResponses];
+
+export type SaveDraftApiV1ComposerDraftsDraftIdPutData = {
+    body: ComposerDraftUpdateRequest;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}';
+};
+
+export type SaveDraftApiV1ComposerDraftsDraftIdPutErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type SaveDraftApiV1ComposerDraftsDraftIdPutError = SaveDraftApiV1ComposerDraftsDraftIdPutErrors[keyof SaveDraftApiV1ComposerDraftsDraftIdPutErrors];
+
+export type SaveDraftApiV1ComposerDraftsDraftIdPutResponses = {
+    /**
+     * Successful Response
+     */
+    200: ComposerDraftResponse;
+};
+
+export type SaveDraftApiV1ComposerDraftsDraftIdPutResponse = SaveDraftApiV1ComposerDraftsDraftIdPutResponses[keyof SaveDraftApiV1ComposerDraftsDraftIdPutResponses];
+
+export type ListMessagesApiV1ComposerDraftsDraftIdMessagesGetData = {
+    body?: never;
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+    };
+    query?: {
+        /**
+         * Limit
+         */
+        limit?: number;
+        /**
+         * Offset
+         */
+        offset?: number;
+    };
+    url: '/api/v1/composer/drafts/{draft_id}/messages';
+};
+
+export type ListMessagesApiV1ComposerDraftsDraftIdMessagesGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type ListMessagesApiV1ComposerDraftsDraftIdMessagesGetError = ListMessagesApiV1ComposerDraftsDraftIdMessagesGetErrors[keyof ListMessagesApiV1ComposerDraftsDraftIdMessagesGetErrors];
+
+export type ListMessagesApiV1ComposerDraftsDraftIdMessagesGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ComposerMessageListResponse;
+};
+
+export type ListMessagesApiV1ComposerDraftsDraftIdMessagesGetResponse = ListMessagesApiV1ComposerDraftsDraftIdMessagesGetResponses[keyof ListMessagesApiV1ComposerDraftsDraftIdMessagesGetResponses];
+
+export type AddMessageApiV1ComposerDraftsDraftIdMessagesPostData = {
+    body: ComposerMessageCreateRequest;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * Idempotency-Key
+         */
+        'Idempotency-Key'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/messages';
+};
+
+export type AddMessageApiV1ComposerDraftsDraftIdMessagesPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type AddMessageApiV1ComposerDraftsDraftIdMessagesPostError = AddMessageApiV1ComposerDraftsDraftIdMessagesPostErrors[keyof AddMessageApiV1ComposerDraftsDraftIdMessagesPostErrors];
+
+export type AddMessageApiV1ComposerDraftsDraftIdMessagesPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: ComposerMessageResponse;
+};
+
+export type AddMessageApiV1ComposerDraftsDraftIdMessagesPostResponse = AddMessageApiV1ComposerDraftsDraftIdMessagesPostResponses[keyof AddMessageApiV1ComposerDraftsDraftIdMessagesPostResponses];
+
+export type StartModelStepApiV1ComposerDraftsDraftIdModelStepsPostData = {
+    body: ComposerModelStepCreateRequest;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * Idempotency-Key
+         */
+        'Idempotency-Key'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/model-steps';
+};
+
+export type StartModelStepApiV1ComposerDraftsDraftIdModelStepsPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type StartModelStepApiV1ComposerDraftsDraftIdModelStepsPostError = StartModelStepApiV1ComposerDraftsDraftIdModelStepsPostErrors[keyof StartModelStepApiV1ComposerDraftsDraftIdModelStepsPostErrors];
+
+export type StartModelStepApiV1ComposerDraftsDraftIdModelStepsPostResponses = {
+    /**
+     * Successful Response
+     */
+    202: ComposerModelStepResponse;
+};
+
+export type StartModelStepApiV1ComposerDraftsDraftIdModelStepsPostResponse = StartModelStepApiV1ComposerDraftsDraftIdModelStepsPostResponses[keyof StartModelStepApiV1ComposerDraftsDraftIdModelStepsPostResponses];
+
+export type CancelModelStepApiV1ComposerDraftsDraftIdModelStepsStepIdDeleteData = {
+    body?: never;
+    headers?: {
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Step Id
+         */
+        step_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/model-steps/{step_id}';
+};
+
+export type CancelModelStepApiV1ComposerDraftsDraftIdModelStepsStepIdDeleteErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type CancelModelStepApiV1ComposerDraftsDraftIdModelStepsStepIdDeleteError = CancelModelStepApiV1ComposerDraftsDraftIdModelStepsStepIdDeleteErrors[keyof CancelModelStepApiV1ComposerDraftsDraftIdModelStepsStepIdDeleteErrors];
+
+export type CancelModelStepApiV1ComposerDraftsDraftIdModelStepsStepIdDeleteResponses = {
+    /**
+     * Successful Response
+     */
+    200: ComposerModelStepResponse;
+};
+
+export type CancelModelStepApiV1ComposerDraftsDraftIdModelStepsStepIdDeleteResponse = CancelModelStepApiV1ComposerDraftsDraftIdModelStepsStepIdDeleteResponses[keyof CancelModelStepApiV1ComposerDraftsDraftIdModelStepsStepIdDeleteResponses];
+
+export type GetModelStepApiV1ComposerDraftsDraftIdModelStepsStepIdGetData = {
+    body?: never;
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Step Id
+         */
+        step_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/model-steps/{step_id}';
+};
+
+export type GetModelStepApiV1ComposerDraftsDraftIdModelStepsStepIdGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type GetModelStepApiV1ComposerDraftsDraftIdModelStepsStepIdGetError = GetModelStepApiV1ComposerDraftsDraftIdModelStepsStepIdGetErrors[keyof GetModelStepApiV1ComposerDraftsDraftIdModelStepsStepIdGetErrors];
+
+export type GetModelStepApiV1ComposerDraftsDraftIdModelStepsStepIdGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ComposerModelStepResponse;
+};
+
+export type GetModelStepApiV1ComposerDraftsDraftIdModelStepsStepIdGetResponse = GetModelStepApiV1ComposerDraftsDraftIdModelStepsStepIdGetResponses[keyof GetModelStepApiV1ComposerDraftsDraftIdModelStepsStepIdGetResponses];
+
+export type ListProposalsApiV1ComposerDraftsDraftIdProposalsGetData = {
+    body?: never;
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+    };
+    query?: {
+        /**
+         * Limit
+         */
+        limit?: number;
+        /**
+         * Offset
+         */
+        offset?: number;
+    };
+    url: '/api/v1/composer/drafts/{draft_id}/proposals';
+};
+
+export type ListProposalsApiV1ComposerDraftsDraftIdProposalsGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type ListProposalsApiV1ComposerDraftsDraftIdProposalsGetError = ListProposalsApiV1ComposerDraftsDraftIdProposalsGetErrors[keyof ListProposalsApiV1ComposerDraftsDraftIdProposalsGetErrors];
+
+export type ListProposalsApiV1ComposerDraftsDraftIdProposalsGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ComposerProposalListResponse;
+};
+
+export type ListProposalsApiV1ComposerDraftsDraftIdProposalsGetResponse = ListProposalsApiV1ComposerDraftsDraftIdProposalsGetResponses[keyof ListProposalsApiV1ComposerDraftsDraftIdProposalsGetResponses];
+
+export type GetProposalApiV1ComposerDraftsDraftIdProposalsProposalIdGetData = {
+    body?: never;
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Proposal Id
+         */
+        proposal_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/proposals/{proposal_id}';
+};
+
+export type GetProposalApiV1ComposerDraftsDraftIdProposalsProposalIdGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type GetProposalApiV1ComposerDraftsDraftIdProposalsProposalIdGetError = GetProposalApiV1ComposerDraftsDraftIdProposalsProposalIdGetErrors[keyof GetProposalApiV1ComposerDraftsDraftIdProposalsProposalIdGetErrors];
+
+export type GetProposalApiV1ComposerDraftsDraftIdProposalsProposalIdGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ComposerProposalResponse;
+};
+
+export type GetProposalApiV1ComposerDraftsDraftIdProposalsProposalIdGetResponse = GetProposalApiV1ComposerDraftsDraftIdProposalsProposalIdGetResponses[keyof GetProposalApiV1ComposerDraftsDraftIdProposalsProposalIdGetResponses];
+
+export type DecideProposalApiV1ComposerDraftsDraftIdProposalsProposalIdDecisionPostData = {
+    body: ComposerProposalDecisionRequest;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Proposal Id
+         */
+        proposal_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/proposals/{proposal_id}/decision';
+};
+
+export type DecideProposalApiV1ComposerDraftsDraftIdProposalsProposalIdDecisionPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type DecideProposalApiV1ComposerDraftsDraftIdProposalsProposalIdDecisionPostError = DecideProposalApiV1ComposerDraftsDraftIdProposalsProposalIdDecisionPostErrors[keyof DecideProposalApiV1ComposerDraftsDraftIdProposalsProposalIdDecisionPostErrors];
+
+export type DecideProposalApiV1ComposerDraftsDraftIdProposalsProposalIdDecisionPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: ComposerProposalResponse;
+};
+
+export type DecideProposalApiV1ComposerDraftsDraftIdProposalsProposalIdDecisionPostResponse = DecideProposalApiV1ComposerDraftsDraftIdProposalsProposalIdDecisionPostResponses[keyof DecideProposalApiV1ComposerDraftsDraftIdProposalsProposalIdDecisionPostResponses];
+
+export type ListRevisionsApiV1ComposerDraftsDraftIdRevisionsGetData = {
+    body?: never;
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+    };
+    query?: {
+        /**
+         * Limit
+         */
+        limit?: number;
+        /**
+         * Offset
+         */
+        offset?: number;
+    };
+    url: '/api/v1/composer/drafts/{draft_id}/revisions';
+};
+
+export type ListRevisionsApiV1ComposerDraftsDraftIdRevisionsGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type ListRevisionsApiV1ComposerDraftsDraftIdRevisionsGetError = ListRevisionsApiV1ComposerDraftsDraftIdRevisionsGetErrors[keyof ListRevisionsApiV1ComposerDraftsDraftIdRevisionsGetErrors];
+
+export type ListRevisionsApiV1ComposerDraftsDraftIdRevisionsGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ComposerRevisionListResponse;
+};
+
+export type ListRevisionsApiV1ComposerDraftsDraftIdRevisionsGetResponse = ListRevisionsApiV1ComposerDraftsDraftIdRevisionsGetResponses[keyof ListRevisionsApiV1ComposerDraftsDraftIdRevisionsGetResponses];
+
+export type CaptureSourceApiV1ComposerDraftsDraftIdRevisionsFromSourcePostData = {
+    body?: never;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * Idempotency-Key
+         */
+        'Idempotency-Key'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/revisions/from-source';
+};
+
+export type CaptureSourceApiV1ComposerDraftsDraftIdRevisionsFromSourcePostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type CaptureSourceApiV1ComposerDraftsDraftIdRevisionsFromSourcePostError = CaptureSourceApiV1ComposerDraftsDraftIdRevisionsFromSourcePostErrors[keyof CaptureSourceApiV1ComposerDraftsDraftIdRevisionsFromSourcePostErrors];
+
+export type CaptureSourceApiV1ComposerDraftsDraftIdRevisionsFromSourcePostResponses = {
+    /**
+     * Successful Response
+     */
+    201: ComposerRevisionResponse;
+};
+
+export type CaptureSourceApiV1ComposerDraftsDraftIdRevisionsFromSourcePostResponse = CaptureSourceApiV1ComposerDraftsDraftIdRevisionsFromSourcePostResponses[keyof CaptureSourceApiV1ComposerDraftsDraftIdRevisionsFromSourcePostResponses];
+
+export type GetRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdGetData = {
+    body?: never;
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Revision Id
+         */
+        revision_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}';
+};
+
+export type GetRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type GetRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdGetError = GetRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdGetErrors[keyof GetRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdGetErrors];
+
+export type GetRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ComposerRevisionResponse;
+};
+
+export type GetRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdGetResponse = GetRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdGetResponses[keyof GetRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdGetResponses];
+
+export type ReadArtifactApiV1ComposerDraftsDraftIdRevisionsRevisionIdArtifactsKindGetData = {
+    body?: never;
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Revision Id
+         */
+        revision_id: string;
+        /**
+         * Kind
+         */
+        kind: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/artifacts/{kind}';
+};
+
+export type ReadArtifactApiV1ComposerDraftsDraftIdRevisionsRevisionIdArtifactsKindGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type ReadArtifactApiV1ComposerDraftsDraftIdRevisionsRevisionIdArtifactsKindGetError = ReadArtifactApiV1ComposerDraftsDraftIdRevisionsRevisionIdArtifactsKindGetErrors[keyof ReadArtifactApiV1ComposerDraftsDraftIdRevisionsRevisionIdArtifactsKindGetErrors];
+
+export type ReadArtifactApiV1ComposerDraftsDraftIdRevisionsRevisionIdArtifactsKindGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: unknown;
+};
+
+export type RestoreRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdRestorePostData = {
+    body?: never;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * Idempotency-Key
+         */
+        'Idempotency-Key'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Revision Id
+         */
+        revision_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/restore';
+};
+
+export type RestoreRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdRestorePostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type RestoreRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdRestorePostError = RestoreRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdRestorePostErrors[keyof RestoreRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdRestorePostErrors];
+
+export type RestoreRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdRestorePostResponses = {
+    /**
+     * Successful Response
+     */
+    201: ComposerRevisionResponse;
+};
+
+export type RestoreRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdRestorePostResponse = RestoreRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdRestorePostResponses[keyof RestoreRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdRestorePostResponses];
+
+export type ListPersonalPermissionsApiV1ComposerPersonalPermissionsGetData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Limit
+         */
+        limit?: number;
+        /**
+         * Offset
+         */
+        offset?: number;
+    };
+    url: '/api/v1/composer/personal-permissions';
+};
+
+export type ListPersonalPermissionsApiV1ComposerPersonalPermissionsGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type ListPersonalPermissionsApiV1ComposerPersonalPermissionsGetError = ListPersonalPermissionsApiV1ComposerPersonalPermissionsGetErrors[keyof ListPersonalPermissionsApiV1ComposerPersonalPermissionsGetErrors];
+
+export type ListPersonalPermissionsApiV1ComposerPersonalPermissionsGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: PersonalPermissionListResponse;
+};
+
+export type ListPersonalPermissionsApiV1ComposerPersonalPermissionsGetResponse = ListPersonalPermissionsApiV1ComposerPersonalPermissionsGetResponses[keyof ListPersonalPermissionsApiV1ComposerPersonalPermissionsGetResponses];
+
+export type GetPersonalPermissionApiV1ComposerPersonalPermissionsUserIdGetData = {
+    body?: never;
+    path: {
+        /**
+         * User Id
+         */
+        user_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/personal-permissions/{user_id}';
+};
+
+export type GetPersonalPermissionApiV1ComposerPersonalPermissionsUserIdGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type GetPersonalPermissionApiV1ComposerPersonalPermissionsUserIdGetError = GetPersonalPermissionApiV1ComposerPersonalPermissionsUserIdGetErrors[keyof GetPersonalPermissionApiV1ComposerPersonalPermissionsUserIdGetErrors];
+
+export type GetPersonalPermissionApiV1ComposerPersonalPermissionsUserIdGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: PersonalPermissionResponse;
+};
+
+export type GetPersonalPermissionApiV1ComposerPersonalPermissionsUserIdGetResponse = GetPersonalPermissionApiV1ComposerPersonalPermissionsUserIdGetResponses[keyof GetPersonalPermissionApiV1ComposerPersonalPermissionsUserIdGetResponses];
+
+export type SetPersonalPermissionApiV1ComposerPersonalPermissionsUserIdPutData = {
+    body: PersonalPermissionUpdateRequest;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * User Id
+         */
+        user_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/personal-permissions/{user_id}';
+};
+
+export type SetPersonalPermissionApiV1ComposerPersonalPermissionsUserIdPutErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type SetPersonalPermissionApiV1ComposerPersonalPermissionsUserIdPutError = SetPersonalPermissionApiV1ComposerPersonalPermissionsUserIdPutErrors[keyof SetPersonalPermissionApiV1ComposerPersonalPermissionsUserIdPutErrors];
+
+export type SetPersonalPermissionApiV1ComposerPersonalPermissionsUserIdPutResponses = {
+    /**
+     * Successful Response
+     */
+    200: PersonalPermissionResponse;
+};
+
+export type SetPersonalPermissionApiV1ComposerPersonalPermissionsUserIdPutResponse = SetPersonalPermissionApiV1ComposerPersonalPermissionsUserIdPutResponses[keyof SetPersonalPermissionApiV1ComposerPersonalPermissionsUserIdPutResponses];
 
 export type GetConversionOptionsApiV1ConversionOptionsGetData = {
     body?: never;

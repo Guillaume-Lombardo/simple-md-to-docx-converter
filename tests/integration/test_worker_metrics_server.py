@@ -19,7 +19,7 @@ from markweave.observability import (
     QueueSnapshot,
 )
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
 
 
 class _QueueObserver:

@@ -15,7 +15,7 @@ from markweave.conversion.processor import build_production_processor
 from markweave.malware import TrustingUploadScanner
 from tests.settings import template_settings
 
-pytestmark = pytest.mark.functional
+pytestmark = [pytest.mark.functional, pytest.mark.light_coverage]
 
 
 def settings_for(tmp_path: Path, *, pandoc: str = "/bin/true") -> Settings:

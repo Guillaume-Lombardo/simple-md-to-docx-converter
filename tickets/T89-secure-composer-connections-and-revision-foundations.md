@@ -2,7 +2,7 @@
 ticket: T89
 linear_id: G1L-588
 linear_url: https://linear.app/g1lom/issue/G1L-588/t89-implement-secure-composer-connections-and-durable-revision
-status: Backlog
+status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -44,6 +44,99 @@ T88.
 ## Progress
 
 - 2026-09-22: Created in Linear and mirrored before implementation. No delivery is claimed.
+- 2026-09-23: Started on `feat/T89-composer-foundations` after verified T88 merge.
+- 2026-09-23: Independently reviewed candidate includes connection security, browser setup, CLI
+  parity, durable drafts/revisions in both profiles, bounded shared-database model-step cancellation
+  and periodic restart recovery, transactional content-free audit, and exact artifact/restore
+  handling. Real HTTP-to-SQLite-to-private-HTTPS tests cover cancellation, no late proposal, and sole
+  execution-slot reuse; PostgreSQL/S3 integration tests also passed locally. The immutable-source
+  canonical Python run passed 5,006 tests, with 56 external-engine-marked deselected and 17 warnings
+  in 41m04s; total coverage is 94.24% and the repository branch-only gate passes at 90.35%
+  (7,374/8,162). Earlier moving-source baselines failed with seven, then two, test failures; the
+  related regressions are fixed and covered by the final passing run. Ruff, ty, OpenAPI, and web
+  checks pass; the official changed-line gate awaits the candidate commit. The unmocked final-image
+  harness covers private HTTPS, mTLS, permissions, outage, scanner failures, cancellation, exact
+  revisions, and post-Composer isolated backup/restore, but standalone and distributed images have
+  not run. Hosted PR CI will run both profiles after publication. Docker-box SSH agent signing still
+  times out, so remote capacity/rollback checks and matched deployment remain pending. Real LiteLLM
+  qualification belongs to T93. T89 remains In Progress; no image, deployment, or release acceptance
+  is claimed.
+- 2026-09-23: Ready PR [#267](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/267)
+  published reviewed source `a5988e223a5d6abcdbd5d1faf8d0eb15e510b3f8`; its first hosted
+  [CI run 35813722349](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/35813722349)
+  failed Python coverage and both final-image E2E profiles. The two light artifacts covered only
+  86.78% of application branches; the local canonical and changed-line gates had passed at 90.35%
+  and 90.64%, respectively. Both E2E profiles stopped at a test expectation of `unauthorized`
+  before any connection existed, when the defined initial state is `unconfigured`. All other
+  substantive CI jobs passed; the aggregate gate failed as expected. Independently reviewed
+  corrective source now checks `unconfigured` initially and
+  `unauthorized` after an ungranted instance connection exists. It retains the two disjoint light
+  shards and adds an unconditional PostgreSQL/S3 coverage producer with a third same-attempt raw
+  artifact; the 90% total, branch, and changed-line thresholds are unchanged. The corrected
+  no-Podman cohort passes 178 selected local-boundary tests and 315 CI validation/selection tests;
+  a simulation combining authentic CI shard artifacts with the additional real-boundary tests
+  passes the official branch and changed-line checkers at 90.33% and 90.64%. The corrective commit
+  and hosted rerun are pending; neither final-image profile nor docker-box deployment is accepted.
+- 2026-09-23: The second hosted
+  [CI run 35816849061](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/35816849061)
+  at exact PR head `e89bf4c894730d062883edbd24011885ca43a1e1` ended `cancelled`.
+  The new unconditional PostgreSQL/S3 coverage job and Python shard 1 passed; shard 0 reached
+  99% before its 20-minute job limit cancelled it, so the aggregate coverage job was skipped.
+  Both final-image E2E profiles stopped after successful connection metadata creation because
+  a page-global secret-field locator matched both the Add form and the new card's rotation form.
+  Every other substantive job passed, while the final gate failed. The next corrective candidate
+  bounds light shards to 25 minutes without changing their selection or coverage
+  contract, and scopes all four secret-field clearing assertions to the Add form in both real and
+  mocked browser tests. The mocked browser test and 13 Composer component tests pass locally;
+  the real final-image journeys remain unverified after that assertion. The next corrective commit,
+  hosted rerun, and docker-box deployment/rollback are pending; T89 remains In Progress.
+- 2026-09-23: The third hosted
+  [CI run 35819110981](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/35819110981)
+  at exact PR head `0b5ea7de80479fda2e0abf806356ab4fdccc4630` completed with all
+  substantive jobs passing except the two final-image E2E profiles. Both Python shards passed
+  within the 25-minute bound (22m01s and 18m20s), and the three-artifact hosted coverage gate
+  passed at 90.31% application branches (7,371/8,162) and 90.64% changed lines (3,670/4,049).
+  The aggregate gate failed because both E2E profiles stopped at the same test fixture assumption:
+  an administrator could manage and test a shared instance connection but had not been granted
+  permission to use it, so `unauthorized` correctly took precedence over the asserted `outage`.
+  The independently reviewed correction grants only that authenticated administrator through the
+  Add form and verifies the grant in the request, creation response, and later listing while
+  retaining Alice/Bob denials. A new hosted run, both complete final-image journeys, and matched
+  docker-box deployment/rollback remain pending; T89 stays In Progress.
+- 2026-09-23: The fourth hosted
+  [CI run 35821247681](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/35821247681)
+  at exact PR head `8abc8be6a2b2585686d612bce328b2070a14b99a` passed both Python shards,
+  unconditional PostgreSQL/S3 coverage, and aggregate coverage at 90.30% application branches
+  (7,370/8,162) and 90.64% changed lines (3,670/4,049). Both rootless-image profiles passed the
+  connection browser test and full real Composer routing, TLS, draft, and revision journey. The
+  standalone profile then failed opening `/login` immediately after forcing the fake scanner
+  offline, before scanner-outage resilience assertions. The distributed profile passed those
+  outage assertions but failed the mapped scanner readiness probe after scanner restart. An
+  isolated existing-image Podman reproduction established that a dynamically allocated scanner
+  IP changes across stop/start while the harness pins the original IP in dependent containers.
+  A one-file harness correction now assigns a network-derived static scanner IP and adds bounded
+  status-only router/frontend/backend probes to diagnose the separate standalone `/login`
+  failure; it retains the real scanner stop/start, fail-closed upload, retained-read, and mapped
+  recovery checks. Local shell checks and 38 harness tests pass. Independent review, hosted
+  rerun, both complete final-image profiles, and docker-box deployment/rollback remain pending.
+  T89 stays In Progress.
+- 2026-09-23: The fifth hosted
+  [CI run 35823925638](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/35823925638)
+  at exact PR head `ec28dcfcf0a6c8ff81cbd36ce9a8196bec6f6584` completed with the complete
+  distributed rootless-image E2E workflow passing, including real Composer connections,
+  TLS/model calls, durable revisions, scanner-offline fail-closed upload with retained owner
+  reads, resumed scanner, isolated backup/restore, and restart checks. The standalone image
+  again passed the full real Composer journey but stopped before scanner-outage assertions:
+  one-shot probes after scanner stop showed the production router `/login` and the `frontend`
+  network alias timing out, while the same frontend page at its inspected numeric address and
+  backend readiness both returned 200. The light job separately failed when the 50-card
+  pagination test exceeded Vitest's five-second default by 64 ms; 250 other web tests passed.
+  All other substantive jobs passed, so the aggregate gate failed only for light and standalone
+  E2E. Independently reviewed local corrections use the current validated numeric frontend
+  address inside the E2E production router and give only the 50-card test a ten-second bound;
+  they retain real browser-to-router routing and all scanner/revision assertions. The next hosted
+  run must pass both profiles and the light job; matched docker-box deployment/rollback remains
+  pending. T89 stays In Progress.
 
 ## Synchronization
 

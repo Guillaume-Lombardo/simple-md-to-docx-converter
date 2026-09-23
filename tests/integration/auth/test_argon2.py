@@ -11,6 +11,8 @@ from argon2.low_level import Type
 
 from markweave.auth.security import Argon2idPasswordHasher, SecretsTokenGenerator
 
+pytestmark = pytest.mark.light_coverage
+
 
 @pytest.mark.integration
 def test_default_argon2id_parameters_verify_and_reject_passwords() -> None:

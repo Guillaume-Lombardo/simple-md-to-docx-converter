@@ -73,7 +73,62 @@ def test_security_defaults_and_secret_redaction() -> None:
     assert settings.reversion_retry_after_seconds is None
     assert settings.reversion_result_retention_seconds is None
     assert settings.reversion_active_limit_per_user is None
+    assert settings.composer_enabled is False
     assert secret not in repr(settings)
+
+
+@pytest.mark.unit
+def test_composer_egress_requires_complete_explicit_operator_policy() -> None:
+    with pytest.raises(
+        ValidationError, match="Composer connection policy must be complete"
+    ):
+        Settings.model_validate(_environment_configuration(composer_enabled=True))
+
+    configured = Settings.model_validate(
+        _environment_configuration(
+            composer_enabled=True,
+            composer_allowed_destinations=["litellm.example.test:443"],
+            composer_allowed_networks=["192.0.2.0/24"],
+            composer_secret_key_path="/run/secrets/composer-envelope-key",  # noqa: S106 - path
+            composer_upload_max_bytes=8192,
+            composer_http_request_max_bytes=9216,
+            composer_maximum_request_bytes=4096,
+            composer_maximum_response_bytes=4096,
+            composer_maximum_models=8,
+            composer_maximum_allowed_users=100,
+            composer_maximum_model_name_length=128,
+            composer_maximum_credential_bytes=8192,
+            composer_maximum_output_tokens=1024,
+            composer_maximum_concurrent_calls=2,
+            composer_retry_after_seconds=3,
+            composer_timeout_seconds=5.0,
+            composer_pending_publication_stale_seconds=30.0,
+            composer_draft_retention_seconds=3600,
+        )
+    )
+    assert configured.composer_enabled
+    assert configured.composer_allowed_destinations == ("litellm.example.test:443",)
+    assert configured.composer_retry_after_seconds == 3
+
+    with pytest.raises(
+        ValidationError, match="Composer connection policy must be complete"
+    ):
+        Settings.model_validate(
+            {**configured.model_dump(), "composer_retry_after_seconds": None}
+        )
+
+    larger_explicit_ceiling = Settings.model_validate(
+        {**configured.model_dump(), "composer_maximum_allowed_users": 1001}
+    )
+    assert larger_explicit_ceiling.composer_maximum_allowed_users == 1001
+
+    with pytest.raises(ValidationError, match="Composer connection policy is invalid"):
+        Settings.model_validate(
+            {
+                **configured.model_dump(),
+                "composer_secret_key_path": "relative-key",
+            }
+        )
 
 
 @pytest.mark.unit

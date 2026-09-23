@@ -42,6 +42,8 @@ from tests.storage_contracts import (
     exercise_object_store_contract,
 )
 
+pytestmark = pytest.mark.light_coverage
+
 
 @pytest.mark.integration
 def test_sqlite_authentication_repository_contract(tmp_path: Path) -> None:

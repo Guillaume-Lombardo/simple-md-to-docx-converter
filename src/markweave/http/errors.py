@@ -12,6 +12,24 @@ from markweave.auth.policy_errors import (
     IdleSessionPolicyConflictError,
     IdleSessionPolicyPreconditionRequiredError,
 )
+from markweave.composer.connections import (
+    ConnectionAuthorizationError,
+    ConnectionConfigurationError,
+    ConnectionConflictError,
+    ConnectionNotFoundError,
+)
+from markweave.composer.egress import (
+    EgressCapacityError,
+    EgressPolicyError,
+    EgressResponseError,
+    EgressUnavailableError,
+)
+from markweave.composer.revisions import (
+    ComposerArtifactError,
+    ComposerConflictError,
+    ComposerNotFoundError,
+)
+from markweave.composer.secrets import SecretError
 from markweave.jobs.errors import (
     JobConflictError,
     JobNotFoundError,
@@ -21,6 +39,7 @@ from markweave.jobs.errors import (
     JobUserQuotaExceededError,
 )
 from markweave.malware import MalwareDetectedError, MalwareScannerUnavailableError
+from markweave.persistence.composer import ComposerCapacityError
 from markweave.persistence.errors import PersistenceError
 from markweave.reversion_jobs.errors import (
     ReversionJobConflictError,
@@ -46,6 +65,13 @@ from markweave.templates.errors import (
     TemplateValidationErrorCode,
 )
 
+from .composer_errors import (
+    ComposerPreconditionInvalidError,
+    ComposerPreconditionRequiredError,
+    ComposerRequestError,
+    ComposerRequestTooLargeError,
+    ComposerUnavailableError,
+)
 from .schemas import ErrorResponse
 
 ERROR_DESCRIPTIONS = {
@@ -58,6 +84,7 @@ ERROR_DESCRIPTIONS = {
     422: "The request is invalid",
     428: "The request requires a precondition",
     429: "The caller has exceeded a configured quota",
+    502: "The upstream service returned an invalid response",
     503: "The service is not ready",
 }
 
@@ -71,6 +98,17 @@ def error_responses(*status_codes: int) -> dict[int | str, dict[str, Any]]:
         }
         for status_code in status_codes
     }
+
+
+def capacity_error_responses(*status_codes: int) -> dict[int | str, dict[str, Any]]:
+    """Document the retry header on Composer routes with model-call capacity."""
+
+    responses = error_responses(*status_codes)
+    if status.HTTP_503_SERVICE_UNAVAILABLE in responses:
+        responses[status.HTTP_503_SERVICE_UNAVAILABLE]["headers"] = {
+            "Retry-After": {"schema": {"type": "string"}}
+        }
+    return responses
 
 
 def install_error_handlers(app: FastAPI) -> None:
@@ -98,6 +136,146 @@ def install_error_handlers(app: FastAPI) -> None:
                 }
             },
         )
+
+    for error_class, http_status, code, message in (
+        (
+            ConnectionAuthorizationError,
+            403,
+            "COMPOSER_FORBIDDEN",
+            "This Composer operation is not permitted.",
+        ),
+        (
+            ConnectionConflictError,
+            412,
+            "COMPOSER_PRECONDITION_FAILED",
+            "The Composer resource has changed.",
+        ),
+        (
+            ConnectionNotFoundError,
+            404,
+            "COMPOSER_CONNECTION_NOT_FOUND",
+            "The Composer connection was not found.",
+        ),
+        (
+            ConnectionConfigurationError,
+            422,
+            "COMPOSER_CONNECTION_INVALID",
+            "The Composer connection is invalid.",
+        ),
+        (
+            EgressPolicyError,
+            422,
+            "COMPOSER_DESTINATION_REJECTED",
+            "The model destination is not permitted.",
+        ),
+        (
+            EgressCapacityError,
+            503,
+            "COMPOSER_CAPACITY_EXHAUSTED",
+            "Composer model call capacity is temporarily exhausted.",
+        ),
+        (
+            EgressUnavailableError,
+            503,
+            "COMPOSER_PROVIDER_UNAVAILABLE",
+            "The model provider is temporarily unavailable.",
+        ),
+        (
+            EgressResponseError,
+            502,
+            "COMPOSER_PROVIDER_RESPONSE_INVALID",
+            "The model provider returned an invalid response.",
+        ),
+        (
+            ComposerPreconditionRequiredError,
+            428,
+            "COMPOSER_PRECONDITION_REQUIRED",
+            "If-Match is required.",
+        ),
+        (
+            ComposerPreconditionInvalidError,
+            422,
+            "COMPOSER_PRECONDITION_INVALID",
+            "If-Match is invalid.",
+        ),
+        (
+            ComposerUnavailableError,
+            503,
+            "COMPOSER_SERVICE_UNAVAILABLE",
+            "Composer is unavailable.",
+        ),
+        (
+            ComposerRequestError,
+            422,
+            "COMPOSER_REQUEST_INVALID",
+            "The Composer request is invalid.",
+        ),
+        (
+            ComposerRequestTooLargeError,
+            413,
+            "COMPOSER_UPLOAD_TOO_LARGE",
+            "The Composer source exceeds the configured limit.",
+        ),
+        (
+            ComposerNotFoundError,
+            404,
+            "COMPOSER_RESOURCE_NOT_FOUND",
+            "The Composer resource was not found.",
+        ),
+        (
+            ComposerCapacityError,
+            503,
+            "COMPOSER_CAPACITY_EXHAUSTED",
+            "Composer model call capacity is temporarily exhausted.",
+        ),
+        (
+            ComposerConflictError,
+            412,
+            "COMPOSER_PRECONDITION_FAILED",
+            "The Composer resource has changed.",
+        ),
+        (
+            ComposerArtifactError,
+            503,
+            "COMPOSER_ARTIFACT_UNAVAILABLE",
+            "The Composer artifact is unavailable.",
+        ),
+        (
+            SecretError,
+            503,
+            "COMPOSER_CREDENTIAL_UNAVAILABLE",
+            "The model credential is unavailable.",
+        ),
+    ):
+
+        def handler(
+            request: Request,
+            _error: Exception,
+            *,
+            response_status: int = http_status,
+            response_code: str = code,
+            response_message: str = message,
+        ) -> JSONResponse:
+            headers = {"Cache-Control": "private, no-store"}
+            if response_status == status.HTTP_503_SERVICE_UNAVAILABLE:
+                headers["Retry-After"] = str(
+                    request.app.state.composer_retry_after_seconds
+                )
+            if isinstance(_error, ComposerCapacityError):
+                request.app.state.components.metrics.record_composer_model_step_saturation(
+                    "admission"
+                )
+            elif isinstance(_error, EgressCapacityError):
+                request.app.state.components.metrics.record_composer_model_step_saturation(
+                    "egress"
+                )
+            return JSONResponse(
+                status_code=response_status,
+                headers=headers,
+                content={"error": {"code": response_code, "message": response_message}},
+            )
+
+        app.add_exception_handler(error_class, handler)
 
     @app.exception_handler(PersistenceError)
     def persistence_error_handler(

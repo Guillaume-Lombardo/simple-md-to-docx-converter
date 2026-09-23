@@ -17,6 +17,8 @@ from markweave.app import create_app
 from markweave.config import Settings
 from tests.settings import template_settings
 
+pytestmark = pytest.mark.light_coverage
+
 
 @contextmanager
 def running_server(settings: Settings) -> Iterator[str]:

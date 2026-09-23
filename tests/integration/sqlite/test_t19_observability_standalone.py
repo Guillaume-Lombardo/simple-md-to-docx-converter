@@ -33,7 +33,7 @@ from tests.reversion_observability_contracts import (
 )
 from tests.template_records import publish_template_pair
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
 
 
 def test_sqlite_queue_metrics_correlation_and_audit_are_content_free(

@@ -346,7 +346,7 @@ def test_every_final_image_container_monitor_inherits_owned_directory() -> None:
         if line.lstrip().startswith("podman run")
     ]
 
-    assert len(podman_runs) == 16
+    assert len(podman_runs) == 17
     assert all(
         '"$temporary_directory" "$temporary_directory_identity"' in lines[index - 1]
         for index in podman_runs
@@ -355,6 +355,44 @@ def test_every_final_image_container_monitor_inherits_owned_directory() -> None:
     removal_index = runner.index("if ! e2e_remove_harness_directory")
     worktree_index = runner.index("if ! e2e_require_worktree_state_unchanged")
     assert removal_index < worktree_index
+
+
+@pytest.mark.unit
+def test_composer_final_image_provider_and_restore_preserve_harness_guards() -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    provider_start = runner.index(
+        'podman run --detach --name "$composer_provider_name"'
+    )
+    provider_block = runner[
+        runner.rfind("e2e_run_in_harness_directory", 0, provider_start) : runner.index(
+            "composer_provider_ready=false", provider_start
+        )
+    ]
+    assert '"$temporary_directory" "$temporary_directory_identity"' in provider_block
+    assert '--network "$network_name"' in provider_block
+    assert '--user "$runtime_uid:0" --read-only' in provider_block
+    assert "--cap-drop=all --security-opt=no-new-privileges" in provider_block
+    assert '--volume "$composer_provider_directory:/provider:ro,Z"' in provider_block
+
+    restore = runner.split("restore_composer_snapshot() {", 1)[1].split(
+        "\nkill_backend_and_reconnect_router() {", 1
+    )[0]
+    assert restore.index('podman rm --force "$router_name"') < restore.index(
+        'podman stop --time 15 "$application_name"'
+    )
+    assert restore.index(
+        'podman unshare cmp -- "$temporary_directory/composer-key-backup"'
+    ) < restore.index('podman start "$application_name"')
+    assert restore.index('podman start "$application_name"') < restore.index(
+        'start_production_router "$application_name"'
+    )
+
+    composer_browser = runner.index("/e2e/browser-next-composer-real.test.mjs")
+    restore_call = runner.index("\nrestore_composer_snapshot\n")
+    restored_browser = runner.index(
+        "MARKWEAVE_E2E_COMPOSER_PHASE=restored-backup", restore_call
+    )
+    assert provider_start < composer_browser < restore_call < restored_browser
 
 
 @pytest.mark.unit
@@ -388,18 +426,21 @@ def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
     assert 'podman image exists "$frontend_image"' in runner
     assert '"$frontend_image" node router.mjs' in runner
     assert 'local backend_origin="${2:-http://127.0.0.1:8080}"' in runner
-    assert 'local frontend_origin="${3:-http://frontend:3000}"' in runner
+    assert 'local frontend_origin="${3:-}"' in runner
     assert 'local expected_api_status="${4:-401}"' in runner
     assert 'local probe_page="${5:-true}"' in runner
     assert "AbortSignal.timeout(1000)" in runner
     assert "--env PUBLIC_HOSTS=localhost:3100" in runner
     assert "--env ROUTER_UPSTREAM_TIMEOUT_MS=30000" in runner
-    assert runner.count('start_production_router "$application_name"') == 7
+    assert runner.count('start_production_router "$application_name"') == 8
     assert runner.count('restart_backend_and_router "$application_name"') == 1
     assert runner.count('kill_backend_and_reconnect_router "$application_name"') == 1
     assert runner.count('start_production_router "$expiry_application_name"') == 1
     provisioning = runner.index("/e2e/browser-provisioning-restart.test.mjs")
-    first_router = runner.index('start_production_router "$application_name"')
+    first_router = runner.index(
+        'start_production_router "$application_name"',
+        runner.index("application_mode=serve"),
+    )
     assert first_router < provisioning
     assert (
         "MARKWEAVE_E2E_BASE_URL=http://localhost:3100"
@@ -407,7 +448,7 @@ def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
     )
     assert (
         'start_production_router "$application_name" http://127.0.0.1:1 \\\n'
-        "  http://frontend:3000 502" in runner
+        '  "$(admission_frontend_origin)" 502' in runner
     )
     assert "MARKWEAVE_E2E_RUNTIME_FAILURE=frontend-outage" in runner
     assert "MARKWEAVE_E2E_RUNTIME_FAILURE=backend-outage" in runner
@@ -436,6 +477,32 @@ def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
     assert 'podman logs "$router_name" >&2 || true' in runner
     assert 'podman logs "$frontend_name" >&2 || true' in runner
     assert 'podman restart --time 15 "$application_name"' not in runner[first_router:]
+
+
+@pytest.mark.unit
+def test_router_uses_current_numeric_frontend_address_during_scanner_outage() -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    router = runner.split("start_production_router() {", 1)[1].split(
+        "\nstart_frontend() {", 1
+    )[0]
+    assert router.index('frontend_origin="$(admission_frontend_origin)"') < (
+        router.index('podman run --detach --name "$router_name"')
+    )
+    assert '--env "FRONTEND_ORIGIN=$frontend_origin"' in router
+    assert "http://frontend:3000" not in router
+    assert (
+        'start_production_router "$application_name" http://127.0.0.1:1 \\\n'
+        '  "$(admission_frontend_origin)" 502' in runner
+    )
+
+    outage_probe = runner.split("probe_scanner_outage_routes() {", 1)[1].split(
+        "\nadmission_frontend_origin() {", 1
+    )[0]
+    assert '["frontend_alias", "http://frontend:3000/login"]' in outage_probe
+    assert '["frontend_numeric", `${process.env.E2E_FRONTEND_ORIGIN}/login`]' in (
+        outage_probe
+    )
+    assert 'name !== "frontend_alias" && status !== "200"' in outage_probe
 
 
 @pytest.mark.unit
@@ -623,7 +690,7 @@ def test_router_is_removed_before_every_backend_network_parent() -> None:
 
     assert 'podman rm --force "$router_name" "$application_name"' not in runner
     assert 'podman rm --force "$router_name" "$expiry_application_name"' not in runner
-    assert runner.count('podman rm --force "$router_name" >/dev/null') == 9
+    assert runner.count('podman rm --force "$router_name" >/dev/null') == 10
     cleanup = runner[runner.index("cleanup() {") : runner.index("trap cleanup EXIT")]
     assert cleanup.index('podman rm --force "$router_name"') < cleanup.index(
         'for resource in "${created[@]}"'

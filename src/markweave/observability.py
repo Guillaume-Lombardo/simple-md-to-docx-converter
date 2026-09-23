@@ -126,6 +126,19 @@ _REVERSION_OPERATIONS = frozenset(
         "reversion_cleanup",
     }
 )
+_COMPOSER_MODEL_STEP_OUTCOMES = frozenset(
+    {"running", "completed", "cancelled", "failed"}
+)
+_COMPOSER_MODEL_STEP_FAILURE_CODES = frozenset(
+    {
+        "execution_unavailable",
+        "provider_unavailable",
+        "provider_invalid",
+        "execution_failed",
+        "capacity_exhausted",
+    }
+)
+_COMPOSER_MODEL_STEP_SATURATION_SCOPES = frozenset({"admission", "egress"})
 _REVERSION_RUNTIME_STATES = frozenset(
     {
         "disabled",
@@ -436,6 +449,7 @@ class OperationalMetrics:
         )
         self._monotonic_clock = monotonic_clock
         self._reversion_runtime_state = "disabled"
+        self._composer_active_model_steps = 0
 
     def record_failure(self, code: str) -> None:
         self._increment("md_converter_job_failures_total", code=code)
@@ -471,6 +485,73 @@ class OperationalMetrics:
             amount=max(0.0, seconds),
             method=method,
             status=status,
+        )
+
+    def set_composer_active_model_steps(self, count: int) -> None:
+        """Publish the current process-local Composer model-step count."""
+
+        if type(count) is not int or count < 0:
+            raise ValueError("Composer active model-step count is invalid")
+        with self._lock:
+            self._composer_active_model_steps = count
+
+    def record_composer_model_step_duration(self, outcome: str, seconds: float) -> None:
+        """Record one bounded, terminal or running Composer model-step duration."""
+
+        if (
+            outcome not in _COMPOSER_MODEL_STEP_OUTCOMES
+            or type(seconds) not in {int, float}
+            or not math.isfinite(seconds)
+            or not 0 <= seconds <= MAX_LOG_DURATION_SECONDS
+        ):
+            raise ValueError("Composer model-step duration observation is invalid")
+        self._increment(
+            "md_converter_composer_model_step_duration_seconds_count",
+            outcome=outcome,
+        )
+        self._increment(
+            "md_converter_composer_model_step_duration_seconds_sum",
+            amount=seconds,
+            outcome=outcome,
+        )
+
+    def record_composer_model_step_failure(self, code: str) -> None:
+        """Record one Composer model step that reached a known failed outcome."""
+
+        if code not in _COMPOSER_MODEL_STEP_FAILURE_CODES:
+            raise ValueError("Composer model-step failure code is invalid")
+        self._increment("md_converter_composer_model_step_failures_total", code=code)
+
+    def record_composer_model_step_saturation(self, scope: str) -> None:
+        """Record bounded admission or egress capacity exhaustion."""
+
+        if scope not in _COMPOSER_MODEL_STEP_SATURATION_SCOPES:
+            raise ValueError("Composer model-step saturation scope is invalid")
+        self._increment(
+            "md_converter_composer_model_step_saturation_total", scope=scope
+        )
+
+    def record_composer_model_step_retry(self) -> None:
+        """Record one bounded Composer model-step retry."""
+
+        self._increment("md_converter_composer_model_step_retries_total")
+
+    def record_composer_model_step_recovery(self, count: int) -> None:
+        """Record model steps recovered after an interrupted execution."""
+
+        if type(count) is not int or count < 0:
+            raise ValueError("Composer model-step recovery count is invalid")
+        self._increment(
+            "md_converter_composer_model_step_recoveries_total", amount=count
+        )
+
+    def record_composer_model_step_expiration(self, count: int) -> None:
+        """Record model steps expired during bounded cleanup."""
+
+        if type(count) is not int or count < 0:
+            raise ValueError("Composer model-step expiration count is invalid")
+        self._increment(
+            "md_converter_composer_model_step_expirations_total", amount=count
         )
 
     def set_reversion_runtime_state(self, state: str) -> None:
@@ -584,6 +665,7 @@ class OperationalMetrics:
                 "md_converter_reversion_reconciliation_pending",
                 float(queue.reversion_reconciliation_pending),
             ),
+            ("md_converter_composer_active_model_steps", self._composer_active_steps()),
             *self._reversion_runtime_gauges(),
         )
         with self._lock:
@@ -624,6 +706,10 @@ class OperationalMetrics:
             ),
             ("md_converter_reversion_degraded", float(enabled and state != "ready")),
         )
+
+    def _composer_active_steps(self) -> float:
+        with self._lock:
+            return float(self._composer_active_model_steps)
 
     def _increment(self, name: str, *, amount: float = 1.0, **labels: str) -> None:
         if amount < 0:

@@ -16,6 +16,8 @@ from markweave.templates.models import (
 )
 from markweave.templates.service import TemplateOperation, TemplateService
 
+pytestmark = pytest.mark.light_coverage
+
 
 def user(name: str, role: Role = Role.USER) -> User:
     return User(uuid4(), name, name.casefold(), "hash:" + name, role)

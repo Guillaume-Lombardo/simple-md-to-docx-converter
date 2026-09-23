@@ -7,7 +7,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 class BoundedRequestBody:
     """Bound upload request bytes before multipart parsing or spooling."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - explicit independent request boundaries
         self,
         app: ASGIApp,
         *,
@@ -15,12 +15,14 @@ class BoundedRequestBody:
         reversion_maximum_bytes: int | None,
         template_maximum_bytes: int,
         template_metadata_maximum_bytes: int,
+        composer_maximum_bytes: int | None = None,
     ) -> None:
         self._app = app
         self._conversion_maximum_bytes = conversion_maximum_bytes
         self._reversion_maximum_bytes = reversion_maximum_bytes
         self._template_maximum_bytes = template_maximum_bytes
         self._template_metadata_maximum_bytes = template_metadata_maximum_bytes
+        self._composer_maximum_bytes = composer_maximum_bytes
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -54,6 +56,15 @@ class BoundedRequestBody:
             maximum_bytes = self._template_metadata_maximum_bytes
             error_code = "TEMPLATE_REQUEST_TOO_LARGE"
             error_message = "The template request is too large."
+        elif method in {"POST", "PUT", "PATCH"} and path.startswith(
+            "/api/v1/composer/"
+        ):
+            if self._composer_maximum_bytes is None:
+                await self._reject_composer_unavailable(send)
+                return
+            maximum_bytes = self._composer_maximum_bytes
+            error_code = "COMPOSER_REQUEST_TOO_LARGE"
+            error_message = "The Composer request is too large."
         else:
             await self._app(scope, receive, send)
             return
@@ -85,6 +96,26 @@ class BoundedRequestBody:
         content = (
             b'{"error":{"code":"REVERSION_SERVICE_UNAVAILABLE",'
             b'"message":"Reverse conversion is unavailable."}}'
+        )
+        await send(
+            {
+                "type": "http.response.start",
+                "status": status.HTTP_503_SERVICE_UNAVAILABLE,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(content)).encode("ascii")),
+                    (b"cache-control", b"private, no-store"),
+                    (b"x-content-type-options", b"nosniff"),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": content})
+
+    @staticmethod
+    async def _reject_composer_unavailable(send: Send) -> None:
+        content = (
+            b'{"error":{"code":"COMPOSER_SERVICE_UNAVAILABLE",'
+            b'"message":"Composer is unavailable."}}'
         )
         await send(
             {

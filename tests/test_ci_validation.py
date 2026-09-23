@@ -236,7 +236,7 @@ def test_ci_upload_artifact_pin_and_comment_are_canonical() -> None:
         for line in workflow.splitlines()
         if "uses: actions/upload-artifact@" in line
     ]
-    assert upload_lines == [f"uses: {UPLOAD_ARTIFACT_PIN}"] * 4
+    assert upload_lines == [f"uses: {UPLOAD_ARTIFACT_PIN}"] * 5
     assert "archive: false" not in workflow
 
     drifted = workflow.replace(
@@ -254,7 +254,7 @@ def test_ci_upload_artifact_pin_and_comment_are_canonical() -> None:
 def test_ci_uses_only_github_hosted_runners() -> None:
     """The upload-artifact v7 runner floor is delegated to GitHub-hosted images."""
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
-    assert workflow.count("runs-on: ubuntu-24.04") == 8
+    assert workflow.count("runs-on: ubuntu-24.04") == 9
     assert "self-hosted" not in workflow
 
 
@@ -2057,10 +2057,26 @@ def test_python_source_discovery_excludes_installed_package_managers(
     ("original", "replacement"),
     [
         ("shard: [0, 1]", "shard: [0]"),
-        ("needs: python-tests", "needs: light"),
+        ("timeout-minutes: 25", "timeout-minutes: 20"),
+        (
+            "needs: [python-tests, python-distributed-coverage]",
+            "needs: python-tests",
+        ),
         ("include-hidden-files: true", "include-hidden-files: false"),
         ("light-coverage-${{ github.run_attempt }}-1", "light-coverage-1-1"),
         ("test -s artifacts/light-coverage/1/.coverage", "true"),
+        (
+            "test -s artifacts/distributed-coverage/.coverage",
+            "true",
+        ),
+        (
+            "distributed-coverage-${{ github.run_attempt }}",
+            "distributed-coverage-1",
+        ),
+        (
+            "artifacts/distributed-coverage/.coverage\n          uv run coverage combine",
+            "artifacts/distributed-coverage/.coverage\n          uv run coverage json",
+        ),
         (
             "coverage json -o coverage.json --fail-under=90",
             "coverage json -o coverage.json --fail-under=0",
@@ -2088,12 +2104,43 @@ def test_sharded_light_cannot_omit_tests_or_weaken_aggregate_gate(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("original", "replacement"),
+    [
+        (
+            "tests/integration/postgres tests/integration/s3",
+            "tests/integration/postgres",
+        ),
+        (
+            "      - name: Prepare the RustFS test bucket\n"
+            "        run: uv run python -m scripts.ci.prepare_s3_test_bucket\n",
+            "",
+        ),
+        (
+            "name: distributed-coverage-${{ github.run_attempt }}",
+            "name: distributed-coverage-1",
+        ),
+        (
+            "path: artifacts/distributed-coverage",
+            "path: artifacts/light-coverage/0",
+        ),
+    ],
+)
+def test_distributed_coverage_cohort_and_artifact_cannot_be_dropped(
+    original: str, replacement: str
+) -> None:
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert original in workflow
+    assert validate_workflow_text(workflow.replace(original, replacement, 1))
+
+
+@pytest.mark.unit
 def test_split_jobs_reuse_dependencies_and_only_trusted_main_writes_compiler_cache() -> (
     None
 ):
     text = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
     workflow = yaml.load(text, Loader=WorkflowLoader)  # noqa: S506
-    for job in ("python-tests", "python-coverage"):
+    for job in ("python-tests", "python-distributed-coverage", "python-coverage"):
         setup = next(
             step
             for step in workflow["jobs"][job]["steps"]

@@ -13,6 +13,10 @@ from markweave.http.routers import (
     administration,
     audit_observability,
     authentication,
+    composer_connections,
+    composer_drafts,
+    composer_model_steps,
+    composer_revisions,
     conversions,
     presentations,
     reversions,
@@ -68,6 +72,7 @@ def create_app(  # noqa: PLR0913 - explicit lifecycle composition inputs
         template_metadata_maximum_bytes=(
             resolved_settings.template_metadata_request_max_bytes
         ),
+        composer_maximum_bytes=resolved_settings.composer_http_request_max_bytes,
     )
     app.add_middleware(
         CorrelationMiddleware,
@@ -76,6 +81,11 @@ def create_app(  # noqa: PLR0913 - explicit lifecycle composition inputs
     app.state.components = resolved_components
     app.state.conversion_retry_after_seconds = (
         resolved_settings.conversion_retry_after_seconds
+    )
+    app.state.composer_retry_after_seconds = (
+        resolved_settings.composer_retry_after_seconds
+        if resolved_settings.composer_retry_after_seconds is not None
+        else resolved_settings.conversion_retry_after_seconds
     )
     app.state.reversion_retry_after_seconds = (
         resolved_settings.reversion_retry_after_seconds
@@ -96,6 +106,10 @@ def create_app(  # noqa: PLR0913 - explicit lifecycle composition inputs
     routers = (
         audit_observability.build_router(dependencies, embedded_worker),
         authentication.build_router(dependencies),
+        composer_connections.build_router(dependencies),
+        composer_drafts.build_router(dependencies),
+        composer_model_steps.build_router(dependencies),
+        composer_revisions.build_router(dependencies),
         administration.build_router(dependencies),
         conversions.build_router(dependencies),
         presentations.build_router(dependencies),

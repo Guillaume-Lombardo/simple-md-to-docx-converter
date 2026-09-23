@@ -21,6 +21,8 @@ from tests.functional.test_auth_api import (
     use_session,
 )
 
+pytestmark = pytest.mark.light_coverage
+
 POLICY_METADATA = {
     "user_idle_minutes_bounds": {
         "minimum_minutes": MINIMUM_USER_IDLE_MINUTES,

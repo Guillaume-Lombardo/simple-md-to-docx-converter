@@ -61,6 +61,8 @@ from tests.sqlite_compatibility import (
 )
 from tests.template_records import publish_template_pair
 
+pytestmark = pytest.mark.light_coverage
+
 COMPONENT_VERSIONS = (("md-converter", "0.1.0"),)
 INTEGRITY_COLUMNS = {
     "source_filename",

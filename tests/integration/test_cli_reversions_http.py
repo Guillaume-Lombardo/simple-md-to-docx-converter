@@ -24,7 +24,7 @@ from markweave.config import Settings
 from markweave.malware import TrustingUploadScanner
 from tests.settings import template_settings
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
 
 
 @pytest.fixture

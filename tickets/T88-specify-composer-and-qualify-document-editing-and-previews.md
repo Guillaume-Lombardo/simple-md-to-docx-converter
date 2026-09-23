@@ -2,7 +2,7 @@
 ticket: T88
 linear_id: G1L-587
 linear_url: https://linear.app/g1lom/issue/G1L-587/t88-specify-composer-and-qualify-document-editing-and-previews
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -134,6 +134,22 @@ gates suffice for T88; production viewer/workflow and each Office edit family re
   `pnpm install` invocation failed because the ambient mise shim lacked the expected version; the
   reviewed bootstrap path resolved that tool invocation. Independent final evidence review and
   repository canonical checks are still pending.
+- 2026-09-23: Verified T88 completion on `main`. Independently approved ready PR
+  [#266](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/266) used exact
+  reviewed source `d01abf5bb4c819b716b325a07397513f53d13a06`; all required PR checks passed
+  in [CI 35794985630](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/35794985630).
+  Protected squash merge `0ca9ba172d1a29cb62c889f9e633041992b4e949` is verified at
+  `origin/main`; exact source branch was removed. Local canonical engine-excluded Pytest passed
+  with 4,762 passed, 56 engine-marked deselected, 11 warnings, and exit 0 in 33m43s; total
+  coverage 94.98%, branch coverage about 91.8%. Ruff, ty, sync and diff checks passed. The full
+  local external-engine suite was unavailable and is not claimed. Main
+  [CI 35796623018](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/35796623018)
+  completed successfully for the verified squash merge, with all required jobs green. T88
+  delivered the normative contract,
+  measured feasibility and documented limits; production native-preview/security/fidelity/workflow
+  acceptance remains T90, Office edit-family acceptance remains T92, and complete final-image/release
+  acceptance remains T93. No Composer production deployment, version bump or public release is
+  claimed.
 
 ## Synchronization
 

@@ -10,6 +10,7 @@ from collections.abc import Callable, Sequence
 from markweave.cli.commands import (
     administration,
     authentication,
+    composer,
     conversions,
     recovery,
     runtime,
@@ -54,6 +55,7 @@ def build_parser() -> argparse.ArgumentParser:
     conversions.register(subparsers)
     templates.register(subparsers)
     administration.register(subparsers)
+    composer.register(subparsers)
     runtime.register(subparsers)
     recovery.register(subparsers)
     return parser

@@ -12,7 +12,7 @@ import pytest
 from markweave.cli.http import HttpTransport
 from markweave.cli.types import ConnectionProfile
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
 
 
 class _AuthenticationHandler(BaseHTTPRequestHandler):

@@ -89,6 +89,7 @@ readonly frontend_image="${published_frontend_image:-${local_frontend_image:-loc
 readonly reverse_attempt_image="${published_reverse_attempt_image:-${local_reverse_attempt_image:-localhost/md-converter-reverse-attempt:t73-$profile}}"
 readonly clamav_name="$prefix-clamav"
 readonly clamav_probe_name="$prefix-clamav-probe"
+readonly composer_provider_name="$prefix-composer-provider"
 readonly postgres_name="$prefix-postgres"
 readonly rustfs_name="$prefix-rustfs"
 readonly worker_one_name="$prefix-worker-1"
@@ -116,6 +117,8 @@ browser_runtime_directory="$temporary_directory/e2e"
 node_runtime_directory="$temporary_directory/node_modules"
 browser_session_directory="$temporary_directory/browser-session"
 provisioning_file="$temporary_directory/users.csv"
+composer_provider_directory="$temporary_directory/composer-provider"
+composer_key_file="$temporary_directory/composer-key"
 provisioned_username="e2e-provisioned-$profile"
 provisioned_initial_password="Provisioned-$profile-initial"
 provisioned_renewed_password="Provisioned-$profile-browser-renewed"
@@ -319,6 +322,7 @@ trap cleanup EXIT
 refuse_existing_resources() {
   local name
   for name in "$application_name" "$clamav_name" "$clamav_probe_name" \
+    "$composer_provider_name" \
     "$postgres_name" "$rustfs_name" \
     "$expiry_application_name" "$insecure_application_name" "$worker_one_name" \
     "$worker_two_name" "$frontend_name" "$router_name"; do
@@ -435,7 +439,10 @@ hardened_runtime=(
 start_production_router() {
   local backend_container="$1"
   local backend_origin="${2:-http://127.0.0.1:8080}"
-  local frontend_origin="${3:-http://frontend:3000}"
+  local frontend_origin="${3:-}"
+  if [[ -z "$frontend_origin" ]]; then
+    frontend_origin="$(admission_frontend_origin)"
+  fi
   local expected_api_status="${4:-401}"
   local probe_page="${5:-true}"
   e2e_podman rm --force "$router_name" >/dev/null 2>&1 || true
@@ -499,6 +506,32 @@ start_frontend() {
   return 1
 }
 
+probe_scanner_outage_routes() {
+  local frontend_origin
+  frontend_origin="$(admission_frontend_origin)"
+  podman exec --env "E2E_FRONTEND_ORIGIN=$frontend_origin" \
+    "$application_name" node --input-type=module -e '
+const targets = [
+  ["router_login", "http://localhost:3100/login"],
+  ["frontend_alias", "http://frontend:3000/login"],
+  ["frontend_numeric", `${process.env.E2E_FRONTEND_ORIGIN}/login`],
+  ["backend_ready", "http://127.0.0.1:8080/health/ready"],
+];
+const results = await Promise.all(targets.map(async ([name, url]) => {
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(2000) });
+    return [name, String(response.status)];
+  } catch (error) {
+    return [name, `error:${error.cause?.code ?? error.name}`];
+  }
+}));
+for (const [name, status] of results)
+  console.log(`scanner-outage route ${name} status=${status}`);
+if (results.some(([name, status]) => name !== "frontend_alias" && status !== "200"))
+  process.exitCode = 1;
+'
+}
+
 admission_frontend_origin() {
   local frontend_address octet
   local -a address_octets
@@ -529,6 +562,59 @@ restart_backend_and_router() {
   wait_for_url "http://127.0.0.1:$backend_port/health/ready" \
     "$backend_container" '"status":"ready"'
   start_production_router "$backend_container"
+}
+
+restore_composer_snapshot() {
+  # Snapshot only after the browser has created real Composer records. Clear the
+  # test profile and restore its full database/object set while the app is stopped.
+  podman rm --force "$router_name" >/dev/null
+  podman stop --time 15 "$application_name" >/dev/null
+  # The envelope key is intentionally outside both storage profiles and must
+  # travel with an operator backup to open restored connection credentials.
+  podman unshare cp -a -- "$composer_key_file" \
+    "$temporary_directory/composer-key-backup"
+  if [[ "$profile" == distributed ]]; then
+    podman stop --time 15 "$worker_one_name" "$worker_two_name" >/dev/null
+    podman exec "$postgres_name" pg_dump --username postgres \
+      --dbname md_converter_e2e --format=custom \
+      --file=/tmp/md-converter-composer-e2e.dump
+    podman cp "$postgres_name:/tmp/md-converter-composer-e2e.dump" \
+      "$temporary_directory/composer-postgres.dump"
+    uv run python -m scripts.e2e.s3_backup backup \
+      --endpoint-url "http://127.0.0.1:$rustfs_port" --region us-east-1 \
+      --access-key-id e2eaccess --secret-access-key e2esecret \
+      --bucket md-converter-t21 \
+      --directory "$temporary_directory/composer-s3-backup"
+    podman exec "$postgres_name" dropdb --username postgres md_converter_e2e
+    podman exec "$postgres_name" createdb --username postgres md_converter_e2e
+    podman cp "$temporary_directory/composer-postgres.dump" \
+      "$postgres_name:/tmp/md-converter-composer-e2e.dump"
+    podman exec "$postgres_name" pg_restore --username postgres \
+      --dbname md_converter_e2e --exit-on-error \
+      /tmp/md-converter-composer-e2e.dump
+    uv run python -m scripts.e2e.s3_backup restore \
+      --endpoint-url "http://127.0.0.1:$rustfs_port" --region us-east-1 \
+      --access-key-id e2eaccess --secret-access-key e2esecret \
+      --bucket md-converter-t21 \
+      --directory "$temporary_directory/composer-s3-backup"
+    podman start "$worker_one_name" "$worker_two_name" >/dev/null
+  else
+    mkdir -m 0700 "$temporary_directory/composer-standalone-backup"
+    podman unshare cp -a -- "$data_directory/." \
+      "$temporary_directory/composer-standalone-backup/"
+    podman unshare find "$data_directory" -mindepth 1 -delete
+    podman unshare cp -a -- \
+      "$temporary_directory/composer-standalone-backup/." "$data_directory/"
+  fi
+  podman unshare cp -a -- "$temporary_directory/composer-key-backup" \
+    "$composer_key_file"
+  podman unshare cmp -- "$temporary_directory/composer-key-backup" \
+    "$composer_key_file"
+  test "$(podman unshare stat -c '%a' "$composer_key_file")" = 400
+  podman start "$application_name" >/dev/null
+  wait_for_url "http://127.0.0.1:$(podman port "$application_name" 8080/tcp | sed 's/.*://')/health/ready" \
+    "$application_name" '"status":"ready"'
+  start_production_router "$application_name"
 }
 
 kill_backend_and_reconnect_router() {
@@ -671,6 +757,32 @@ printf '%s\n%s,%s,user,true,true\n' \
   "$provisioned_username" "$provisioned_initial_password" >"$provisioning_file"
 chmod 0444 "$provisioning_file"
 install -m 0444 "$repository/scripts/container/fake-clamav.py" "$clamav_script"
+mkdir -m 0755 -- "$composer_provider_directory"
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -noenc \
+  -days 1 -sha256 -subj /CN=e2e-llm \
+  -addext 'subjectAltName=DNS:e2e-llm' \
+  -addext 'basicConstraints=critical,CA:TRUE' \
+  -keyout "$composer_provider_directory/server.key" \
+  -out "$composer_provider_directory/server.crt" >/dev/null 2>&1
+openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -noenc \
+  -subj /CN=e2e-composer-client \
+  -keyout "$composer_provider_directory/client.key" \
+  -out "$composer_provider_directory/client.csr" >/dev/null 2>&1
+printf 'extendedKeyUsage=clientAuth\n' >"$composer_provider_directory/client.ext"
+openssl x509 -req -in "$composer_provider_directory/client.csr" \
+  -CA "$composer_provider_directory/server.crt" \
+  -CAkey "$composer_provider_directory/server.key" \
+  -CAcreateserial -days 1 -sha256 \
+  -extfile "$composer_provider_directory/client.ext" \
+  -out "$composer_provider_directory/client.crt" >/dev/null 2>&1
+openssl rand -hex 32 >"$composer_key_file"
+chmod 0400 "$composer_provider_directory/server.key" \
+  "$composer_provider_directory/client.key" "$composer_key_file"
+chmod 0444 "$composer_provider_directory/server.crt" \
+  "$composer_provider_directory/client.crt"
+podman unshare chown "$runtime_uid:0" \
+  "$composer_provider_directory/server.key" \
+  "$composer_provider_directory/client.key" "$composer_key_file"
 cp -a "$repository/tests/e2e" "$browser_runtime_directory"
 COREPACK_ENABLE_NETWORK=0 pnpm install --frozen-lockfile --ignore-scripts --filter md-converter-web-tests
 cp -a "$repository/node_modules" "$node_runtime_directory"
@@ -716,12 +828,35 @@ fi
 
 podman network create "$network_name" >/dev/null
 created+=("network:$network_name")
+scanner_static_address="$(podman network inspect "$network_name" | uv run python -c '
+import ipaddress
+import json
+import sys
+
+networks = json.load(sys.stdin)
+if len(networks) != 1:
+    raise SystemExit("E2E network inspection must return one network")
+for subnet in networks[0].get("subnets", []):
+    try:
+        network = ipaddress.IPv4Network(subnet["subnet"])
+        gateway = ipaddress.IPv4Address(subnet["gateway"])
+    except (KeyError, ValueError, TypeError):
+        continue
+    address = gateway + 1
+    if gateway in network and address in network and address != network.broadcast_address:
+        print(address)
+        break
+else:
+    raise SystemExit("E2E network has no usable scanner IPv4 address")
+')"
+readonly scanner_static_address
 
 created=("$clamav_name" "${created[@]}")
 e2e_run_in_harness_directory \
   "$temporary_directory" "$temporary_directory_identity" \
   podman run --detach --name "$clamav_name" --network "$network_name" \
-  --network-alias e2e-clamav --read-only --cap-drop=all \
+  --network-alias e2e-clamav --ip "$scanner_static_address" \
+  --read-only --cap-drop=all \
   --env MARKWEAVE_TEST_CLAMAV_REJECT_EICAR=true \
   --security-opt=no-new-privileges --pids-limit=64 --memory=128m \
   --tmpfs /tmp:rw,nosuid,nodev,noexec,size=8m \
@@ -744,13 +879,52 @@ podman rm "$clamav_probe_name" >/dev/null
 
 clamav_address="$(podman inspect "$clamav_name" \
   --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')"
-if [[ -z "$clamav_address" ]]; then
-  echo "Fake ClamAV has no address on the E2E network." >&2
+if [[ "$clamav_address" != "$scanner_static_address" ]]; then
+  echo "Fake ClamAV did not receive its reserved E2E network address." >&2
   exit 1
 fi
 # The unmapped peer above proves the network alias. Application and worker
 # containers use this mapping to avoid later transient Netavark DNS failures.
 scanner_host_mapping=(--add-host "e2e-clamav:$clamav_address")
+
+# The provider is a private TLS peer on the harness network. Its certificate
+# and the independent Composer encryption key are generated only for this run.
+created=("$composer_provider_name" "${created[@]}")
+e2e_run_in_harness_directory \
+  "$temporary_directory" "$temporary_directory_identity" \
+  podman run --detach --name "$composer_provider_name" --network "$network_name" \
+  --network-alias e2e-llm --user "$runtime_uid:0" --read-only \
+  --cap-drop=all --security-opt=no-new-privileges --pids-limit=64 \
+  --memory=128m --cpus=0.5 \
+  --volume "$browser_runtime_directory:/e2e:ro,Z" \
+  --volume "$composer_provider_directory:/provider:ro,Z" \
+  --entrypoint /opt/md-converter/venv/bin/python \
+  "$image" /e2e/composer_https_provider.py >/dev/null
+composer_provider_ready=false
+for _ in $(seq 1 120); do
+  if podman exec "$composer_provider_name" python -c \
+    'import socket, ssl; c=ssl.create_default_context(cafile="/provider/server.crt"); s=socket.create_connection(("127.0.0.1",8443),1); c.wrap_socket(s,server_hostname="e2e-llm").close(); c.load_cert_chain("/provider/client.crt","/provider/client.key"); s=socket.create_connection(("127.0.0.1",8444),1); c.wrap_socket(s,server_hostname="e2e-llm").close()' \
+    >/dev/null 2>&1; then
+    composer_provider_ready=true
+    break
+  fi
+  if [[ "$(podman inspect "$composer_provider_name" --format '{{.State.Running}}' 2>/dev/null)" != true ]]; then
+    podman logs "$composer_provider_name" >&2 || true
+    exit 1
+  fi
+  sleep 0.25
+done
+if [[ "$composer_provider_ready" != true ]]; then
+  echo "Timed out waiting for the Composer HTTPS provider." >&2
+  exit 1
+fi
+composer_provider_address="$(podman inspect "$composer_provider_name" \
+  --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')"
+if [[ ! "$composer_provider_address" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "Composer E2E provider has no IPv4 address." >&2
+  exit 1
+fi
+scanner_host_mapping+=(--add-host "e2e-llm:$composer_provider_address")
 
 reverse_digest="$(podman image inspect "$reverse_attempt_image" --format '{{.Digest}}')"
 if [[ ! "$reverse_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
@@ -833,6 +1007,10 @@ application_volumes=(
   --volume "$temporary_directory/browser-artifacts:/browser-artifacts:rw,Z"
   --volume "$browser_session_directory:/browser-session:rw,Z"
   --volume "$provisioning_file:/run/secrets/users.csv:ro,Z"
+  --volume "$composer_key_file:/run/secrets/composer-key:ro,Z"
+  --volume "$composer_provider_directory/server.crt:/run/composer-e2e-ca.crt:ro,Z"
+  --volume "$composer_provider_directory/client.crt:/run/composer-e2e-client.crt:ro,Z"
+  --volume "$composer_provider_directory/client.key:/run/composer-e2e-client.key:ro,Z"
 )
 if [[ "$profile" == standalone ]]; then
   application_volumes+=(--volume "$data_directory:/data:rw,Z" "${reverse_worker_runtime[@]}")
@@ -842,6 +1020,24 @@ application_mode=serve
 application_settings=(
   "${E2E_SETTINGS[@]}"
   --env MARKWEAVE_USER_PROVISIONING_FILE=/run/secrets/users.csv
+  --env MARKWEAVE_COMPOSER_ENABLED=true
+  --env 'MARKWEAVE_COMPOSER_ALLOWED_DESTINATIONS=["e2e-llm:8443","e2e-llm:8444"]'
+  --env "MARKWEAVE_COMPOSER_ALLOWED_NETWORKS=[\"$composer_provider_address/32\"]"
+  --env MARKWEAVE_COMPOSER_SECRET_KEY_PATH=/run/secrets/composer-key
+  --env MARKWEAVE_COMPOSER_UPLOAD_MAX_BYTES=1000000
+  --env MARKWEAVE_COMPOSER_HTTP_REQUEST_MAX_BYTES=1100000
+  --env MARKWEAVE_COMPOSER_MAXIMUM_REQUEST_BYTES=131072
+  --env MARKWEAVE_COMPOSER_MAXIMUM_RESPONSE_BYTES=262144
+  --env MARKWEAVE_COMPOSER_MAXIMUM_MODELS=32
+  --env MARKWEAVE_COMPOSER_MAXIMUM_ALLOWED_USERS=32
+  --env MARKWEAVE_COMPOSER_MAXIMUM_MODEL_NAME_LENGTH=128
+  --env MARKWEAVE_COMPOSER_MAXIMUM_CREDENTIAL_BYTES=16384
+  --env MARKWEAVE_COMPOSER_MAXIMUM_OUTPUT_TOKENS=256
+  --env MARKWEAVE_COMPOSER_MAXIMUM_CONCURRENT_CALLS=1
+  --env MARKWEAVE_COMPOSER_RETRY_AFTER_SECONDS=2
+  --env MARKWEAVE_COMPOSER_TIMEOUT_SECONDS=3
+  --env MARKWEAVE_COMPOSER_PENDING_PUBLICATION_STALE_SECONDS=60
+  --env MARKWEAVE_COMPOSER_DRAFT_RETENTION_SECONDS=86400
 )
 created=("$application_name" "${created[@]}")
 e2e_run_in_harness_directory \
@@ -1175,6 +1371,71 @@ podman exec \
   --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts \
   "$application_name" node --test /e2e/browser-next-auth.test.mjs
 podman exec \
+  --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  "$application_name" node --test /e2e/browser-next-composer-connections.test.mjs
+podman exec \
+  --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json" \
+  "$application_name" node --test /e2e/browser-next-composer-real.test.mjs
+if podman logs "$application_name" 2>&1 | \
+  grep -Fq 'composer-e2e-write-only-secret'; then
+  echo "Composer credential appeared in application logs." >&2
+  exit 1
+fi
+if podman logs "$composer_provider_name" 2>&1 | \
+  grep -Fq 'composer-e2e-write-only-secret'; then
+  echo "Composer credential appeared in provider logs." >&2
+  exit 1
+fi
+provider_events="$(podman logs "$composer_provider_name")"
+if [[ "$(grep -Fc '"operation": "chat", "status": 503' <<<"$provider_events")" -ne 2 || \
+  "$(grep -Fc '"operation": "chat", "status": 200' <<<"$provider_events")" -ne 7 || \
+  "$(grep -Fc '"operation": "authorization", "status": 401' <<<"$provider_events")" -ne 2 ]]; then
+  echo "Composer HTTPS provider did not observe the expected outage and retry calls." >&2
+  exit 1
+fi
+podman stop --time 5 "$clamav_name" >/dev/null
+probe_scanner_outage_routes
+if ! podman exec \
+  --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  --env MARKWEAVE_E2E_COMPOSER_PHASE=scanner-unavailable \
+  --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json" \
+  "$application_name" node --test /e2e/browser-next-composer-resilience.test.mjs; then
+  probe_scanner_outage_routes || true
+  exit 1
+fi
+podman start "$clamav_name" >/dev/null
+restarted_clamav_address="$(podman inspect "$clamav_name" \
+  --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')"
+if [[ "$restarted_clamav_address" != "$clamav_address" ]]; then
+  echo "Fake ClamAV changed its reserved E2E network address after restart." >&2
+  exit 1
+fi
+bash "$repository/scripts/container/wait-for-fake-clamav.sh" \
+  "$clamav_name" "$profile-resumed" "$application_name" e2e-clamav
+wait_for_url "http://127.0.0.1:$(podman port "$application_name" 8080/tcp | sed 's/.*://')/health/ready" \
+  "$application_name" '"status":"ready"'
+restore_composer_snapshot
+podman exec \
+  --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  --env MARKWEAVE_E2E_COMPOSER_PHASE=restored-backup \
+  --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json" \
+  "$application_name" node --test /e2e/browser-next-composer-resilience.test.mjs
+provider_events="$(podman logs "$composer_provider_name")"
+if [[ "$(grep -Fc '"operation": "chat", "status": 200' <<<"$provider_events")" -ne 11 ]]; then
+  echo "Restored Composer calls, cancelled step, replacement step, and occupying connection test did not reach the provider." >&2
+  exit 1
+fi
+if podman logs "$application_name" 2>&1 | \
+  grep -Fq 'composer-e2e-write-only-secret'; then
+  echo "Restored Composer credential appeared in application logs." >&2
+  exit 1
+fi
+podman exec \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
   --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts \
   --env MARKWEAVE_E2E_CONVERSION_STATE=/browser-session/next-conversion.json \
@@ -1231,6 +1492,12 @@ if [[ "$profile" == standalone ]]; then
   wait_for_embedded_worker_idle "$application_name"
 fi
 start_production_router "$application_name"
+podman exec \
+  --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  --env MARKWEAVE_E2E_COMPOSER_PHASE=restart \
+  --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json" \
+  "$application_name" node --test /e2e/browser-next-composer-resilience.test.mjs
 podman exec \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
   "$application_name" node --test /e2e/browser-next-conversion-admission.test.mjs
@@ -1301,7 +1568,7 @@ podman exec \
   --env MARKWEAVE_E2E_REVERSE_RESULT_RECEIPT=/browser-session/reverse-broker-restart-result.json \
   "$application_name" node --test /e2e/browser-next-reversion.test.mjs
 start_production_router "$application_name" http://127.0.0.1:1 \
-  http://frontend:3000 502
+  "$(admission_frontend_origin)" 502
 e2e_podman exec \
   --env MARKWEAVE_E2E_RUNTIME_FAILURE=backend-outage \
   "$application_name" node --test /e2e/browser-next-runtime-failures.test.mjs

@@ -13,6 +13,8 @@ from markweave.auth.memory import MemoryReadinessProbe
 from markweave.config import ConfigurationError, Settings
 from tests.settings import template_settings
 
+pytestmark = pytest.mark.light_coverage
+
 
 def make_client(
     data_directory: Path, *, session_absolute_seconds: int = 8 * 60 * 60

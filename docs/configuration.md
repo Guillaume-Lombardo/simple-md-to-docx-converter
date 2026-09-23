@@ -189,6 +189,43 @@ the exact release manifest for a published three-image set. See the
 [reverse qualification evidence](evidence/t73-reverse-conversion-qualification.md) for candidate
 history and current validation boundaries.
 
+## Optional Composer connections
+
+Composer model access is disabled by default. Setting `MARKWEAVE_COMPOSER_ENABLED=true` requires
+every policy input below. The backend alone reads the credential key and contacts approved model
+destinations. Ordinary conversions and their readiness remain independent of this configuration.
+An unavailable model endpoint does not remove access to an owner's retained Composer data.
+
+| Environment variable | Requirement when Composer is enabled | Handling |
+| --- | --- | --- |
+| `MARKWEAVE_COMPOSER_ENABLED` | `false` by default | Enables model connections only when the remaining policy is complete |
+| `MARKWEAVE_COMPOSER_ALLOWED_DESTINATIONS` | Nonempty JSON array of exact `host:port` pairs | HTTPS destinations that operators explicitly approve |
+| `MARKWEAVE_COMPOSER_ALLOWED_NETWORKS` | Nonempty JSON array of CIDR networks | Every resolved address must also belong to an approved network |
+| `MARKWEAVE_COMPOSER_SECRET_KEY_PATH` | Absolute path | External operator-managed envelope key, absent from the image and database; regular, non-symlink file containing exactly 64 hexadecimal characters for 32 random bytes, with an optional final newline; owner-only `0600` is recommended, and group write/execute or any world permissions are rejected |
+| `MARKWEAVE_COMPOSER_UPLOAD_MAX_BYTES` | Positive integer | New Composer source upload ceiling |
+| `MARKWEAVE_COMPOSER_HTTP_REQUEST_MAX_BYTES` | Positive integer greater than the upload ceiling | Complete inbound Composer mutation request ceiling before parsing |
+| `MARKWEAVE_COMPOSER_MAXIMUM_REQUEST_BYTES` | Positive integer | Complete outbound JSON request ceiling |
+| `MARKWEAVE_COMPOSER_MAXIMUM_RESPONSE_BYTES` | Positive integer | Complete inbound JSON response ceiling |
+| `MARKWEAVE_COMPOSER_MAXIMUM_MODELS` | Positive integer | Model catalog ceiling |
+| `MARKWEAVE_COMPOSER_MAXIMUM_ALLOWED_USERS` | Required positive integer | Operator-selected per-connection instance grant ceiling, also bounding one connection response |
+| `MARKWEAVE_COMPOSER_MAXIMUM_MODEL_NAME_LENGTH` | Positive integer | Model identifier ceiling |
+| `MARKWEAVE_COMPOSER_MAXIMUM_CREDENTIAL_BYTES` | Positive integer | API key, client identity, and CA input ceiling |
+| `MARKWEAVE_COMPOSER_MAXIMUM_OUTPUT_TOKENS` | Positive integer | Model output token ceiling |
+| `MARKWEAVE_COMPOSER_MAXIMUM_CONCURRENT_CALLS` | Positive integer | Bounded model call slots |
+| `MARKWEAVE_COMPOSER_RETRY_AFTER_SECONDS` | Required positive integer | `Retry-After` for temporary Composer `503` responses, including global model capacity exhaustion |
+| `MARKWEAVE_COMPOSER_TIMEOUT_SECONDS` | Positive finite number | Model request timeout |
+| `MARKWEAVE_COMPOSER_PENDING_PUBLICATION_STALE_SECONDS` | Positive finite number | Recovery threshold for hidden incomplete sources and revisions |
+| `MARKWEAVE_COMPOSER_DRAFT_RETENTION_SECONDS` | Positive integer | Required when Composer is enabled; whole owner draft, source, and linked revision-history cleanup window |
+
+The destination and network lists are separate controls: a DNS name alone never grants access to
+an arbitrary resolved address. Keep the key file in an operator secret mount and include the same
+key identity in the backup and restore procedure; database and object backups alone cannot recover
+encrypted credentials. Rotate or revoke a connection's credential through Composer's authorized
+configuration flow. Never put model keys, private keys, document content, or private citations in
+these environment variables or logs.
+Content-free Composer connection audit events use the configured audit-retention window and
+bounded cleanup.
+
 ## Jobs, workers, metrics, and retention
 
 | Environment variable | Requirement or default | Applies to / constraint |

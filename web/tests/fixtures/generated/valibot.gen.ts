@@ -34,11 +34,349 @@ export const vAuditRecordResponse = v.object({
 });
 
 /**
+ * Body_create_draft_api_v1_composer_drafts_post
+ */
+export const vBodyCreateDraftApiV1ComposerDraftsPost = v.object({
+    content: v.nullish(v.string()),
+    source: v.string(),
+    title: v.nullish(v.string())
+});
+
+/**
  * Body_replace_template_api_v1_templates__template_id__content_put
  */
 export const vBodyReplaceTemplateApiV1TemplatesTemplateIdContentPut = v.object({
     content: v.string(),
     expected_fonts: v.array(v.string())
+});
+
+/**
+ * ComposerArtifactResponse
+ */
+export const vComposerArtifactResponse = v.object({
+    kind: v.string(),
+    media_type: v.string(),
+    sha256: v.string(),
+    size: v.pipe(v.number(), v.integer())
+});
+
+/**
+ * ComposerAvailabilityState
+ */
+export const vComposerAvailabilityState = v.picklist([
+    'unconfigured',
+    'disabled',
+    'unauthorized',
+    'ready',
+    'outage'
+]);
+
+/**
+ * ComposerCapabilitiesResponse
+ */
+export const vComposerCapabilitiesResponse = v.object({
+    instance_connections_manageable: v.boolean(),
+    maximum_credential_bytes: v.nullable(v.pipe(v.number(), v.integer())),
+    maximum_model_request_bytes: v.nullable(v.pipe(v.number(), v.integer())),
+    maximum_output_tokens: v.nullable(v.pipe(v.number(), v.integer())),
+    maximum_upload_bytes: v.nullable(v.pipe(v.number(), v.integer())),
+    personal_connections_allowed: v.boolean(),
+    status: vComposerAvailabilityState,
+    status_message: v.nullable(v.string())
+});
+
+/**
+ * ComposerDraftResponse
+ */
+export const vComposerDraftResponse = v.object({
+    content: v.string(),
+    created_at: v.pipe(v.string(), v.isoTimestamp()),
+    current_revision_id: v.nullable(v.pipe(v.string(), v.uuid())),
+    etag: v.string(),
+    id: v.pipe(v.string(), v.uuid()),
+    source_kind: v.string(),
+    source_media_type: v.string(),
+    title: v.string(),
+    updated_at: v.pipe(v.string(), v.isoTimestamp()),
+    version: v.pipe(v.number(), v.integer())
+});
+
+/**
+ * ComposerDraftSummaryResponse
+ */
+export const vComposerDraftSummaryResponse = v.object({
+    current_revision_id: v.nullable(v.pipe(v.string(), v.uuid())),
+    etag: v.string(),
+    id: v.pipe(v.string(), v.uuid()),
+    source_kind: v.string(),
+    source_media_type: v.string(),
+    title: v.string(),
+    updated_at: v.pipe(v.string(), v.isoTimestamp()),
+    version: v.pipe(v.number(), v.integer())
+});
+
+/**
+ * ComposerDraftListResponse
+ */
+export const vComposerDraftListResponse = v.object({
+    drafts: v.array(vComposerDraftSummaryResponse),
+    limit: v.pipe(v.number(), v.integer()),
+    offset: v.pipe(v.number(), v.integer())
+});
+
+/**
+ * ComposerDraftUpdateRequest
+ */
+export const vComposerDraftUpdateRequest = v.object({
+    content: v.string(),
+    title: v.pipe(v.string(), v.minLength(1), v.maxLength(256))
+});
+
+/**
+ * ComposerHandoffRequest
+ */
+export const vComposerHandoffRequest = v.object({
+    title: v.nullish(v.string())
+});
+
+/**
+ * ComposerMessageCreateRequest
+ */
+export const vComposerMessageCreateRequest = v.object({
+    content: v.pipe(v.string(), v.minLength(1))
+});
+
+/**
+ * ComposerMessageResponse
+ */
+export const vComposerMessageResponse = v.object({
+    content: v.string(),
+    created_at: v.pipe(v.string(), v.isoTimestamp()),
+    draft_id: v.pipe(v.string(), v.uuid()),
+    id: v.pipe(v.string(), v.uuid()),
+    role: v.string()
+});
+
+/**
+ * ComposerMessageListResponse
+ */
+export const vComposerMessageListResponse = v.object({
+    limit: v.pipe(v.number(), v.integer()),
+    messages: v.array(vComposerMessageResponse),
+    offset: v.pipe(v.number(), v.integer())
+});
+
+/**
+ * ComposerModelStepCreateRequest
+ *
+ * Exact user-approved text for one bounded model proposal attempt.
+ */
+export const vComposerModelStepCreateRequest = v.object({
+    approved_endpoint: v.pipe(v.string(), v.minLength(1)),
+    approved_model: v.pipe(v.string(), v.minLength(1)),
+    connection_id: v.pipe(v.string(), v.uuid()),
+    content: v.pipe(v.string(), v.minLength(1)),
+    max_output_tokens: v.pipe(v.number(), v.integer(), v.gtValue(0))
+});
+
+/**
+ * ComposerModelStepResponse
+ */
+export const vComposerModelStepResponse = v.object({
+    base_version: v.pipe(v.number(), v.integer()),
+    connection_id: v.pipe(v.string(), v.uuid()),
+    created_at: v.pipe(v.string(), v.isoTimestamp()),
+    draft_id: v.pipe(v.string(), v.uuid()),
+    error_code: v.nullable(v.string()),
+    id: v.pipe(v.string(), v.uuid()),
+    model_identity: v.string(),
+    proposal_id: v.nullable(v.pipe(v.string(), v.uuid())),
+    status: v.string(),
+    updated_at: v.pipe(v.string(), v.isoTimestamp())
+});
+
+/**
+ * ComposerProposalDecision
+ */
+export const vComposerProposalDecision = v.picklist([
+    'accepted',
+    'edited',
+    'rejected'
+]);
+
+/**
+ * ComposerProposalDecisionRequest
+ */
+export const vComposerProposalDecisionRequest = v.object({
+    decided_value: v.nullish(v.string()),
+    state: vComposerProposalDecision
+});
+
+/**
+ * ComposerProposalResponse
+ */
+export const vComposerProposalResponse = v.object({
+    base_version: v.pipe(v.number(), v.integer()),
+    created_at: v.pipe(v.string(), v.isoTimestamp()),
+    decided_at: v.nullable(v.pipe(v.string(), v.isoTimestamp())),
+    decided_by: v.nullable(v.pipe(v.string(), v.uuid())),
+    decided_value: v.nullable(v.string()),
+    draft_id: v.pipe(v.string(), v.uuid()),
+    id: v.pipe(v.string(), v.uuid()),
+    proposed_value: v.string(),
+    provenance: v.string(),
+    state: v.string()
+});
+
+/**
+ * ComposerProposalListResponse
+ */
+export const vComposerProposalListResponse = v.object({
+    limit: v.pipe(v.number(), v.integer()),
+    offset: v.pipe(v.number(), v.integer()),
+    proposals: v.array(vComposerProposalResponse)
+});
+
+/**
+ * ComposerRevisionResponse
+ */
+export const vComposerRevisionResponse = v.object({
+    approved_values: v.string(),
+    artifacts: v.array(vComposerArtifactResponse),
+    created_at: v.pipe(v.string(), v.isoTimestamp()),
+    draft_id: v.pipe(v.string(), v.uuid()),
+    id: v.pipe(v.string(), v.uuid()),
+    model_identity: v.nullable(v.string()),
+    number: v.pipe(v.number(), v.integer()),
+    operation: v.string(),
+    provenance: v.string(),
+    render_options: v.string(),
+    restored_from_revision_id: v.nullable(v.pipe(v.string(), v.uuid())),
+    source_sha256: v.string(),
+    template_reference: v.nullable(v.string())
+});
+
+/**
+ * ComposerRevisionSummaryResponse
+ */
+export const vComposerRevisionSummaryResponse = v.object({
+    created_at: v.pipe(v.string(), v.isoTimestamp()),
+    draft_id: v.pipe(v.string(), v.uuid()),
+    id: v.pipe(v.string(), v.uuid()),
+    model_identity: v.nullable(v.string()),
+    number: v.pipe(v.number(), v.integer()),
+    operation: v.string(),
+    provenance: v.string(),
+    restored_from_revision_id: v.nullable(v.pipe(v.string(), v.uuid()))
+});
+
+/**
+ * ComposerRevisionListResponse
+ */
+export const vComposerRevisionListResponse = v.object({
+    limit: v.pipe(v.number(), v.integer()),
+    offset: v.pipe(v.number(), v.integer()),
+    revisions: v.array(vComposerRevisionSummaryResponse)
+});
+
+/**
+ * ConnectionIdentityMode
+ */
+export const vConnectionIdentityMode = v.picklist(['shared', 'individual']);
+
+/**
+ * ConnectionModelsResponse
+ */
+export const vConnectionModelsResponse = v.object({
+    models: v.array(v.string())
+});
+
+/**
+ * ConnectionScope
+ */
+export const vConnectionScope = v.picklist(['instance', 'personal']);
+
+/**
+ * ConnectionCreateRequest
+ */
+export const vConnectionCreateRequest = v.object({
+    allowed_user_ids: v.optional(v.array(v.pipe(v.string(), v.uuid())), []),
+    enabled: v.optional(v.boolean(), false),
+    endpoint: v.pipe(v.string(), v.minLength(1), v.maxLength(2048)),
+    identity_mode: vConnectionIdentityMode,
+    name: v.pipe(v.string(), v.minLength(1), v.maxLength(128)),
+    permitted_models: v.optional(v.array(v.string()), []),
+    scope: vConnectionScope,
+    selected_model: v.nullish(v.pipe(v.string(), v.maxLength(256)))
+});
+
+/**
+ * ConnectionResponse
+ */
+export const vConnectionResponse = v.object({
+    allowed_user_ids: v.array(v.pipe(v.string(), v.uuid())),
+    authorized: v.boolean(),
+    client_certificate_present: v.boolean(),
+    credential_present: v.boolean(),
+    enabled: v.boolean(),
+    endpoint: v.string(),
+    etag: v.string(),
+    id: v.pipe(v.string(), v.uuid()),
+    identity_mode: vConnectionIdentityMode,
+    internal_ca_present: v.boolean(),
+    name: v.string(),
+    permitted_models: v.array(v.string()),
+    scope: vConnectionScope,
+    selected_model: v.nullable(v.string()),
+    status: vComposerAvailabilityState,
+    status_message: v.nullable(v.string())
+});
+
+/**
+ * ConnectionListResponse
+ */
+export const vConnectionListResponse = v.object({
+    connections: v.array(vConnectionResponse),
+    limit: v.pipe(v.number(), v.integer()),
+    offset: v.pipe(v.number(), v.integer())
+});
+
+/**
+ * ConnectionTestRequest
+ */
+export const vConnectionTestRequest = v.object({
+    model: v.nullish(v.pipe(v.string(), v.maxLength(256)))
+});
+
+/**
+ * ConnectionTestResponse
+ */
+export const vConnectionTestResponse = v.object({
+    status: vComposerAvailabilityState,
+    status_message: v.nullable(v.string())
+});
+
+/**
+ * ConnectionUpdateRequest
+ */
+export const vConnectionUpdateRequest = v.object({
+    allowed_user_ids: v.nullish(v.array(v.pipe(v.string(), v.uuid()))),
+    enabled: v.nullish(v.boolean()),
+    endpoint: v.nullish(v.pipe(v.string(), v.minLength(1), v.maxLength(2048))),
+    name: v.nullish(v.pipe(v.string(), v.minLength(1), v.maxLength(128))),
+    permitted_models: v.nullish(v.array(v.string())),
+    selected_model: v.nullish(v.pipe(v.string(), v.maxLength(256)))
+});
+
+/**
+ * CredentialWriteRequest
+ */
+export const vCredentialWriteRequest = v.object({
+    api_key: v.optional(v.null()),
+    client_certificate: v.optional(v.null()),
+    client_private_key: v.optional(v.null()),
+    internal_ca: v.optional(v.null()),
+    revoke: v.optional(v.boolean(), false)
 });
 
 /**
@@ -169,6 +507,32 @@ export const vPasswordChangeRequirementRequest = v.object({
 export const vPasswordResetRequest = v.object({
     password: v.string(),
     password_change_required: v.optional(v.boolean(), false)
+});
+
+/**
+ * PersonalPermissionResponse
+ */
+export const vPersonalPermissionResponse = v.object({
+    allowed: v.boolean(),
+    etag: v.string(),
+    user_id: v.pipe(v.string(), v.uuid()),
+    username: v.string()
+});
+
+/**
+ * PersonalPermissionListResponse
+ */
+export const vPersonalPermissionListResponse = v.object({
+    limit: v.pipe(v.number(), v.integer()),
+    offset: v.pipe(v.number(), v.integer()),
+    permissions: v.array(vPersonalPermissionResponse)
+});
+
+/**
+ * PersonalPermissionUpdateRequest
+ */
+export const vPersonalPermissionUpdateRequest = v.object({
+    allowed: v.boolean()
 });
 
 /**
@@ -632,6 +996,17 @@ export const vHttpValidationError = v.object({
 });
 
 /**
+ * CredentialWriteRequest
+ */
+export const vCredentialWriteRequestWritable = v.object({
+    api_key: v.nullish(v.string()),
+    client_certificate: v.nullish(v.string()),
+    client_private_key: v.nullish(v.string()),
+    internal_ca: v.nullish(v.string()),
+    revoke: v.optional(v.boolean(), false)
+});
+
+/**
  * Successful Response
  */
 export const vGetSessionPolicyApiV1AdminSessionPolicyGetResponse = vIdleSessionPolicyResponse;
@@ -722,6 +1097,381 @@ export const vListAuditRecordsApiV1AuditGetQuery = v.object({
  * Successful Response
  */
 export const vListAuditRecordsApiV1AuditGetResponse = v.array(vAuditRecordResponse);
+
+/**
+ * Successful Response
+ */
+export const vCapabilitiesApiV1ComposerCapabilitiesGetResponse = vComposerCapabilitiesResponse;
+
+export const vListConnectionsApiV1ComposerConnectionsGetQuery = v.object({
+    limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100)), 50),
+    offset: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(2147483647)), 0)
+});
+
+/**
+ * Successful Response
+ */
+export const vListConnectionsApiV1ComposerConnectionsGetResponse = vConnectionListResponse;
+
+export const vCreateConnectionApiV1ComposerConnectionsPostBody = vConnectionCreateRequest;
+
+export const vCreateConnectionApiV1ComposerConnectionsPostHeaders = v.object({
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+/**
+ * Successful Response
+ */
+export const vCreateConnectionApiV1ComposerConnectionsPostResponse = vConnectionResponse;
+
+export const vRevokeConnectionApiV1ComposerConnectionsConnectionIdDeleteHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vRevokeConnectionApiV1ComposerConnectionsConnectionIdDeletePath = v.object({
+    connection_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vRevokeConnectionApiV1ComposerConnectionsConnectionIdDeleteResponse = vConnectionResponse;
+
+export const vGetConnectionApiV1ComposerConnectionsConnectionIdGetPath = v.object({
+    connection_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vGetConnectionApiV1ComposerConnectionsConnectionIdGetResponse = vConnectionResponse;
+
+export const vUpdateConnectionApiV1ComposerConnectionsConnectionIdPatchBody = vConnectionUpdateRequest;
+
+export const vUpdateConnectionApiV1ComposerConnectionsConnectionIdPatchHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vUpdateConnectionApiV1ComposerConnectionsConnectionIdPatchPath = v.object({
+    connection_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vUpdateConnectionApiV1ComposerConnectionsConnectionIdPatchResponse = vConnectionResponse;
+
+export const vWriteCredentialsApiV1ComposerConnectionsConnectionIdCredentialsPutBody = vCredentialWriteRequestWritable;
+
+export const vWriteCredentialsApiV1ComposerConnectionsConnectionIdCredentialsPutHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vWriteCredentialsApiV1ComposerConnectionsConnectionIdCredentialsPutPath = v.object({
+    connection_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vWriteCredentialsApiV1ComposerConnectionsConnectionIdCredentialsPutResponse = vConnectionResponse;
+
+export const vDiscoverModelsApiV1ComposerConnectionsConnectionIdModelsGetPath = v.object({
+    connection_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vDiscoverModelsApiV1ComposerConnectionsConnectionIdModelsGetResponse = vConnectionModelsResponse;
+
+export const vTestConnectionApiV1ComposerConnectionsConnectionIdTestPostBody = vConnectionTestRequest;
+
+export const vTestConnectionApiV1ComposerConnectionsConnectionIdTestPostHeaders = v.object({
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vTestConnectionApiV1ComposerConnectionsConnectionIdTestPostPath = v.object({
+    connection_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vTestConnectionApiV1ComposerConnectionsConnectionIdTestPostResponse = vConnectionTestResponse;
+
+export const vListDraftsApiV1ComposerDraftsGetQuery = v.object({
+    limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100)), 50),
+    offset: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(2147483647)), 0)
+});
+
+/**
+ * Successful Response
+ */
+export const vListDraftsApiV1ComposerDraftsGetResponse = vComposerDraftListResponse;
+
+export const vCreateDraftApiV1ComposerDraftsPostBody = vBodyCreateDraftApiV1ComposerDraftsPost;
+
+export const vCreateDraftApiV1ComposerDraftsPostHeaders = v.object({
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+/**
+ * Successful Response
+ */
+export const vCreateDraftApiV1ComposerDraftsPostResponse = vComposerDraftResponse;
+
+export const vHandoffConversionApiV1ComposerDraftsFromConversionJobIdPostBody = vComposerHandoffRequest;
+
+export const vHandoffConversionApiV1ComposerDraftsFromConversionJobIdPostHeaders = v.object({
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vHandoffConversionApiV1ComposerDraftsFromConversionJobIdPostPath = v.object({
+    job_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vHandoffConversionApiV1ComposerDraftsFromConversionJobIdPostResponse = vComposerDraftResponse;
+
+export const vGetDraftApiV1ComposerDraftsDraftIdGetPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vGetDraftApiV1ComposerDraftsDraftIdGetResponse = vComposerDraftResponse;
+
+export const vSaveDraftApiV1ComposerDraftsDraftIdPutBody = vComposerDraftUpdateRequest;
+
+export const vSaveDraftApiV1ComposerDraftsDraftIdPutHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vSaveDraftApiV1ComposerDraftsDraftIdPutPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vSaveDraftApiV1ComposerDraftsDraftIdPutResponse = vComposerDraftResponse;
+
+export const vListMessagesApiV1ComposerDraftsDraftIdMessagesGetPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid())
+});
+
+export const vListMessagesApiV1ComposerDraftsDraftIdMessagesGetQuery = v.object({
+    limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100)), 50),
+    offset: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(2147483647)), 0)
+});
+
+/**
+ * Successful Response
+ */
+export const vListMessagesApiV1ComposerDraftsDraftIdMessagesGetResponse = vComposerMessageListResponse;
+
+export const vAddMessageApiV1ComposerDraftsDraftIdMessagesPostBody = vComposerMessageCreateRequest;
+
+export const vAddMessageApiV1ComposerDraftsDraftIdMessagesPostHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'Idempotency-Key': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vAddMessageApiV1ComposerDraftsDraftIdMessagesPostPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vAddMessageApiV1ComposerDraftsDraftIdMessagesPostResponse = vComposerMessageResponse;
+
+export const vStartModelStepApiV1ComposerDraftsDraftIdModelStepsPostBody = vComposerModelStepCreateRequest;
+
+export const vStartModelStepApiV1ComposerDraftsDraftIdModelStepsPostHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'Idempotency-Key': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vStartModelStepApiV1ComposerDraftsDraftIdModelStepsPostPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vStartModelStepApiV1ComposerDraftsDraftIdModelStepsPostResponse = vComposerModelStepResponse;
+
+export const vCancelModelStepApiV1ComposerDraftsDraftIdModelStepsStepIdDeleteHeaders = v.object({
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vCancelModelStepApiV1ComposerDraftsDraftIdModelStepsStepIdDeletePath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid()),
+    step_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vCancelModelStepApiV1ComposerDraftsDraftIdModelStepsStepIdDeleteResponse = vComposerModelStepResponse;
+
+export const vGetModelStepApiV1ComposerDraftsDraftIdModelStepsStepIdGetPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid()),
+    step_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vGetModelStepApiV1ComposerDraftsDraftIdModelStepsStepIdGetResponse = vComposerModelStepResponse;
+
+export const vListProposalsApiV1ComposerDraftsDraftIdProposalsGetPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid())
+});
+
+export const vListProposalsApiV1ComposerDraftsDraftIdProposalsGetQuery = v.object({
+    limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100)), 50),
+    offset: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(2147483647)), 0)
+});
+
+/**
+ * Successful Response
+ */
+export const vListProposalsApiV1ComposerDraftsDraftIdProposalsGetResponse = vComposerProposalListResponse;
+
+export const vGetProposalApiV1ComposerDraftsDraftIdProposalsProposalIdGetPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid()),
+    proposal_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vGetProposalApiV1ComposerDraftsDraftIdProposalsProposalIdGetResponse = vComposerProposalResponse;
+
+export const vDecideProposalApiV1ComposerDraftsDraftIdProposalsProposalIdDecisionPostBody = vComposerProposalDecisionRequest;
+
+export const vDecideProposalApiV1ComposerDraftsDraftIdProposalsProposalIdDecisionPostHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vDecideProposalApiV1ComposerDraftsDraftIdProposalsProposalIdDecisionPostPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid()),
+    proposal_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vDecideProposalApiV1ComposerDraftsDraftIdProposalsProposalIdDecisionPostResponse = vComposerProposalResponse;
+
+export const vListRevisionsApiV1ComposerDraftsDraftIdRevisionsGetPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid())
+});
+
+export const vListRevisionsApiV1ComposerDraftsDraftIdRevisionsGetQuery = v.object({
+    limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100)), 50),
+    offset: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(2147483647)), 0)
+});
+
+/**
+ * Successful Response
+ */
+export const vListRevisionsApiV1ComposerDraftsDraftIdRevisionsGetResponse = vComposerRevisionListResponse;
+
+export const vCaptureSourceApiV1ComposerDraftsDraftIdRevisionsFromSourcePostHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'Idempotency-Key': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vCaptureSourceApiV1ComposerDraftsDraftIdRevisionsFromSourcePostPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vCaptureSourceApiV1ComposerDraftsDraftIdRevisionsFromSourcePostResponse = vComposerRevisionResponse;
+
+export const vGetRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdGetPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid()),
+    revision_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vGetRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdGetResponse = vComposerRevisionResponse;
+
+export const vReadArtifactApiV1ComposerDraftsDraftIdRevisionsRevisionIdArtifactsKindGetPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid()),
+    revision_id: v.pipe(v.string(), v.uuid()),
+    kind: v.string()
+});
+
+export const vRestoreRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdRestorePostHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'Idempotency-Key': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vRestoreRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdRestorePostPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid()),
+    revision_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vRestoreRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdRestorePostResponse = vComposerRevisionResponse;
+
+export const vListPersonalPermissionsApiV1ComposerPersonalPermissionsGetQuery = v.object({
+    limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100)), 50),
+    offset: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(2147483647)), 0)
+});
+
+/**
+ * Successful Response
+ */
+export const vListPersonalPermissionsApiV1ComposerPersonalPermissionsGetResponse = vPersonalPermissionListResponse;
+
+export const vGetPersonalPermissionApiV1ComposerPersonalPermissionsUserIdGetPath = v.object({
+    user_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vGetPersonalPermissionApiV1ComposerPersonalPermissionsUserIdGetResponse = vPersonalPermissionResponse;
+
+export const vSetPersonalPermissionApiV1ComposerPersonalPermissionsUserIdPutBody = vPersonalPermissionUpdateRequest;
+
+export const vSetPersonalPermissionApiV1ComposerPersonalPermissionsUserIdPutHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vSetPersonalPermissionApiV1ComposerPersonalPermissionsUserIdPutPath = v.object({
+    user_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vSetPersonalPermissionApiV1ComposerPersonalPermissionsUserIdPutResponse = vPersonalPermissionResponse;
 
 export const vGetConversionOptionsApiV1ConversionOptionsGetQuery = v.object({
     template_kind: v.optional(vTemplateKind, 'docx')

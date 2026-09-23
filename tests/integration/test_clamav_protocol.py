@@ -12,6 +12,8 @@ import pytest
 
 from markweave.malware import ClamAVUploadScanner
 
+pytestmark = pytest.mark.light_coverage
+
 
 class _ClamdHandler(socketserver.BaseRequestHandler):
     def handle(self) -> None:

@@ -181,7 +181,7 @@ jobs:
   python-tests:
     name: CI / Python tests (${{ matrix.shard }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       max-parallel: 2
@@ -225,9 +225,86 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  python-distributed-coverage:
+    name: CI / Python distributed coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: docker.io/library/postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8
+        env:
+          POSTGRES_DB: md_converter_test
+          POSTGRES_PASSWORD: t12-ci-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d md_converter_test"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 30
+      rustfs:
+        image: ghcr.io/rustfs/rustfs:1.0.0-beta.12-glibc@sha256:6d693c8d0c09a1c5770f1780303a5d58b9e864c313fd2644ecd561e92b79ae04
+        env:
+          RUSTFS_ACCESS_KEY: t12integration
+          RUSTFS_ADDRESS: 0.0.0.0:9000
+          RUSTFS_CONSOLE_ENABLE: false
+          RUSTFS_SECRET_KEY: t12integrationsecret
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd "curl -fsS http://127.0.0.1:9000/health"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 30
+    env:
+      MARKWEAVE_TEST_POSTGRES_URL: postgresql+psycopg://postgres:t12-ci-password@127.0.0.1:5432/md_converter_test
+      MARKWEAVE_TEST_S3_ACCESS_KEY_ID: t12integration
+      MARKWEAVE_TEST_S3_BUCKET: md-converter-t12
+      MARKWEAVE_TEST_S3_ENDPOINT_URL: http://127.0.0.1:9000
+      MARKWEAVE_TEST_S3_REGION: us-east-1
+      MARKWEAVE_TEST_S3_SECRET_ACCESS_KEY: t12integrationsecret
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Python 3.14
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+          check-latest: false
+      - name: Set up uv
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.12.1"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: py314
+          save-cache: false
+      - name: Synchronize locked dependencies
+        run: uv sync --locked --all-groups
+      - name: Prepare the RustFS test bucket
+        run: uv run python -m scripts.ci.prepare_s3_test_bucket
+      - name: Run distributed storage coverage
+        run: >-
+          uv run pytest tests/integration/postgres tests/integration/s3
+          tests/integration/test_local_test_services_lifecycle.py
+          -m "requires_postgres or requires_s3"
+          -p no:scripts.ci.pytest_branch_coverage
+          --cov-fail-under=0 --cov-report=
+      - name: Retain distributed coverage
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: distributed-coverage-${{ github.run_attempt }}
+          path: .coverage
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
   python-coverage:
     name: CI / Python coverage
-    needs: python-tests
+    needs: [python-tests, python-distributed-coverage]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -261,12 +338,18 @@ jobs:
         with:
           name: light-coverage-${{ github.run_attempt }}-1
           path: artifacts/light-coverage/1
-      - name: Combine complete light coverage
+      - name: Download distributed coverage
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: distributed-coverage-${{ github.run_attempt }}
+          path: artifacts/distributed-coverage
+      - name: Combine complete Python coverage
         run: |
           set -euo pipefail
           test -s artifacts/light-coverage/0/.coverage
           test -s artifacts/light-coverage/1/.coverage
-          uv run coverage combine artifacts/light-coverage/0/.coverage artifacts/light-coverage/1/.coverage
+          test -s artifacts/distributed-coverage/.coverage
+          uv run coverage combine artifacts/light-coverage/0/.coverage artifacts/light-coverage/1/.coverage artifacts/distributed-coverage/.coverage
           uv run coverage json -o coverage.json --fail-under=90
       - name: Enforce application branch-only coverage
         run: >-
