@@ -1249,6 +1249,7 @@ function ComposerWorkspaceInner({
   return (
     <AppShell
       current="Composer"
+      nativeNavigation
       user={authState.user}
       pending={authState.pending}
       onLogout={() => void auth.logout()}

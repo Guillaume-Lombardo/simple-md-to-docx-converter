@@ -3,6 +3,7 @@ import { vi } from "vitest";
 import type { ReactNode } from "react";
 import { LoginPage, PasswordRenewalPage } from "../components/auth";
 import { AuthProvider, Protected } from "../src/auth/context";
+import { redirectProtected } from "../src/auth/navigation";
 import { AuthController } from "../src/auth/controller";
 import { ApiError, type ApiTransport } from "../src/api/transport";
 
@@ -140,6 +141,27 @@ test("protected navigation redirects anonymous and restricted sessions", async (
   );
   await waitFor(() => expect(replace).toHaveBeenCalledWith("/change-password"));
 });
+
+test.each(["/login", "/change-password"] as const)(
+  "protected Composer session redirects replace the document to %s",
+  (destination) => {
+    const replaceDocument = vi.fn();
+    const replaceRoute = vi.fn();
+    redirectProtected(destination, replaceRoute, {
+      pathname: "/composer",
+      replace: replaceDocument,
+    });
+    expect(replaceDocument).toHaveBeenCalledOnce();
+    expect(replaceDocument).toHaveBeenCalledWith(destination);
+    expect(replaceRoute).not.toHaveBeenCalled();
+    redirectProtected(destination, replaceRoute, {
+      pathname: "/composer/connections",
+      replace: replaceDocument,
+    });
+    expect(replaceRoute).toHaveBeenCalledWith(destination);
+    expect(replaceDocument).toHaveBeenCalledOnce();
+  },
+);
 
 test("protected unavailable state retries current-user loading", async () => {
   const json = vi

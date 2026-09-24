@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import {
   type ChangeEvent,
   type DragEvent,
@@ -51,7 +50,6 @@ export function ConversionWorkspace({
     () => (ownerId ? ownerStorageEpoch(ownerId) : null),
     [ownerId],
   );
-  const router = useRouter();
   const [controller] = useState(
     () =>
       supplied ??
@@ -179,7 +177,11 @@ export function ConversionWorkspace({
       if (state.source) return;
     }
     const id = await create();
-    if (id) router.push(`/composer?draft=${encodeURIComponent(id)}`);
+    if (id) {
+      const link = document.createElement("a");
+      link.href = `/composer?draft=${encodeURIComponent(id)}`;
+      link.click();
+    }
   }
 
   useEffect(() => {

@@ -13,6 +13,16 @@ import {
 
 const push = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
+
+function observeDocumentNavigation(): string[] {
+  const paths: string[] = [];
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+    this: HTMLAnchorElement,
+  ) {
+    paths.push(this.getAttribute("href") ?? "");
+  });
+  return paths;
+}
 vi.mock("../src/conversion/persistence", () => ({
   ownerStorageEpoch: vi.fn().mockReturnValue(0),
   resumeOwnerStorage: vi.fn(),
@@ -388,6 +398,7 @@ test("unavailable options expose a bounded retry without private failure details
 
 test("selected Markdown opens an explicit scanned Composer draft without starting a conversion", async () => {
   push.mockReset();
+  const navigations = observeDocumentNavigation();
   const draftId = "00000000-0000-4000-8000-000000000301";
   const draft = {
     content: "# Draft",
@@ -428,12 +439,24 @@ test("selected Markdown opens an explicit scanned Composer draft without startin
       screen.getByRole("button", { name: "Open selected source in Composer" }),
     ).toBeEnabled(),
   );
+  let releaseSave!: () => void;
+  vi.mocked(writeConversionInputs).mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        releaseSave = resolve;
+      }),
+  );
   fireEvent.click(
     screen.getByRole("button", { name: "Open selected source in Composer" }),
   );
+  await vi.waitFor(() => expect(releaseSave).toBeTypeOf("function"));
+  expect(multipartWithMetadata).not.toHaveBeenCalled();
+  expect(navigations).toEqual([]);
+  releaseSave();
   await vi.waitFor(() =>
-    expect(push).toHaveBeenCalledWith(`/composer?draft=${draftId}`),
+    expect(navigations).toContain(`/composer?draft=${draftId}`),
   );
+  expect(push).not.toHaveBeenCalled();
   expect(multipartWithMetadata).toHaveBeenCalledWith(
     "/api/v1/composer/drafts",
     expect.any(FormData),

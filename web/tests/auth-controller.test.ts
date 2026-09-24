@@ -1,7 +1,10 @@
 import { AuthController } from "../src/auth/controller";
 import { ApiError, type ApiTransport } from "../src/api/transport";
 import type { UserResponse } from "../src/api/generated/types.gen";
-import { clearConversionInputs } from "../src/conversion/persistence";
+import {
+  clearConversionInputs,
+  resumeOwnerStorage,
+} from "../src/conversion/persistence";
 
 vi.mock("../src/conversion/persistence", () => ({
   clearConversionInputs: vi.fn().mockResolvedValue(undefined),
@@ -266,18 +269,23 @@ test("successful logout revokes the visible session and expiry clears an active 
   const controller = controllerWith(json);
   await controller.login("Alice", "password");
   controller.expire();
-  expect(clearConversionInputs).toHaveBeenCalledWith(user().id);
+  expect(controller.snapshot()).toEqual({ phase: "expiring" });
+  await vi.waitFor(() =>
+    expect(clearConversionInputs).toHaveBeenCalledWith(user().id),
+  );
   expect(
     sessionStorage.getItem(`composer:message:${user().id}:draft`),
   ).toBeNull();
   expect(sessionStorage.getItem("composer:message:bob:draft")).toBe(
     "other user's text",
   );
-  expect(controller.snapshot()).toEqual({
-    phase: "anonymous",
-    pending: false,
-    notice: "Your session ended. Please sign in again.",
-  });
+  await vi.waitFor(() =>
+    expect(controller.snapshot()).toEqual({
+      phase: "anonymous",
+      pending: false,
+      notice: "Your session ended. Please sign in again.",
+    }),
+  );
   json
     .mockResolvedValueOnce({ csrf_token: "csrf", user: user() })
     .mockResolvedValueOnce(undefined);
@@ -290,6 +298,71 @@ test("successful logout revokes the visible session and expiry clears an active 
   ).toBeNull();
   expect(controller.snapshot()).toEqual({ phase: "anonymous", pending: false });
   sessionStorage.clear();
+});
+
+test("expiry hides the owner and delays rehydration until IndexedDB cleanup completes", async () => {
+  let releaseCleanup!: () => void;
+  vi.mocked(clearConversionInputs).mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        releaseCleanup = resolve;
+      }),
+  );
+  const nextOwner = user({ username: "Alice renewed" });
+  const json = vi
+    .fn()
+    .mockResolvedValueOnce({ csrf_token: "csrf", user: user() })
+    .mockResolvedValueOnce(nextOwner);
+  const controller = controllerWith(json);
+  await controller.login("Alice", "password");
+  vi.mocked(resumeOwnerStorage).mockClear();
+  controller.expire();
+  expect(controller.snapshot()).toEqual({ phase: "expiring" });
+  expect("user" in controller.snapshot()).toBe(false);
+  await vi.waitFor(() =>
+    expect(clearConversionInputs).toHaveBeenCalledWith(user().id),
+  );
+  await controller.login("Alice", "new session");
+  expect(json).toHaveBeenCalledTimes(1);
+  const reload = controller.load();
+  expect(controller.snapshot()).toEqual({ phase: "loading" });
+  expect(json).toHaveBeenCalledTimes(1);
+  expect(resumeOwnerStorage).not.toHaveBeenCalledWith(nextOwner.id);
+  releaseCleanup();
+  await reload;
+  expect(json).toHaveBeenCalledTimes(2);
+  expect(controller.snapshot()).toMatchObject({
+    phase: "authenticated",
+    user: { id: nextOwner.id },
+  });
+  expect(resumeOwnerStorage).toHaveBeenCalledWith(nextOwner.id);
+});
+
+test("expiry repeated during a waiting load cannot redirect before cleanup", async () => {
+  let releaseCleanup!: () => void;
+  vi.mocked(clearConversionInputs).mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        releaseCleanup = resolve;
+      }),
+  );
+  const json = vi
+    .fn()
+    .mockResolvedValueOnce({ csrf_token: "csrf", user: user() });
+  const controller = controllerWith(json);
+  await controller.login("Alice", "password");
+  controller.expire();
+  const staleLoad = controller.load();
+  controller.expire();
+  expect(controller.snapshot()).toEqual({ phase: "expiring" });
+  expect(json).toHaveBeenCalledTimes(1);
+  await vi.waitFor(() => expect(releaseCleanup).toBeTypeOf("function"));
+  releaseCleanup();
+  await staleLoad;
+  await vi.waitFor(() =>
+    expect(controller.snapshot()).toMatchObject({ phase: "anonymous" }),
+  );
+  expect(json).toHaveBeenCalledTimes(1);
 });
 
 test("subscribers receive changes and disposal aborts active requests", async () => {

@@ -1018,9 +1018,98 @@ test("Composer uses real final-image routing, TLS egress and durable owner revis
       .getByRole("textbox", { name: "Editable Markdown" })
       .fill(unsavedEdit);
     const workspace = adminPage.getByRole("group", { name: "Workspace" });
-    await workspace.getByRole("link", { name: "Convert" }).click();
+    const [convertResponse] = await Promise.all([
+      adminPage.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/convert" &&
+          response.request().resourceType() === "document",
+      ),
+      workspace.getByRole("link", { name: "Convert" }).click(),
+    ]);
     await adminPage.getByRole("heading", { name: "Convert" }).waitFor();
+    assert.equal(
+      new URL(
+        await adminPage.evaluate(
+          () => performance.getEntriesByType("navigation")[0]?.name,
+        ),
+      ).pathname,
+      "/convert",
+    );
+    assert.doesNotMatch(
+      convertResponse.headers()["content-security-policy"] ?? "",
+      /frame-src 'self'/,
+    );
+    assert.match(
+      convertResponse.headers()["content-security-policy"] ?? "",
+      /default-src 'none'/,
+    );
+    await adminPage.evaluate(() => {
+      window.__composerReturnDocument = true;
+    });
     await workspace.getByRole("link", { name: "Composer" }).click();
+    await adminPage
+      .getByRole("textbox", { name: "Editable Markdown" })
+      .waitFor();
+    const composerDocumentUrl = await adminPage.evaluate(
+      () => performance.getEntriesByType("navigation")[0]?.name,
+    );
+    assert.equal(new URL(composerDocumentUrl).pathname, "/composer");
+    assert.equal(
+      await adminPage.evaluate(() => window.__composerReturnDocument),
+      undefined,
+    );
+    assert.equal(
+      await adminPage
+        .getByRole("textbox", { name: "Message or answer" })
+        .inputValue(),
+      unsentMessage,
+    );
+    assert.equal(
+      await adminPage
+        .getByRole("textbox", { name: "Editable Markdown" })
+        .inputValue(),
+      unsavedEdit,
+    );
+    const [revertResponse] = await Promise.all([
+      adminPage.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/revert" &&
+          response.request().resourceType() === "document",
+      ),
+      adminPage.getByRole("link", { name: "2md, Experimental" }).click(),
+    ]);
+    await adminPage.waitForURL("**/revert");
+    assert.equal(
+      new URL(
+        await adminPage.evaluate(
+          () => performance.getEntriesByType("navigation")[0]?.name,
+        ),
+      ).pathname,
+      "/revert",
+    );
+    assert.doesNotMatch(
+      revertResponse.headers()["content-security-policy"] ?? "",
+      /frame-src 'self'/,
+    );
+    assert.match(
+      revertResponse.headers()["content-security-policy"] ?? "",
+      /default-src 'none'/,
+    );
+    const [composerResponse] = await Promise.all([
+      adminPage.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/composer" &&
+          response.request().resourceType() === "document",
+      ),
+      adminPage
+        .getByRole("group", { name: "Workspace" })
+        .getByRole("link", { name: "Composer" })
+        .click(),
+    ]);
+    assert.match(
+      composerResponse.headers()["content-security-policy"] ?? "",
+      /frame-src 'self'/,
+    );
     await adminPage
       .getByRole("textbox", { name: "Editable Markdown" })
       .waitFor();
@@ -1247,6 +1336,31 @@ test("Composer uses real final-image routing, TLS egress and durable owner revis
       statePath,
       `${JSON.stringify({ draftId: draft.id, revisionId: first.id, restoredId: restored.id, generatedRevisions, connectionId: adminConnection.connection.id, backupConnectionId: backupConnection.id, source })}\n`,
       { mode: 0o600 },
+    );
+    const [loginResponse] = await Promise.all([
+      adminPage.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/login" &&
+          response.request().resourceType() === "document",
+      ),
+      adminPage.getByRole("button", { name: "Sign out" }).click(),
+    ]);
+    await adminPage.getByRole("heading", { name: "Sign in" }).waitFor();
+    assert.equal(
+      new URL(
+        await adminPage.evaluate(
+          () => performance.getEntriesByType("navigation")[0]?.name,
+        ),
+      ).pathname,
+      "/login",
+    );
+    assert.doesNotMatch(
+      loginResponse.headers()["content-security-policy"] ?? "",
+      /frame-src 'self'/,
+    );
+    assert.match(
+      loginResponse.headers()["content-security-policy"] ?? "",
+      /default-src 'none'/,
     );
   } finally {
     await Promise.all(contexts.map((context) => context.close()));

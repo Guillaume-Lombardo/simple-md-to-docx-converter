@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import {
   type ChangeEvent,
   type DragEvent,
@@ -48,7 +47,6 @@ export function ReversionWorkspace({
     () => (ownerId ? ownerStorageEpoch(ownerId) : null),
     [ownerId],
   );
-  const router = useRouter();
   const [controller] = useState(
     () => supplied ?? new ReversionController(undefined, () => auth.expire()),
   );
@@ -140,7 +138,11 @@ export function ReversionWorkspace({
       if (state.source) return;
     }
     const id = await create();
-    if (id) router.push(`/composer?draft=${encodeURIComponent(id)}`);
+    if (id) {
+      const link = document.createElement("a");
+      link.href = `/composer?draft=${encodeURIComponent(id)}`;
+      link.click();
+    }
   }
 
   if (authState.phase !== "authenticated") return null;

@@ -15,6 +15,7 @@ import type { EffectiveUser } from "../src/auth/controller";
 export function AppShell({
   children,
   current,
+  nativeNavigation = false,
   onLogout,
   pending = false,
   user,
@@ -29,10 +30,12 @@ export function AppShell({
     | "Admin"
     | "Templates"
     | "Users";
+  nativeNavigation?: boolean;
   onLogout?: () => void;
   pending?: boolean;
   user?: EffectiveUser;
 }) {
+  const NavigationLink = nativeNavigation ? "a" : Link;
   return (
     <>
       <a className="sr-only focus:not-sr-only" href="#main">
@@ -67,7 +70,7 @@ export function AppShell({
             className="flex shrink-0 items-center gap-2 rounded-control border border-muted p-1"
             role="group"
           >
-            <Link
+            <NavigationLink
               aria-current={
                 ["Convert", "Presentations", "Revert"].includes(current)
                   ? "page"
@@ -77,59 +80,59 @@ export function AppShell({
               href="/convert"
             >
               Convert
-            </Link>
+            </NavigationLink>
             <span aria-hidden="true" className="text-muted">
               |
             </span>
             {user && !user.password_change_required ? (
-              <Link
+              <a
                 aria-current={current === "Composer" ? "page" : undefined}
                 className="rounded-control px-2 py-1 text-accent underline-offset-4 hover:underline"
                 href="/composer"
               >
                 Composer
-              </Link>
+              </a>
             ) : (
               <span aria-disabled="true" className="px-2 py-1 text-muted">
                 Composer
               </span>
             )}
           </div>
-          <Link
+          <NavigationLink
             aria-current={current === "Convert" ? "page" : undefined}
             className="text-accent underline-offset-4 hover:underline"
             href="/convert"
           >
             2docx
-          </Link>
+          </NavigationLink>
           {user && !user.password_change_required ? (
-            <Link
+            <NavigationLink
               aria-current={current === "Composer" ? "page" : undefined}
               className="text-accent underline-offset-4 hover:underline"
               href="/composer/connections"
             >
               My connections
-            </Link>
+            </NavigationLink>
           ) : user ? (
             <span aria-disabled="true" className="text-muted">
               My connections
             </span>
           ) : null}
           {user && !user.password_change_required ? (
-            <Link
+            <NavigationLink
               href="/presentations"
               aria-current={current === "Presentations" ? "page" : undefined}
               className="text-accent underline-offset-4 hover:underline"
             >
               2pptx
-            </Link>
+            </NavigationLink>
           ) : (
             <span aria-disabled="true" className="text-muted">
               2pptx
             </span>
           )}
           {user && !user.password_change_required ? (
-            <Link
+            <NavigationLink
               aria-current={current === "Revert" ? "page" : undefined}
               aria-label="2md, Experimental"
               className="flex items-center gap-2 text-accent underline-offset-4 hover:underline"
@@ -139,7 +142,7 @@ export function AppShell({
               <span aria-hidden="true" className="experimental-stamp">
                 Experimental
               </span>
-            </Link>
+            </NavigationLink>
           ) : (
             <span
               aria-disabled="true"
@@ -150,35 +153,35 @@ export function AppShell({
             </span>
           )}
           {user && !user.password_change_required ? (
-            <Link
+            <NavigationLink
               aria-current={current === "Templates" ? "page" : undefined}
               className="text-accent underline-offset-4 hover:underline"
               href="/templates"
             >
               templates
-            </Link>
+            </NavigationLink>
           ) : (
             <span aria-disabled="true" className="text-muted">
               templates
             </span>
           )}
           {user?.role === "admin" && !user.password_change_required && (
-            <Link
+            <NavigationLink
               aria-current={current === "Admin" ? "page" : undefined}
               className="text-accent underline-offset-4 hover:underline"
               href="/admin"
             >
               Admin
-            </Link>
+            </NavigationLink>
           )}
           {user?.role === "admin" && !user.password_change_required && (
-            <Link
+            <NavigationLink
               aria-current={current === "Users" ? "page" : undefined}
               className="text-accent underline-offset-4 hover:underline"
               href="/users"
             >
               Users
-            </Link>
+            </NavigationLink>
           )}
           {user && (
             <div className="ml-auto flex flex-wrap items-center gap-3">

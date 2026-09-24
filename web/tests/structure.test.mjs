@@ -91,9 +91,9 @@ test("no application route duplicates the FastAPI API", async () => {
 
 test("shell links target only delivered application routes", async () => {
   const shell = await readFile("components/primitives.tsx", "utf8");
-  const destinations = [...shell.matchAll(/<Link[\s\S]*?href="([^"]+)"/g)].map(
-    (match) => match[1],
-  );
+  const destinations = [
+    ...shell.matchAll(/<(?:NavigationLink|a)\b[^>]*\bhref="(\/[^\"]+)"/g),
+  ].map((match) => match[1]);
   assert.deepEqual(destinations, [
     "/convert",
     "/composer",
@@ -129,7 +129,10 @@ test("authentication keeps authority and secrets outside browser persistence", a
     assert.doesNotMatch(source, /setInterval|setTimeout/);
   }
   assert.match(controller, /clearOwnerDraftInputs\(previous\.user\.id\)/);
-  assert.match(controller, /clearOwnerDraftInputs\(this\.state\.user\.id\)/);
+  assert.match(
+    controller,
+    /ownerId\s*\?\s*Promise\.resolve\(\)\.then\(\(\) => clearOwnerDraftInputs\(ownerId\)\)/,
+  );
   assert.match(cleanup, /key\?\.startsWith\("composer:"\)/);
   assert.match(cleanup, /key\.split\(":"\)\[2\] === ownerId/);
   assert.match(cleanup, /sessionStorage\.removeItem\(key\)/);

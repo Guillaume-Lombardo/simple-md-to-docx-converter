@@ -114,6 +114,10 @@ async function exerciseStructuredPptx(page) {
     .getByRole("button", { name: "Open selected source in Composer" })
     .click();
   await page.waitForURL(/\/composer\?draft=[0-9a-f-]{36}$/);
+  const documentUrl = await page.evaluate(
+    () => performance.getEntriesByType("navigation")[0]?.name,
+  );
+  assert.equal(new URL(documentUrl).pathname, "/composer");
   await page.getByRole("heading", { name: "Composer", exact: true }).waitFor();
   await page.getByRole("button", { name: "Capture source revision" }).click();
   await page.getByText(/Original source captured/).waitFor();

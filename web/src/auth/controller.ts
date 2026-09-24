@@ -10,6 +10,7 @@ import { clearOwnerDraftInputs, resumeOwnerDraftInputs } from "./local-drafts";
 
 export type AuthState =
   | { phase: "loading" }
+  | { phase: "expiring" }
   | { phase: "anonymous"; pending: boolean; notice?: string }
   | { phase: "unavailable" }
   | {
@@ -32,6 +33,7 @@ export class AuthController {
   private generation = 0;
   private request?: AbortController;
   private operationPending = false;
+  private ownerCleanup?: Promise<void>;
 
   constructor(private readonly api: ApiTransport = new ApiTransport()) {}
 
@@ -49,10 +51,12 @@ export class AuthController {
   }
 
   async load(): Promise<void> {
-    this.operationPending = false;
     const { controller, generation } = this.start();
     this.publish({ phase: "loading" });
     try {
+      if (this.ownerCleanup) await this.ownerCleanup;
+      if (!this.current(generation)) return;
+      this.operationPending = false;
       const user = await this.api.json(
         "/api/v1/session",
         vApiSessionApiV1SessionGetResponse,
@@ -198,14 +202,32 @@ export class AuthController {
   }
 
   expire(): void {
-    if (this.state.phase === "anonymous" && !this.state.pending) return;
-    if (hasUser(this.state)) void clearOwnerDraftInputs(this.state.user.id);
+    if (
+      this.state.phase === "expiring" ||
+      (this.state.phase === "anonymous" && !this.state.pending)
+    )
+      return;
+    const ownerId = hasUser(this.state) ? this.state.user.id : null;
+    const cleanup = ownerId
+      ? Promise.resolve().then(() => clearOwnerDraftInputs(ownerId))
+      : this.ownerCleanup;
     this.dispose();
-    this.publish({
-      phase: "anonymous",
-      pending: false,
-      notice: SIGN_IN_AGAIN,
-    });
+    if (!cleanup) {
+      this.publish({
+        phase: "anonymous",
+        pending: false,
+        notice: SIGN_IN_AGAIN,
+      });
+      return;
+    }
+    const generation = this.generation;
+    this.ownerCleanup = cleanup;
+    this.operationPending = true;
+    this.publish({ phase: "expiring" });
+    void cleanup.then(
+      () => this.finishExpiry(cleanup, generation),
+      () => this.finishExpiry(cleanup, generation),
+    );
   }
 
   unavailableMessage(): string {
@@ -221,6 +243,17 @@ export class AuthController {
 
   private current(generation: number): boolean {
     return generation === this.generation;
+  }
+
+  private finishExpiry(cleanup: Promise<void>, generation: number): void {
+    if (this.ownerCleanup === cleanup) this.ownerCleanup = undefined;
+    if (!this.current(generation)) return;
+    this.operationPending = false;
+    this.publish({
+      phase: "anonymous",
+      pending: false,
+      notice: SIGN_IN_AGAIN,
+    });
   }
 
   private accept(user: UserResponse): void {
@@ -240,7 +273,7 @@ export class AuthController {
   }
 
   private pending(): boolean {
-    return this.operationPending;
+    return this.operationPending || this.ownerCleanup !== undefined;
   }
 
   private publishPending(pending: boolean): void {

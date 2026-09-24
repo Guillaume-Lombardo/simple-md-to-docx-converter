@@ -19,6 +19,16 @@ import {
 
 const push = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
+
+function observeDocumentNavigation(): string[] {
+  const paths: string[] = [];
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+    this: HTMLAnchorElement,
+  ) {
+    paths.push(this.getAttribute("href") ?? "");
+  });
+  return paths;
+}
 vi.mock("../src/conversion/persistence", () => ({
   ownerStorageEpoch: vi.fn().mockReturnValue(0),
   resumeOwnerStorage: vi.fn(),
@@ -228,6 +238,7 @@ test("template fallback and unavailable search results are explained before sele
 });
 
 test("a failed final source save blocks Composer upload while retaining the source", async () => {
+  const navigations = observeDocumentNavigation();
   const multipartWithMetadata = vi.fn();
   renderWorkspace({ json: standardJson(), multipartWithMetadata });
   const input = await screen.findByLabelText(/Source file/);
@@ -252,10 +263,12 @@ test("a failed final source save blocks Composer upload while retaining the sour
   expect(open).toBeDisabled();
   expect(screen.getByText("Selected retained.md (10 bytes).")).toBeVisible();
   expect(multipartWithMetadata).not.toHaveBeenCalled();
+  expect(navigations).toEqual([]);
   expect(push).not.toHaveBeenCalled();
 });
 
 test("a recent unnamed result can hand off once despite browser storage failure", async () => {
+  const navigations = observeDocumentNavigation();
   vi.mocked(writeConversionInputs).mockRejectedValue(
     new DOMException("quota", "QuotaExceededError"),
   );
@@ -311,8 +324,9 @@ test("a recent unnamed result can hand off once despite browser storage failure"
     status: 201,
   });
   await waitFor(() =>
-    expect(push).toHaveBeenCalledWith(`/composer?draft=${draftId}`),
+    expect(navigations).toContain(`/composer?draft=${draftId}`),
   );
+  expect(push).not.toHaveBeenCalled();
   expect(jsonWithMetadata).toHaveBeenCalledWith(
     `/api/v1/composer/drafts/from-conversion/${job.id}`,
     expect.anything(),

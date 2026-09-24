@@ -18,6 +18,16 @@ import {
 
 const push = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
+
+function observeDocumentNavigation(): string[] {
+  const paths: string[] = [];
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+    this: HTMLAnchorElement,
+  ) {
+    paths.push(this.getAttribute("href") ?? "");
+  });
+  return paths;
+}
 vi.mock("../src/conversion/persistence", () => ({
   ownerStorageEpoch: vi.fn().mockReturnValue(0),
   resumeOwnerStorage: vi.fn(),
@@ -471,6 +481,7 @@ test("download saving defers object URL revocation", () => {
 
 test("selected Office source explicitly creates a scanned Composer draft", async () => {
   push.mockReset();
+  const navigations = observeDocumentNavigation();
   const draftId = "00000000-0000-4000-8000-000000000301";
   const multipartWithMetadata = vi.fn().mockResolvedValue({
     data: { id: draftId },
@@ -494,12 +505,24 @@ test("selected Office source explicitly creates a scanned Composer draft", async
       screen.getByRole("button", { name: "Open selected source in Composer" }),
     ).toBeEnabled(),
   );
+  let releaseSave!: () => void;
+  vi.mocked(writeReversionInputs).mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        releaseSave = resolve;
+      }),
+  );
   fireEvent.click(
     screen.getByRole("button", { name: "Open selected source in Composer" }),
   );
+  await vi.waitFor(() => expect(releaseSave).toBeTypeOf("function"));
+  expect(multipartWithMetadata).not.toHaveBeenCalled();
+  expect(navigations).toEqual([]);
+  releaseSave();
   await vi.waitFor(() =>
-    expect(push).toHaveBeenCalledWith(`/composer?draft=${draftId}`),
+    expect(navigations).toContain(`/composer?draft=${draftId}`),
   );
+  expect(push).not.toHaveBeenCalled();
   expect(multipartWithMetadata).toHaveBeenCalledWith(
     "/api/v1/composer/drafts",
     expect.any(FormData),
@@ -513,6 +536,7 @@ test("selected Office source explicitly creates a scanned Composer draft", async
 
 test("completed Markdown result uses the owner-scoped reversion handoff", async () => {
   push.mockReset();
+  const navigations = observeDocumentNavigation();
   const draftId = "00000000-0000-4000-8000-000000000302";
   const jsonWithMetadata = vi.fn().mockResolvedValue({
     data: { id: draftId },
@@ -541,8 +565,9 @@ test("completed Markdown result uses the owner-scoped reversion handoff", async 
     screen.getByRole("button", { name: "Open Markdown result in Composer" }),
   );
   await vi.waitFor(() =>
-    expect(push).toHaveBeenCalledWith(`/composer?draft=${draftId}`),
+    expect(navigations).toContain(`/composer?draft=${draftId}`),
   );
+  expect(push).not.toHaveBeenCalled();
   expect(jsonWithMetadata).toHaveBeenCalledWith(
     `/api/v1/composer/drafts/from-reversion/${reversionJob.id}`,
     expect.anything(),

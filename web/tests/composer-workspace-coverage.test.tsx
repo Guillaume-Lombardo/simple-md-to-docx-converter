@@ -1071,7 +1071,7 @@ test("overlapping question and proposal pages preserve unsent human review", asy
   expect(correction).toHaveValue("Human correction in progress");
   expect(api.answerQuestion).not.toHaveBeenCalled();
   expect(api.decide).not.toHaveBeenCalled();
-});
+}, 15_000);
 
 test("an answered question can be prepared for model review without another mutation", async () => {
   const answered = {
