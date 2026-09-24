@@ -154,6 +154,66 @@
     "response_class": "JSONResponse"
   },
   {
+    "path": "/api/v1/composer/authors",
+    "methods": [
+      "GET"
+    ],
+    "name": "list_authors",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/authors",
+    "methods": [
+      "POST"
+    ],
+    "name": "create_author",
+    "include_in_schema": true,
+    "status_code": 201,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/authors/{author_id}",
+    "methods": [
+      "GET"
+    ],
+    "name": "get_author",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/authors/{author_id}",
+    "methods": [
+      "PATCH"
+    ],
+    "name": "update_author",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/authors/{author_id}/grants/{user_id}",
+    "methods": [
+      "PUT"
+    ],
+    "name": "grant_author",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/authors/{author_id}/grants/{user_id}",
+    "methods": [
+      "DELETE"
+    ],
+    "name": "revoke_author",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
     "path": "/api/v1/composer/capabilities",
     "methods": [
       "GET"
@@ -431,6 +491,176 @@
     "name": "publish_generation",
     "include_in_schema": true,
     "status_code": 201,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/fill-templates",
+    "methods": [
+      "GET"
+    ],
+    "name": "list_templates",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/fill-templates",
+    "methods": [
+      "POST"
+    ],
+    "name": "create_template",
+    "include_in_schema": true,
+    "status_code": 201,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/fill-templates/{template_id}",
+    "methods": [
+      "GET"
+    ],
+    "name": "get_template",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/fill-templates/{template_id}/versions",
+    "methods": [
+      "POST"
+    ],
+    "name": "replace_template",
+    "include_in_schema": true,
+    "status_code": 201,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/fill-templates/{template_id}/versions",
+    "methods": [
+      "GET"
+    ],
+    "name": "list_versions",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/fill-templates/{template_id}/versions/{version_id}",
+    "methods": [
+      "GET"
+    ],
+    "name": "get_version",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/fill-templates/{template_id}/versions/{version_id}/content",
+    "methods": [
+      "GET"
+    ],
+    "name": "download_version",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/fill-templates/{template_id}/grants/{user_id}",
+    "methods": [
+      "PUT"
+    ],
+    "name": "grant_template",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/fill-templates/{template_id}/grants/{user_id}",
+    "methods": [
+      "DELETE"
+    ],
+    "name": "revoke_template",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/drafts/{draft_id}/fill-plans",
+    "methods": [
+      "POST"
+    ],
+    "name": "create_plan",
+    "include_in_schema": true,
+    "status_code": 201,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/drafts/{draft_id}/fill-plans",
+    "methods": [
+      "GET"
+    ],
+    "name": "list_plans",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/drafts/{draft_id}/fill-plans/{plan_id}",
+    "methods": [
+      "GET"
+    ],
+    "name": "get_plan",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/drafts/{draft_id}/fill-plans/{plan_id}",
+    "methods": [
+      "PATCH"
+    ],
+    "name": "update_plan",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/drafts/{draft_id}/fill-plans/{plan_id}/approve",
+    "methods": [
+      "POST"
+    ],
+    "name": "approve_plan",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/drafts/{draft_id}/fill-plans/{plan_id}/publish",
+    "methods": [
+      "POST"
+    ],
+    "name": "publish_plan",
+    "include_in_schema": true,
+    "status_code": 201,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/regenerations",
+    "methods": [
+      "POST"
+    ],
+    "name": "regenerate",
+    "include_in_schema": true,
+    "status_code": 201,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/drafts/{draft_id}/model-steps/preview",
+    "methods": [
+      "POST"
+    ],
+    "name": "preview_model_step",
+    "include_in_schema": true,
+    "status_code": null,
     "response_class": "JSONResponse"
   },
   {

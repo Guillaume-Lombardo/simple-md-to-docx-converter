@@ -1176,6 +1176,8 @@ class ComposerModelStepRow(Base):
     approved_endpoint: Mapped[str] = mapped_column(String(), nullable=False)
     model: Mapped[str] = mapped_column(String(), nullable=False)
     payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    author_refs: Mapped[str] = mapped_column(String(), nullable=False, default="[]")
+    author_preview_digest: Mapped[str | None] = mapped_column(String(64))
     idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
     state: Mapped[str] = mapped_column(String(16), nullable=False)
     intent: Mapped[str] = mapped_column(
@@ -1328,6 +1330,7 @@ class ComposerRevisionRow(Base):
     source_reference: Mapped[str] = mapped_column(String(), nullable=False)
     template_reference: Mapped[str | None] = mapped_column(String())
     approved_values: Mapped[str] = mapped_column(String(), nullable=False)
+    typed_fill_snapshot: Mapped[str | None] = mapped_column(String())
     render_options: Mapped[str] = mapped_column(String(), nullable=False)
     model_identity: Mapped[str | None] = mapped_column(String())
     provenance: Mapped[str] = mapped_column(String(), nullable=False)
@@ -1373,3 +1376,289 @@ class ComposerArtifactRow(Base):
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     media_type: Mapped[str] = mapped_column(String(128), nullable=False)
+
+
+class AuthorKnowledgeRow(Base):
+    """Private structured author identity with an immutable owner."""
+
+    __tablename__ = "author_knowledge"
+    __table_args__ = (
+        CheckConstraint("version > 0", name="ck_author_knowledge_version"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(), nullable=False)
+    fields_json: Mapped[str] = mapped_column(String(), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+Index("ix_author_knowledge_owner", AuthorKnowledgeRow.owner_id, AuthorKnowledgeRow.id)
+
+
+class AuthorKnowledgeGrantRow(Base):
+    """An explicit named-user read grant for one author entry."""
+
+    __tablename__ = "author_knowledge_grants"
+
+    author_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("author_knowledge.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+Index("ix_author_knowledge_grants_user", AuthorKnowledgeGrantRow.user_id)
+
+
+class AuthorKnowledgeAuditRow(Base):
+    """Content-free evidence committed with author mutations and grants."""
+
+    __tablename__ = "author_knowledge_audit"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    author_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    actor_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    operation: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_user_id: Mapped[str | None] = mapped_column(String(36))
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    administrator_intervention: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+Index("ix_author_knowledge_audit_author", AuthorKnowledgeAuditRow.author_id)
+Index(
+    "ix_author_knowledge_audit_retention",
+    AuthorKnowledgeAuditRow.created_at,
+    AuthorKnowledgeAuditRow.id,
+)
+
+
+class TypedTemplateRow(Base):
+    """Private DOCX filling-template identity, distinct from Pandoc references."""
+
+    __tablename__ = "typed_templates"
+    __table_args__ = (
+        CheckConstraint("revision > 0", name="ck_typed_templates_revision"),
+        CheckConstraint(
+            "publication_state IN ('pending', 'published')",
+            name="ck_typed_templates_publication",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    current_version_id: Mapped[str | None] = mapped_column(String(36))
+    publication_state: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+Index("ix_typed_templates_owner", TypedTemplateRow.owner_id, TypedTemplateRow.id)
+
+
+class TypedTemplateGrantRow(Base):
+    """Named-user read grant for a typed filling template."""
+
+    __tablename__ = "typed_template_grants"
+
+    template_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("typed_templates.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+Index("ix_typed_template_grants_user", TypedTemplateGrantRow.user_id)
+
+
+class TypedTemplateVersionRow(Base):
+    """Immutable schema and DOCX digest; only publication state may advance."""
+
+    __tablename__ = "typed_template_versions"
+    __table_args__ = (
+        UniqueConstraint(
+            "template_id", "number", name="uq_typed_template_versions_number"
+        ),
+        CheckConstraint("number > 0", name="ck_typed_template_versions_number"),
+        CheckConstraint("size > 0", name="ck_typed_template_versions_size"),
+        CheckConstraint(
+            "publication_state IN ('pending', 'published')",
+            name="ck_typed_template_versions_publication",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    template_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("typed_templates.id", ondelete="CASCADE"), nullable=False
+    )
+    number: Mapped[int] = mapped_column(Integer, nullable=False)
+    expected_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    object_owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    created_by: Mapped[str] = mapped_column(String(36), nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    schema_json: Mapped[str] = mapped_column(String(), nullable=False)
+    schema_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    publication_state: Mapped[str] = mapped_column(String(16), nullable=False)
+    publication_token: Mapped[str | None] = mapped_column(String(36))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+Index("ix_typed_template_versions_template", TypedTemplateVersionRow.template_id)
+Index(
+    "ix_typed_template_versions_recovery",
+    TypedTemplateVersionRow.publication_state,
+    TypedTemplateVersionRow.lease_expires_at,
+)
+
+
+class TypedTemplateAuditRow(Base):
+    """Content-free typed-template mutation evidence."""
+
+    __tablename__ = "typed_template_audit"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    template_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    actor_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    operation: Mapped[str] = mapped_column(String(32), nullable=False)
+    version_id: Mapped[str | None] = mapped_column(String(36))
+    target_user_id: Mapped[str | None] = mapped_column(String(36))
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    administrator_intervention: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+Index("ix_typed_template_audit_template", TypedTemplateAuditRow.template_id)
+Index(
+    "ix_typed_template_audit_retention",
+    TypedTemplateAuditRow.created_at,
+    TypedTemplateAuditRow.id,
+)
+
+
+class ComposerFillPlanRow(Base):
+    """Reviewable typed field plan before an exact revision is published."""
+
+    __tablename__ = "composer_fill_plans"
+    __table_args__ = (
+        UniqueConstraint(
+            "draft_id", "idempotency_key", name="uq_composer_fill_plan_key"
+        ),
+        CheckConstraint("version > 0", name="ck_composer_fill_plan_version"),
+        CheckConstraint(
+            "draft_version > 0", name="ck_composer_fill_plan_draft_version"
+        ),
+        CheckConstraint(
+            "state IN ('pending', 'approved', 'published')",
+            name="ck_composer_fill_plan_state",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    draft_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("composer_drafts.id", ondelete="CASCADE"), nullable=False
+    )
+    owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    draft_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_revision_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("composer_revisions.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    template_version_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("typed_template_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    template_docx_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    template_schema_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    author_refs: Mapped[str] = mapped_column(String(), nullable=False)
+    values_json: Mapped[str] = mapped_column(String(), nullable=False)
+    provenance_json: Mapped[str] = mapped_column(String(), nullable=False)
+    questions_json: Mapped[str] = mapped_column(String(), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    result_revision_id: Mapped[str | None] = mapped_column(String(36))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+Index(
+    "ix_composer_fill_plans_history",
+    ComposerFillPlanRow.draft_id,
+    ComposerFillPlanRow.created_at,
+    ComposerFillPlanRow.id,
+)
+Index("ix_composer_fill_plans_state", ComposerFillPlanRow.state)
+
+
+class ComposerFillPlanDecisionRow(Base):
+    """Content-free idempotency receipt for one reviewed fill-plan decision."""
+
+    __tablename__ = "composer_fill_plan_decisions"
+    __table_args__ = (
+        UniqueConstraint(
+            "plan_id", "idempotency_key", name="uq_composer_fill_plan_decision_key"
+        ),
+        CheckConstraint(
+            "resulting_version > 0", name="ck_composer_fill_plan_decision_version"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    plan_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("composer_fill_plans.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    resulting_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )

@@ -21,6 +21,7 @@ from markweave.auth.security import (
 )
 from markweave.auth.service import AuthenticationService, SecurityRuntime, SessionPolicy
 from markweave.composer.admin_policy import ComposerAdminPolicy
+from markweave.composer.author_knowledge import AuthorKnowledgeLimits
 from markweave.composer.connections import ConnectionService
 from markweave.composer.runtime import build_connection_policy, build_connection_service
 from markweave.config import (
@@ -61,6 +62,9 @@ from markweave.persistence.composer import (
     SqlConnectionRepository,
 )
 from markweave.persistence.composer.admin_policy import SqlComposerAdminPolicyRepository
+from markweave.persistence.composer.author_knowledge import SqlAuthorKnowledgeRepository
+from markweave.persistence.composer.fill_plans import SqlFillPlanRepository
+from markweave.persistence.composer.typed_templates import SqlTypedTemplateRepository
 from markweave.persistence.jobs import SqlJobRepository
 from markweave.persistence.migrations import upgrade_database
 from markweave.persistence.observability import SqlAuditReader, SqlOperationalObserver
@@ -130,6 +134,9 @@ class AppComponents:
     composer_connections: ConnectionService | None = None
     composer_model_step_repository: SqlComposerModelStepRepository | None = None
     composer_steps: ComposerStepRunner | None = None
+    composer_authors: SqlAuthorKnowledgeRepository | None = None
+    composer_fill_templates: SqlTypedTemplateRepository | None = None
+    composer_fill_plans: SqlFillPlanRepository | None = None
     metrics: OperationalMetrics = field(default_factory=OperationalMetrics)
     queue_observer: QueueObserver | None = None
     audit_reader: AuditReader | None = None
@@ -369,17 +376,19 @@ def build_upload_scanner(settings: Settings) -> UploadScanner:
     )
 
 
-def _build_composer_step_runtime(
+def _build_composer_step_runtime(  # noqa: PLR0913, PLR0917 - explicit runtime ports
     settings: Settings,
     engine: Engine,
     connections: ConnectionService | None,
     metrics: OperationalMetrics,
     recovery_limit: int,
+    authors: SqlAuthorKnowledgeRepository | None = None,
 ) -> tuple[SqlComposerModelStepRepository, ComposerStepRunner | None, tuple[Any, ...]]:
     repository = SqlComposerModelStepRepository(
         engine,
         on_expiration=metrics.record_composer_model_step_expiration,
         on_recovery=metrics.record_composer_model_step_recovery,
+        authors=authors,
     )
     repository.recover_stale_model_steps(
         stale_before=datetime.now(UTC), limit=recovery_limit
@@ -547,6 +556,40 @@ def build_components(  # noqa: PLR0912, PLR0915 - explicit resource ownership co
         )
         templates.reclaim_pending()
         composer_store = SqlComposerRepository(engine, object_store)
+        composer_authors = (
+            SqlAuthorKnowledgeRepository(
+                engine,
+                AuthorKnowledgeLimits(
+                    max_fields=settings.template_max_xml_elements,
+                    max_name_length=settings.template_max_name_characters,
+                    max_field_value_length=settings.composer_maximum_request_bytes,
+                    max_field_name_length=settings.template_max_name_characters,
+                    max_citation_length=settings.template_metadata_request_max_bytes,
+                ),
+            )
+            if settings.composer_maximum_request_bytes is not None
+            else None
+        )
+        composer_fill_templates = (
+            SqlTypedTemplateRepository(
+                engine,
+                object_store,
+                publication_lease=timedelta(
+                    seconds=settings.template_pending_publication_stale_seconds
+                ),
+            )
+            if composer_authors is not None
+            else None
+        )
+        composer_fill_plans = (
+            SqlFillPlanRepository(engine)
+            if composer_fill_templates is not None
+            else None
+        )
+        if composer_fill_templates is not None:
+            composer_fill_templates.recover_pending(
+                limit=job_policies.schedule.cleanup_limit
+            )
         if settings.composer_pending_publication_stale_seconds is not None:
             stale_before = datetime.now(UTC) - timedelta(
                 seconds=settings.composer_pending_publication_stale_seconds
@@ -582,6 +625,7 @@ def build_components(  # noqa: PLR0912, PLR0915 - explicit resource ownership co
                 composer_connections,
                 metrics,
                 job_policies.schedule.cleanup_limit,
+                composer_authors,
             )
         )
         owned_resources = (*owned_resources, *step_resources)
@@ -622,6 +666,9 @@ def build_components(  # noqa: PLR0912, PLR0915 - explicit resource ownership co
             composer_connections=composer_connections,
             composer_model_step_repository=composer_model_step_repository,
             composer_steps=composer_steps,
+            composer_authors=composer_authors,
+            composer_fill_templates=composer_fill_templates,
+            composer_fill_plans=composer_fill_plans,
             metrics=metrics,
             queue_observer=SqlOperationalObserver(
                 observation_engine,

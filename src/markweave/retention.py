@@ -81,6 +81,8 @@ class ComposerContentAuditRepository(Protocol):
 
     def cleanup_content_audit(self, *, cutoff_at: datetime, limit: int) -> int: ...
 
+    def cleanup_t91_audit(self, *, cutoff_at: datetime, limit: int) -> int: ...
+
 
 class ComposerConnectionAuditRepository(Protocol):
     """Bounded cleanup for content-free Composer connection audit events."""
@@ -168,6 +170,10 @@ class RetentionService:
             composer_cleaned += self._composer.cleanup_orphan_sources(limit=limit)
         if self._composer_content_audit is not None:
             composer_cleaned += self._composer_content_audit.cleanup_content_audit(
+                cutoff_at=now - timedelta(seconds=self._policy.audit_seconds),
+                limit=limit,
+            )
+            composer_cleaned += self._composer_content_audit.cleanup_t91_audit(
                 cutoff_at=now - timedelta(seconds=self._policy.audit_seconds),
                 limit=limit,
             )

@@ -121,6 +121,9 @@ def test_inprocess_sql_repository_control_flow() -> None:
     upgrade_database(engine)
     assert set(inspect(engine).get_table_names()) == {
         "alembic_version",
+        "author_knowledge",
+        "author_knowledge_audit",
+        "author_knowledge_grants",
         "audit_cleanup_guards",
         "authentication_audit_records",
         "composer_admin_policy",
@@ -132,6 +135,8 @@ def test_inprocess_sql_repository_control_flow() -> None:
         "composer_content_audit",
         "composer_credentials",
         "composer_drafts",
+        "composer_fill_plan_decisions",
+        "composer_fill_plans",
         "composer_generations",
         "composer_key_identity",
         "composer_messages",
@@ -157,6 +162,10 @@ def test_inprocess_sql_repository_control_flow() -> None:
         "template_preferences",
         "template_versions",
         "templates",
+        "typed_template_audit",
+        "typed_template_grants",
+        "typed_template_versions",
+        "typed_templates",
         "users",
     }
     job_columns = {

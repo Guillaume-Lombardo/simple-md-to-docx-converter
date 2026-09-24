@@ -503,6 +503,11 @@ run_browser_test() {
       --volume "$composer_provider_directory/client.key:/run/composer-e2e-client.key:ro,z"
       --volume "$composer_corpus_directory:/spikes/anydoc/corpus:ro,z"
     )
+  elif [[ "$test_file" == /e2e/browser-next-composer-typed.test.mjs ]]; then
+    browser_credentials=(
+      --volume "$composer_provider_directory/server.crt:/run/composer-e2e-ca.crt:ro,z"
+      --volume "$composer_corpus_directory:/spikes/anydoc/corpus:ro,z"
+    )
   elif [[ "$test_file" == /e2e/browser-next-composer-resilience.test.mjs ]]; then
     browser_credentials=(
       --volume "$composer_provider_directory/server.crt:/run/composer-e2e-ca.crt:ro,z"
@@ -998,6 +1003,29 @@ for corpus_file in docx/text.docx pdf/text.pdf; do
   test "$(sha256sum "$repository/spikes/anydoc/corpus/$corpus_file" | cut -d ' ' -f 1)" = \
     "$(sha256sum "$composer_corpus_directory/$corpus_file" | cut -d ' ' -f 1)"
 done
+uv run python - "$repository/tests/integration/composer/test_typed_docx_fill.py" \
+  "$composer_corpus_directory/docx/typed.docx" \
+  "$composer_corpus_directory/docx/typed-schema.json" <<'PY'
+import importlib.util
+import json
+import sys
+from pathlib import Path
+
+module_path, docx_path, schema_path = map(Path, sys.argv[1:])
+spec = importlib.util.spec_from_file_location("typed_e2e_fixture", module_path)
+assert spec is not None and spec.loader is not None
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+docx_path.write_bytes(module._template())
+schema_path.write_text(
+    json.dumps(module._schema(), sort_keys=True, separators=(",", ":")),
+    encoding="utf-8",
+)
+PY
+chmod 0444 "$composer_corpus_directory/docx/typed.docx" \
+  "$composer_corpus_directory/docx/typed-schema.json"
+test -s "$composer_corpus_directory/docx/typed.docx"
+test -s "$composer_corpus_directory/docx/typed-schema.json"
 COREPACK_ENABLE_NETWORK=0 pnpm install --frozen-lockfile --ignore-scripts --filter md-converter-web-tests
 cp -a "$repository/node_modules" "$node_runtime_directory"
 chmod -R a+rX "$browser_runtime_directory" "$node_runtime_directory"
@@ -1349,6 +1377,9 @@ if [[ "$composer_scenario_only" == 1 ]]; then
     --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
     --env MARKWEAVE_E2E_PROFILE="$profile" \
     --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json"
+  run_browser_test "$application_name" /e2e/browser-next-composer-typed.test.mjs \
+    --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
+    --env MARKWEAVE_E2E_PROFILE="$profile"
   if podman logs "$application_name" 2>&1 | grep -Fq 'composer-e2e-write-only-secret'; then
     echo "Composer credential appeared in application logs." >&2
     exit 1
@@ -1361,6 +1392,7 @@ if [[ "$composer_scenario_only" == 1 ]]; then
   test -s "$temporary_directory/browser-artifacts/browser-next-composer-real-cgroup-001.txt"
   test -s "$temporary_directory/browser-artifacts/browser-next-composer-connections-cgroup-001.txt"
   test -s "$temporary_directory/browser-artifacts/browser-next-composer-pairing-cgroup-001.txt"
+  test -s "$temporary_directory/browser-artifacts/browser-next-composer-typed-cgroup-001.txt"
   test -s "$browser_session_directory/composer-$profile.json"
   podman unshare chown -R 0:0 -- "$browser_session_directory"
   mkdir -p -- "$artifact_directory"
@@ -1689,6 +1721,9 @@ run_browser_test "$application_name" /e2e/browser-next-composer-pairing.test.mjs
   --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
   --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json"
+run_browser_test "$application_name" /e2e/browser-next-composer-typed.test.mjs \
+  --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
+  --env MARKWEAVE_E2E_PROFILE="$profile"
 if podman logs "$application_name" 2>&1 | \
   grep -Fq 'composer-e2e-write-only-secret'; then
   echo "Composer credential appeared in application logs." >&2

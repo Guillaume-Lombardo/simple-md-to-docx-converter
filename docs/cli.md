@@ -12,7 +12,7 @@ markweave [--json] [--non-interactive] [--timeout SECONDS] COMMAND
 login | logout | whoami | password change
 convert | jobs {list,show,wait,cancel,download,manifest,reverse}
 templates {list,search,show,create,download,update,replace,archive,delete,versions,version-download,restore,preferred,fallback}
-composer {capabilities,policy,connections,personal-permissions,drafts,messages,model-steps,proposals,revisions}
+composer {capabilities,policy,connections,personal-permissions,drafts,messages,model-steps,proposals,revisions,authors,fill-templates,fill-plans}
 users {list,create,activate,deactivate,reset-password,require-password-change}
 audit | health {live,ready,metrics}
 serve | worker | doctor | migrate
@@ -49,6 +49,33 @@ Use
 `markweave composer revisions diff DRAFT_ID TO_REVISION_ID --from-revision FROM_REVISION_ID`
 for bounded line changes. Native Office proposals are reviewable but cannot be published as
 document edits until a qualified structured editor is available.
+
+The author directory and typed Word filling use separate Composer command families:
+
+```text
+markweave composer authors {list,show,create,update,grant,revoke}
+markweave composer fill-templates {list,show,create,replace,versions,version,download,grant,revoke}
+markweave composer fill-plans {list,show,create,update,approve,publish,regenerate}
+```
+
+Author fields, typed schemas, values, and provenance are read from private current-user-only JSON
+files through `--fields-file`, `--schema-file`, `--values-file`, and `--provenance-file`. Template
+creation and replacement also take a local DOCX path. The CLI bounds these inputs using service
+capabilities and rejects duplicate JSON keys and non-finite values. Use the exact ETag returned by
+`show` or `list` with `--etag` for conditional mutations and an `--idempotency-key` for fill plan
+decisions and publication. `fill-plans show` displays durable missing or ambiguous questions;
+resolve them through `update` before `approve`. `publish` creates an immutable DOCX revision;
+`regenerate` uses the frozen approved inputs and makes no model request. See each command's
+`--help` for positional IDs and options.
+
+For a model step, repeat `--author AUTHOR_ID` to select authorized author entries. The CLI
+requests an exact prompt preview using the draft `--etag`, checks its digest and author versions,
+and shows the complete text for interactive approval before it starts the step. `--force` retains
+the existing explicit approval behavior for scripts. The start request binds the preview digest
+and exact author versions; a changed or revoked entry fails before model transmission. To resume
+after answering a durable question, start a fresh step with `--answered-question-id QUESTION_ID`
+and a new ETag and idempotency key. Use `--intent question` to request another question; the
+default intent is a proposal. Model text still comes only from `--content-file` or `--stdin`.
 
 Administrators can inspect and replace the Composer destination policy through the
 authenticated API:

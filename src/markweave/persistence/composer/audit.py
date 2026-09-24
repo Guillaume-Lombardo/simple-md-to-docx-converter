@@ -7,14 +7,19 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import Engine, delete, select, text
+from sqlalchemy import Engine, delete, literal, select, text, union_all
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from markweave.auth.models import SYSTEM_ACTOR_ID  # noqa: F401 - public re-export
 from markweave.persistence.composer.common import DEFAULT_PAGE_LIMIT, utc, validate_page
 from markweave.persistence.errors import PersistenceError
-from markweave.persistence.schema import ComposerContentAuditRow, RetentionCleanupRunRow
+from markweave.persistence.schema import (
+    AuthorKnowledgeAuditRow,
+    ComposerContentAuditRow,
+    RetentionCleanupRunRow,
+    TypedTemplateAuditRow,
+)
 from markweave.persistence.sql import serialize_sqlite_write
 
 
@@ -161,6 +166,67 @@ class SqlComposerAuditRepository:
                     RetentionCleanupRunRow(
                         id=str(self._new_id()),
                         kind="composer_content_audit",
+                        cutoff_at=cutoff_at,
+                        removed_count=removed,
+                        completed_at=self._clock(),
+                    )
+                )
+                return removed
+        except SQLAlchemyError:
+            raise PersistenceError from None
+
+    def cleanup_t91_audit(self, *, cutoff_at: datetime, limit: int) -> int:
+        """Remove one bounded page of old author/template evidence with a receipt."""
+
+        if isinstance(limit, bool) or limit <= 0:
+            raise ValueError("Audit cleanup limit must be positive")
+        combined = union_all(
+            select(
+                AuthorKnowledgeAuditRow.id.label("id"),
+                AuthorKnowledgeAuditRow.created_at.label("created_at"),
+                literal("author").label("kind"),
+            ).where(AuthorKnowledgeAuditRow.created_at < cutoff_at),
+            select(
+                TypedTemplateAuditRow.id.label("id"),
+                TypedTemplateAuditRow.created_at.label("created_at"),
+                literal("template").label("kind"),
+            ).where(TypedTemplateAuditRow.created_at < cutoff_at),
+        ).subquery()
+        try:
+            with Session(self._engine) as database, database.begin():
+                serialize_sqlite_write(database, self._engine)
+                candidates = tuple(
+                    database.execute(
+                        select(combined.c.id, combined.c.kind)
+                        .order_by(combined.c.created_at, combined.c.id, combined.c.kind)
+                        .limit(limit)
+                    )
+                )
+                removed = 0
+                if candidates:
+                    guard_id = str(self._new_id())
+                    database.execute(
+                        text("INSERT INTO audit_cleanup_guards (id) VALUES (:id)"),
+                        {"id": guard_id},
+                    )
+                    for row_type, kind in (
+                        (AuthorKnowledgeAuditRow, "author"),
+                        (TypedTemplateAuditRow, "template"),
+                    ):
+                        ids = [row.id for row in candidates if row.kind == kind]
+                        if ids:
+                            result = database.connection().execute(
+                                delete(row_type).where(row_type.id.in_(ids))
+                            )
+                            removed += int(result.rowcount or 0)
+                    database.execute(
+                        text("DELETE FROM audit_cleanup_guards WHERE id = :id"),
+                        {"id": guard_id},
+                    )
+                database.add(
+                    RetentionCleanupRunRow(
+                        id=str(self._new_id()),
+                        kind="composer_t91_audit",
                         cutoff_at=cutoff_at,
                         removed_count=removed,
                         completed_at=self._clock(),

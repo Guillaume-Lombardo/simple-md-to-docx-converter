@@ -1176,6 +1176,12 @@ test("Composer uses real final-image routing, TLS egress and durable owner revis
         .inputValue(),
       "Question: Which date should this report use?\nAnswer: Use 23 September 2026.",
     );
+    await adminPage
+      .getByRole("button", { name: "Preview exact prompt" })
+      .click();
+    await adminPage
+      .getByText("Exact text selected for transmission:")
+      .waitFor();
     await adminPage.getByRole("button", { name: "Send reviewed text" }).click();
     const resumedProposal = adminPage
       .locator("details")
@@ -1211,6 +1217,7 @@ test("Composer uses real final-image routing, TLS egress and durable owner revis
         await outputChoice.selectOption(output);
       const generate = adminPage.getByRole("button", {
         name: `Generate ${output.toUpperCase()}`,
+        exact: true,
       });
       await generate.click({ trial: true });
       assert.equal(await generate.isEnabled(), true);

@@ -34,12 +34,58 @@ export const vAuditRecordResponse = v.object({
 });
 
 /**
+ * AuthorPromptPreviewRequest
+ */
+export const vAuthorPromptPreviewRequest = v.strictObject({
+    approved_endpoint: v.pipe(v.string(), v.minLength(1)),
+    approved_model: v.pipe(v.string(), v.minLength(1)),
+    author_ids: v.array(v.pipe(v.string(), v.uuid())),
+    connection_id: v.pipe(v.string(), v.uuid()),
+    content: v.pipe(v.string(), v.minLength(1)),
+    max_output_tokens: v.pipe(v.number(), v.integer(), v.gtValue(0))
+});
+
+/**
+ * AuthorReference
+ */
+export const vAuthorReference = v.object({
+    id: v.pipe(v.string(), v.uuid()),
+    version: v.pipe(v.number(), v.integer(), v.gtValue(0))
+});
+
+/**
+ * AuthorPromptPreviewResponse
+ */
+export const vAuthorPromptPreviewResponse = v.object({
+    author_refs: v.array(vAuthorReference),
+    preview_digest: v.string(),
+    transmitted_content: v.string()
+});
+
+/**
  * Body_create_draft_api_v1_composer_drafts_post
  */
 export const vBodyCreateDraftApiV1ComposerDraftsPost = v.object({
     content: v.nullish(v.string()),
     source: v.string(),
     title: v.nullish(v.string())
+});
+
+/**
+ * Body_create_template_api_v1_composer_fill_templates_post
+ */
+export const vBodyCreateTemplateApiV1ComposerFillTemplatesPost = v.object({
+    file: v.string(),
+    name: v.string(),
+    schema: v.string()
+});
+
+/**
+ * Body_replace_template_api_v1_composer_fill_templates__template_id__versions_post
+ */
+export const vBodyReplaceTemplateApiV1ComposerFillTemplatesTemplateIdVersionsPost = v.object({
+    file: v.string(),
+    schema: v.string()
 });
 
 /**
@@ -211,6 +257,8 @@ export const vComposerModelStepCreateRequest = v.object({
     answered_question_id: v.nullish(v.pipe(v.string(), v.uuid())),
     approved_endpoint: v.pipe(v.string(), v.minLength(1)),
     approved_model: v.pipe(v.string(), v.minLength(1)),
+    author_preview_digest: v.nullish(v.string()),
+    author_refs: v.optional(v.array(vAuthorReference), []),
     connection_id: v.pipe(v.string(), v.uuid()),
     content: v.pipe(v.string(), v.minLength(1)),
     intent: v.optional(v.picklist(['proposal', 'question']), 'proposal'),
@@ -297,6 +345,7 @@ export const vComposerQuestionResponse = v.object({
     draft_id: v.pipe(v.string(), v.uuid()),
     id: v.pipe(v.string(), v.uuid()),
     model_step_id: v.pipe(v.string(), v.uuid()),
+    source_author_ids: v.optional(v.array(v.pipe(v.string(), v.uuid())), []),
     state: v.picklist(['pending', 'answered']),
     text: v.string()
 });
@@ -352,7 +401,8 @@ export const vComposerRevisionResponse = v.object({
     render_options: v.string(),
     restored_from_revision_id: v.nullable(v.pipe(v.string(), v.uuid())),
     source_sha256: v.string(),
-    template_reference: v.nullable(v.string())
+    template_reference: v.nullable(v.string()),
+    typed_fill_snapshot: v.nullish(v.string())
 });
 
 /**
@@ -495,6 +545,85 @@ export const vErrorDetail = v.object({
  */
 export const vErrorResponse = v.object({
     error: vErrorDetail
+});
+
+/**
+ * FillPlanCreateRequest
+ */
+export const vFillPlanCreateRequest = v.strictObject({
+    author_ids: v.optional(v.array(v.pipe(v.string(), v.uuid())), []),
+    source_revision_id: v.pipe(v.string(), v.uuid()),
+    template_id: v.pipe(v.string(), v.uuid()),
+    template_version_id: v.pipe(v.string(), v.uuid()),
+    values: v.optional(v.record(v.string(), v.unknown()))
+});
+
+/**
+ * FillProvenanceKind
+ */
+export const vFillProvenanceKind = v.picklist([
+    'supplied',
+    'cited',
+    'model_suggested',
+    'human_approved',
+    'human_edited',
+    'unresolved',
+    'template_default'
+]);
+
+/**
+ * FillQuestion
+ */
+export const vFillQuestion = v.object({
+    path: v.string(),
+    reason: v.string(),
+    text: v.string()
+});
+
+/**
+ * FillValueProvenance
+ */
+export const vFillValueProvenance = v.strictObject({
+    kind: vFillProvenanceKind,
+    source_reference: v.nullish(v.string())
+});
+
+/**
+ * FillPlanResponse
+ */
+export const vFillPlanResponse = v.object({
+    author_refs: v.array(v.record(v.string(), v.unknown())),
+    created_at: v.pipe(v.string(), v.isoTimestamp()),
+    draft_id: v.pipe(v.string(), v.uuid()),
+    etag: v.string(),
+    id: v.pipe(v.string(), v.uuid()),
+    provenance: v.object({}),
+    questions: v.array(vFillQuestion),
+    result_revision_id: v.nullable(v.pipe(v.string(), v.uuid())),
+    source_revision_id: v.pipe(v.string(), v.uuid()),
+    state: v.string(),
+    template_id: v.pipe(v.string(), v.uuid()),
+    template_version_id: v.pipe(v.string(), v.uuid()),
+    updated_at: v.pipe(v.string(), v.isoTimestamp()),
+    values: v.record(v.string(), v.unknown()),
+    version: v.pipe(v.number(), v.integer())
+});
+
+/**
+ * FillPlanListResponse
+ */
+export const vFillPlanListResponse = v.object({
+    limit: v.pipe(v.number(), v.integer()),
+    offset: v.pipe(v.number(), v.integer()),
+    plans: v.array(vFillPlanResponse)
+});
+
+/**
+ * FillPlanUpdateRequest
+ */
+export const vFillPlanUpdateRequest = v.strictObject({
+    provenance: v.object({}),
+    values: v.record(v.string(), v.unknown())
 });
 
 /**
@@ -1089,6 +1218,54 @@ export const vTemplateVersionResponse = v.object({
 });
 
 /**
+ * TypedTemplateResponse
+ */
+export const vTypedTemplateResponse = v.object({
+    active_version_id: v.pipe(v.string(), v.uuid()),
+    created_at: v.pipe(v.string(), v.isoTimestamp()),
+    etag: v.string(),
+    id: v.pipe(v.string(), v.uuid()),
+    name: v.string(),
+    owner_id: v.pipe(v.string(), v.uuid()),
+    shared_with: v.array(v.pipe(v.string(), v.uuid())),
+    updated_at: v.pipe(v.string(), v.isoTimestamp()),
+    version: v.pipe(v.number(), v.integer())
+});
+
+/**
+ * TypedTemplateListResponse
+ */
+export const vTypedTemplateListResponse = v.object({
+    limit: v.pipe(v.number(), v.integer()),
+    offset: v.pipe(v.number(), v.integer()),
+    templates: v.array(vTypedTemplateResponse)
+});
+
+/**
+ * TypedTemplateVersionResponse
+ */
+export const vTypedTemplateVersionResponse = v.object({
+    created_at: v.pipe(v.string(), v.isoTimestamp()),
+    docx_sha256: v.string(),
+    id: v.pipe(v.string(), v.uuid()),
+    number: v.pipe(v.number(), v.integer()),
+    schema: v.record(v.string(), v.unknown()),
+    schema_sha256: v.string(),
+    schema_version: v.pipe(v.number(), v.integer()),
+    size: v.pipe(v.number(), v.integer()),
+    template_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * TypedTemplateVersionListResponse
+ */
+export const vTypedTemplateVersionListResponse = v.object({
+    limit: v.pipe(v.number(), v.integer()),
+    offset: v.pipe(v.number(), v.integer()),
+    versions: v.array(vTypedTemplateVersionResponse)
+});
+
+/**
  * UserCreateRequest
  *
  * Administrator local-account creation request.
@@ -1139,6 +1316,59 @@ export const vValidationError = v.object({
  */
 export const vHttpValidationError = v.object({
     detail: v.optional(v.array(vValidationError))
+});
+
+/**
+ * ValueProvenance
+ */
+export const vValueProvenance = v.picklist([
+    'supplied',
+    'cited',
+    'model_suggested',
+    'human_approved',
+    'human_edited',
+    'unresolved'
+]);
+
+/**
+ * AuthorFieldValue
+ */
+export const vAuthorFieldValue = v.strictObject({
+    provenance: vValueProvenance,
+    source_reference: v.nullish(v.string()),
+    value: v.nullish(v.string())
+});
+
+/**
+ * AuthorResponse
+ */
+export const vAuthorResponse = v.object({
+    created_at: v.pipe(v.string(), v.isoTimestamp()),
+    etag: v.string(),
+    fields: v.object({}),
+    id: v.pipe(v.string(), v.uuid()),
+    name: v.string(),
+    owner_id: v.pipe(v.string(), v.uuid()),
+    shared_with: v.array(v.pipe(v.string(), v.uuid())),
+    updated_at: v.pipe(v.string(), v.isoTimestamp()),
+    version: v.pipe(v.number(), v.integer())
+});
+
+/**
+ * AuthorListResponse
+ */
+export const vAuthorListResponse = v.object({
+    authors: v.array(vAuthorResponse),
+    limit: v.pipe(v.number(), v.integer()),
+    offset: v.pipe(v.number(), v.integer())
+});
+
+/**
+ * AuthorWriteRequest
+ */
+export const vAuthorWriteRequest = v.strictObject({
+    fields: v.object({}),
+    name: v.pipe(v.string(), v.minLength(1))
 });
 
 /**
@@ -1271,6 +1501,82 @@ export const vListAuditRecordsApiV1AuditGetQuery = v.object({
  * Successful Response
  */
 export const vListAuditRecordsApiV1AuditGetResponse = v.array(vAuditRecordResponse);
+
+export const vListAuthorsApiV1ComposerAuthorsGetQuery = v.object({
+    limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100)), 50),
+    offset: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(2147483647)), 0)
+});
+
+/**
+ * Successful Response
+ */
+export const vListAuthorsApiV1ComposerAuthorsGetResponse = vAuthorListResponse;
+
+export const vCreateAuthorApiV1ComposerAuthorsPostBody = vAuthorWriteRequest;
+
+export const vCreateAuthorApiV1ComposerAuthorsPostHeaders = v.object({
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+/**
+ * Successful Response
+ */
+export const vCreateAuthorApiV1ComposerAuthorsPostResponse = vAuthorResponse;
+
+export const vGetAuthorApiV1ComposerAuthorsAuthorIdGetPath = v.object({
+    author_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vGetAuthorApiV1ComposerAuthorsAuthorIdGetResponse = vAuthorResponse;
+
+export const vUpdateAuthorApiV1ComposerAuthorsAuthorIdPatchBody = vAuthorWriteRequest;
+
+export const vUpdateAuthorApiV1ComposerAuthorsAuthorIdPatchHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vUpdateAuthorApiV1ComposerAuthorsAuthorIdPatchPath = v.object({
+    author_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vUpdateAuthorApiV1ComposerAuthorsAuthorIdPatchResponse = vAuthorResponse;
+
+export const vRevokeAuthorApiV1ComposerAuthorsAuthorIdGrantsUserIdDeleteHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vRevokeAuthorApiV1ComposerAuthorsAuthorIdGrantsUserIdDeletePath = v.object({
+    author_id: v.pipe(v.string(), v.uuid()),
+    user_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vRevokeAuthorApiV1ComposerAuthorsAuthorIdGrantsUserIdDeleteResponse = vAuthorResponse;
+
+export const vGrantAuthorApiV1ComposerAuthorsAuthorIdGrantsUserIdPutHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vGrantAuthorApiV1ComposerAuthorsAuthorIdGrantsUserIdPutPath = v.object({
+    author_id: v.pipe(v.string(), v.uuid()),
+    user_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vGrantAuthorApiV1ComposerAuthorsAuthorIdGrantsUserIdPutResponse = vAuthorResponse;
 
 /**
  * Successful Response
@@ -1453,6 +1759,97 @@ export const vSaveDraftApiV1ComposerDraftsDraftIdPutPath = v.object({
  */
 export const vSaveDraftApiV1ComposerDraftsDraftIdPutResponse = vComposerDraftResponse;
 
+export const vListPlansApiV1ComposerDraftsDraftIdFillPlansGetPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid())
+});
+
+export const vListPlansApiV1ComposerDraftsDraftIdFillPlansGetQuery = v.object({
+    limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100)), 50),
+    offset: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(2147483647)), 0)
+});
+
+/**
+ * Successful Response
+ */
+export const vListPlansApiV1ComposerDraftsDraftIdFillPlansGetResponse = vFillPlanListResponse;
+
+export const vCreatePlanApiV1ComposerDraftsDraftIdFillPlansPostBody = vFillPlanCreateRequest;
+
+export const vCreatePlanApiV1ComposerDraftsDraftIdFillPlansPostHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'Idempotency-Key': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vCreatePlanApiV1ComposerDraftsDraftIdFillPlansPostPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vCreatePlanApiV1ComposerDraftsDraftIdFillPlansPostResponse = vFillPlanResponse;
+
+export const vGetPlanApiV1ComposerDraftsDraftIdFillPlansPlanIdGetPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid()),
+    plan_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vGetPlanApiV1ComposerDraftsDraftIdFillPlansPlanIdGetResponse = vFillPlanResponse;
+
+export const vUpdatePlanApiV1ComposerDraftsDraftIdFillPlansPlanIdPatchBody = vFillPlanUpdateRequest;
+
+export const vUpdatePlanApiV1ComposerDraftsDraftIdFillPlansPlanIdPatchHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'Idempotency-Key': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vUpdatePlanApiV1ComposerDraftsDraftIdFillPlansPlanIdPatchPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid()),
+    plan_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vUpdatePlanApiV1ComposerDraftsDraftIdFillPlansPlanIdPatchResponse = vFillPlanResponse;
+
+export const vApprovePlanApiV1ComposerDraftsDraftIdFillPlansPlanIdApprovePostHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'Idempotency-Key': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vApprovePlanApiV1ComposerDraftsDraftIdFillPlansPlanIdApprovePostPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid()),
+    plan_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vApprovePlanApiV1ComposerDraftsDraftIdFillPlansPlanIdApprovePostResponse = vFillPlanResponse;
+
+export const vPublishPlanApiV1ComposerDraftsDraftIdFillPlansPlanIdPublishPostHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'Idempotency-Key': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vPublishPlanApiV1ComposerDraftsDraftIdFillPlansPlanIdPublishPostPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid()),
+    plan_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vPublishPlanApiV1ComposerDraftsDraftIdFillPlansPlanIdPublishPostResponse = vComposerRevisionResponse;
+
 export const vListGenerationsApiV1ComposerDraftsDraftIdGenerationsGetPath = v.object({
     draft_id: v.pipe(v.string(), v.uuid())
 });
@@ -1555,6 +1952,21 @@ export const vStartModelStepApiV1ComposerDraftsDraftIdModelStepsPostPath = v.obj
  * Successful Response
  */
 export const vStartModelStepApiV1ComposerDraftsDraftIdModelStepsPostResponse = vComposerModelStepResponse;
+
+export const vPreviewModelStepApiV1ComposerDraftsDraftIdModelStepsPreviewPostBody = vAuthorPromptPreviewRequest;
+
+export const vPreviewModelStepApiV1ComposerDraftsDraftIdModelStepsPreviewPostHeaders = v.object({
+    'If-Match': v.nullish(v.string())
+});
+
+export const vPreviewModelStepApiV1ComposerDraftsDraftIdModelStepsPreviewPostPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vPreviewModelStepApiV1ComposerDraftsDraftIdModelStepsPreviewPostResponse = vAuthorPromptPreviewResponse;
 
 export const vCancelModelStepApiV1ComposerDraftsDraftIdModelStepsStepIdDeleteHeaders = v.object({
     'X-CSRF-Token': v.nullish(v.string())
@@ -1756,6 +2168,22 @@ export const vDiffRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdDiffGetQu
  */
 export const vDiffRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdDiffGetResponse = vComposerRevisionDiffResponse;
 
+export const vRegenerateApiV1ComposerDraftsDraftIdRevisionsRevisionIdRegenerationsPostHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'Idempotency-Key': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vRegenerateApiV1ComposerDraftsDraftIdRevisionsRevisionIdRegenerationsPostPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid()),
+    revision_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vRegenerateApiV1ComposerDraftsDraftIdRevisionsRevisionIdRegenerationsPostResponse = vComposerRevisionResponse;
+
 export const vRestoreRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdRestorePostHeaders = v.object({
     'If-Match': v.nullish(v.string()),
     'Idempotency-Key': v.nullish(v.string()),
@@ -1789,6 +2217,111 @@ export const vCreateGenerationApiV1ComposerDraftsDraftIdRevisionsSourceRevisionI
  * Successful Response
  */
 export const vCreateGenerationApiV1ComposerDraftsDraftIdRevisionsSourceRevisionIdGenerationsPostResponse = vComposerGenerationResponse;
+
+export const vListTemplatesApiV1ComposerFillTemplatesGetQuery = v.object({
+    limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100)), 50),
+    offset: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(2147483647)), 0)
+});
+
+/**
+ * Successful Response
+ */
+export const vListTemplatesApiV1ComposerFillTemplatesGetResponse = vTypedTemplateListResponse;
+
+export const vCreateTemplateApiV1ComposerFillTemplatesPostBody = vBodyCreateTemplateApiV1ComposerFillTemplatesPost;
+
+export const vCreateTemplateApiV1ComposerFillTemplatesPostHeaders = v.object({
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+/**
+ * Successful Response
+ */
+export const vCreateTemplateApiV1ComposerFillTemplatesPostResponse = vTypedTemplateResponse;
+
+export const vGetTemplateApiV1ComposerFillTemplatesTemplateIdGetPath = v.object({
+    template_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vGetTemplateApiV1ComposerFillTemplatesTemplateIdGetResponse = vTypedTemplateResponse;
+
+export const vRevokeTemplateApiV1ComposerFillTemplatesTemplateIdGrantsUserIdDeleteHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vRevokeTemplateApiV1ComposerFillTemplatesTemplateIdGrantsUserIdDeletePath = v.object({
+    template_id: v.pipe(v.string(), v.uuid()),
+    user_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vRevokeTemplateApiV1ComposerFillTemplatesTemplateIdGrantsUserIdDeleteResponse = vTypedTemplateResponse;
+
+export const vGrantTemplateApiV1ComposerFillTemplatesTemplateIdGrantsUserIdPutHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vGrantTemplateApiV1ComposerFillTemplatesTemplateIdGrantsUserIdPutPath = v.object({
+    template_id: v.pipe(v.string(), v.uuid()),
+    user_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vGrantTemplateApiV1ComposerFillTemplatesTemplateIdGrantsUserIdPutResponse = vTypedTemplateResponse;
+
+export const vListVersionsApiV1ComposerFillTemplatesTemplateIdVersionsGetPath = v.object({
+    template_id: v.pipe(v.string(), v.uuid())
+});
+
+export const vListVersionsApiV1ComposerFillTemplatesTemplateIdVersionsGetQuery = v.object({
+    limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100)), 50),
+    offset: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(2147483647)), 0)
+});
+
+/**
+ * Successful Response
+ */
+export const vListVersionsApiV1ComposerFillTemplatesTemplateIdVersionsGetResponse = vTypedTemplateVersionListResponse;
+
+export const vReplaceTemplateApiV1ComposerFillTemplatesTemplateIdVersionsPostBody = vBodyReplaceTemplateApiV1ComposerFillTemplatesTemplateIdVersionsPost;
+
+export const vReplaceTemplateApiV1ComposerFillTemplatesTemplateIdVersionsPostHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vReplaceTemplateApiV1ComposerFillTemplatesTemplateIdVersionsPostPath = v.object({
+    template_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vReplaceTemplateApiV1ComposerFillTemplatesTemplateIdVersionsPostResponse = vTypedTemplateResponse;
+
+export const vGetVersionApiV1ComposerFillTemplatesTemplateIdVersionsVersionIdGetPath = v.object({
+    template_id: v.pipe(v.string(), v.uuid()),
+    version_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vGetVersionApiV1ComposerFillTemplatesTemplateIdVersionsVersionIdGetResponse = vTypedTemplateVersionResponse;
+
+export const vDownloadVersionApiV1ComposerFillTemplatesTemplateIdVersionsVersionIdContentGetPath = v.object({
+    template_id: v.pipe(v.string(), v.uuid()),
+    version_id: v.pipe(v.string(), v.uuid())
+});
 
 export const vListPersonalPermissionsApiV1ComposerPersonalPermissionsGetQuery = v.object({
     limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100)), 50),

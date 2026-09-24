@@ -41,7 +41,7 @@ def test_root_help_snapshot(capsys: pytest.CaptureFixture[str]) -> None:
         "    session-policy      Inspect or update role-specific idle sessions.\n"
         "    audit               Inspect audit records.\n"
         "    health              Inspect service health.\n"
-        "    composer            Manage Composer connections.\n"
+        "    composer            Manage Composer work.\n"
         "    serve               Run the local HTTP service.\n"
         "    worker              Run a local worker.\n"
         "    doctor              Check local prerequisites.\n"

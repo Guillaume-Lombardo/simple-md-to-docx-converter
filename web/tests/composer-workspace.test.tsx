@@ -4,6 +4,7 @@ import { AuthProvider } from "../src/auth/context";
 import { ApiError, type ApiTransport } from "../src/api/transport";
 import type { ComposerWorkspaceApi } from "../src/composer/workspace-api";
 import { ComposerWorkspace } from "../src/composer/workspace";
+import { AuthorDirectoryApi } from "../src/composer/author-directory-api";
 
 vi.mock("../src/composer/preview/composer-preview", () => ({
   ComposerPreview: ({
@@ -141,6 +142,7 @@ function setup(
     unauthorized?: boolean;
     connectionFailure?: boolean;
     question?: boolean;
+    questionAuthorIds?: string[];
     preserveStorage?: boolean;
     proposalState?: "pending" | "accepted" | "edited";
     markdown?: boolean;
@@ -253,7 +255,16 @@ function setup(
           ? [{ ...proposal, state: options.proposalState }]
           : [],
       ),
-    questions: vi.fn().mockResolvedValue(options.question ? [question] : []),
+    questions: vi.fn().mockResolvedValue(
+      options.question
+        ? [
+            {
+              ...question,
+              source_author_ids: options.questionAuthorIds ?? [],
+            },
+          ]
+        : [],
+    ),
     revisions: vi
       .fn()
       .mockResolvedValue(
@@ -335,6 +346,11 @@ function setup(
     saveDraft: vi.fn(),
     createDraft: vi.fn().mockResolvedValue({ data: draft }),
     addMessage: vi.fn().mockResolvedValue({}),
+    previewStep: vi.fn().mockResolvedValue({
+      transmitted_content: "Approved request",
+      author_refs: [],
+      preview_digest: "reviewed-digest",
+    }),
     startStep: vi.fn().mockResolvedValue({
       id: "00000000-0000-4000-8000-000000000401",
       draft_id: draft.id,
@@ -381,7 +397,9 @@ function setup(
       updated_at: "2026-09-23T12:00:00Z",
     }),
     decide: vi.fn(),
-    answerQuestion: vi.fn().mockResolvedValue({ data: question }),
+    answerQuestion: vi.fn().mockResolvedValue({
+      data: { ...question, source_author_ids: options.questionAuthorIds ?? [] },
+    }),
     publishProposal: vi.fn(),
     publishDraft: vi.fn().mockImplementation(async () => {
       published = true;
@@ -572,6 +590,16 @@ test("an assistant question has a durable identity and a human answer resumes on
     screen.getByRole("spinbutton", { name: /Maximum output tokens/ }),
     { target: { value: "128" } },
   );
+  expect(
+    screen.getByRole("button", { name: "Send reviewed text" }),
+  ).toBeDisabled();
+  const preview = screen.getByRole("button", { name: "Preview exact prompt" });
+  await waitFor(() => expect(preview).toBeEnabled());
+  fireEvent.click(preview);
+  await waitFor(() => expect(api.previewStep).toHaveBeenCalledOnce());
+  expect(
+    screen.getByRole("button", { name: "Send reviewed text" }),
+  ).toBeEnabled();
   fireEvent.click(screen.getByRole("button", { name: "Send reviewed text" }));
   await waitFor(() =>
     expect(api.startStep).toHaveBeenCalledWith(
@@ -1262,4 +1290,327 @@ test("an exactly selected old revision stays in the selector after newest-page r
   expect(
     screen.getByRole("button", { name: "Load older revisions" }),
   ).toBeEnabled();
+});
+
+test("selected author facts require an exact, current prompt preview before model transmission", async () => {
+  const authorList = vi
+    .spyOn(AuthorDirectoryApi.prototype, "list")
+    .mockResolvedValue([
+      {
+        id: "00000000-0000-4000-8000-000000000901",
+        owner_id: user.id,
+        name: "Report author",
+        fields: { name: { value: "Alice", provenance: "supplied" } },
+        version: 2,
+        shared_with: [],
+      },
+    ]);
+  try {
+    const api = setup();
+    const previewStep = vi.fn().mockResolvedValue({
+      transmitted_content: "Approved request\nAuthor: Alice",
+      author_refs: [{ id: "00000000-0000-4000-8000-000000000901", version: 2 }],
+      preview_digest: "reviewed-digest",
+    });
+    Object.assign(api, { previewStep });
+    fireEvent.change(
+      await screen.findByRole("textbox", {
+        name: "Exact approved text for transmission",
+      }),
+      {
+        target: { value: "Approved request" },
+      },
+    );
+    fireEvent.change(
+      screen.getByRole("spinbutton", { name: /Maximum output tokens/ }),
+      {
+        target: { value: "100" },
+      },
+    );
+    fireEvent.click(
+      await screen.findByRole("checkbox", { name: "Report author" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Send reviewed text" }),
+    ).toBeDisabled();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Preview exact prompt" }),
+    );
+    expect(
+      await screen.findByText(/Approved request\s+Author: Alice/),
+    ).toBeVisible();
+    expect(previewStep).toHaveBeenCalledWith(
+      expect.objectContaining({ id: draft.id, etag: draft.etag }),
+      expect.objectContaining({
+        content: "Approved request",
+        author_ids: ["00000000-0000-4000-8000-000000000901"],
+      }),
+    );
+    fireEvent.change(
+      screen.getByRole("textbox", {
+        name: "Exact approved text for transmission",
+      }),
+      {
+        target: { value: "Changed request" },
+      },
+    );
+    expect(
+      screen.getByRole("button", { name: "Send reviewed text" }),
+    ).toBeDisabled();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Preview exact prompt" }),
+    );
+    await waitFor(() => expect(previewStep).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole("button", { name: "Send reviewed text" }));
+    await waitFor(() =>
+      expect(api.startStep).toHaveBeenCalledWith(
+        expect.objectContaining({ id: draft.id }),
+        expect.objectContaining({
+          content: "Changed request",
+          author_refs: [
+            { id: "00000000-0000-4000-8000-000000000901", version: 2 },
+          ],
+          author_preview_digest: "reviewed-digest",
+        }),
+        expect.any(String),
+      ),
+    );
+  } finally {
+    authorList.mockRestore();
+  }
+});
+
+test("revoked author prompt preview cannot be sent to a model", async () => {
+  const authorList = vi
+    .spyOn(AuthorDirectoryApi.prototype, "list")
+    .mockResolvedValue([
+      {
+        id: "00000000-0000-4000-8000-000000000901",
+        owner_id: user.id,
+        name: "Report author",
+        fields: { name: { value: "Alice", provenance: "supplied" } },
+        version: 2,
+        shared_with: [],
+      },
+    ]);
+  try {
+    const api = setup();
+    const previewStep = vi
+      .fn()
+      .mockRejectedValue(new ApiError(403, "FORBIDDEN", "private detail"));
+    Object.assign(api, { previewStep });
+    fireEvent.change(
+      await screen.findByRole("textbox", {
+        name: "Exact approved text for transmission",
+      }),
+      { target: { value: "Approved request" } },
+    );
+    fireEvent.change(
+      screen.getByRole("spinbutton", { name: /Maximum output tokens/ }),
+      { target: { value: "100" } },
+    );
+    fireEvent.click(
+      await screen.findByRole("checkbox", { name: "Report author" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Preview exact prompt" }),
+    );
+    expect(
+      await screen.findByText(
+        "An author entry changed or access was revoked. Refresh the preview and selection.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Send reviewed text" }),
+    ).toBeDisabled();
+    expect(screen.queryByText("private detail")).toBeNull();
+    expect(api.startStep).not.toHaveBeenCalled();
+  } finally {
+    authorList.mockRestore();
+  }
+});
+
+test("an unavailable author directory shows an error while model work remains manual", async () => {
+  const authorList = vi
+    .spyOn(AuthorDirectoryApi.prototype, "list")
+    .mockRejectedValue(new ApiError(503, "UNAVAILABLE", "private detail"));
+  try {
+    setup();
+    expect(
+      await screen.findByText("Authorized authors could not be loaded."),
+    ).toBeVisible();
+    expect(
+      screen.getByText("No authorized author entries are available."),
+    ).toBeVisible();
+    expect(screen.queryByText("private detail")).toBeNull();
+  } finally {
+    authorList.mockRestore();
+  }
+});
+
+test("model author selector loads a later authorized page before exact prompt preview", async () => {
+  const later = {
+    id: "00000000-0000-4000-8000-000000000901",
+    owner_id: user.id,
+    name: "Later author",
+    fields: { name: { value: "Alice", provenance: "supplied" as const } },
+    version: 2,
+    shared_with: [],
+  };
+  const first = Array.from({ length: 100 }, (_, at) => ({
+    ...later,
+    id: `author-${at}`,
+    name: `Author ${at}`,
+  }));
+  const authorList = vi
+    .spyOn(AuthorDirectoryApi.prototype, "list")
+    .mockImplementation((offset = 0) =>
+      Promise.resolve(offset === 0 ? first : [later]),
+    );
+  try {
+    const api = setup();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Load more model authors" }),
+    );
+    expect(
+      await screen.findByRole("checkbox", { name: "Later author" }),
+    ).toBeVisible();
+    expect(authorList).toHaveBeenCalledWith(100);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Later author" }));
+    fireEvent.change(
+      screen.getByRole("textbox", {
+        name: "Exact approved text for transmission",
+      }),
+      {
+        target: { value: "Approved request" },
+      },
+    );
+    fireEvent.change(
+      screen.getByRole("spinbutton", { name: /Maximum output tokens/ }),
+      {
+        target: { value: "100" },
+      },
+    );
+    const preview = screen.getByRole("button", {
+      name: "Preview exact prompt",
+    });
+    await waitFor(() => expect(preview).toBeEnabled());
+    fireEvent.click(preview);
+    await waitFor(() =>
+      expect(api.previewStep).toHaveBeenCalledWith(
+        expect.objectContaining({ id: draft.id }),
+        expect.objectContaining({ author_ids: [later.id] }),
+      ),
+    );
+  } finally {
+    authorList.mockRestore();
+  }
+});
+
+test("answer resume reselects original author facts and requires a new exact preview", async () => {
+  const authorId = "00000000-0000-4000-8000-000000000901";
+  const authorList = vi
+    .spyOn(AuthorDirectoryApi.prototype, "list")
+    .mockResolvedValue([
+      {
+        id: authorId,
+        owner_id: user.id,
+        name: "Report author",
+        fields: { name: { value: "Alice", provenance: "supplied" } },
+        version: 2,
+        shared_with: [],
+      },
+    ]);
+  try {
+    const api = setup({ question: true, questionAuthorIds: [authorId] });
+    api.previewStep.mockResolvedValue({
+      transmitted_content: "Question and author facts",
+      author_refs: [{ id: authorId, version: 2 }],
+      preview_digest: "resume-digest",
+    });
+    fireEvent.change(
+      await screen.findByRole("textbox", { name: "Your answer" }),
+      {
+        target: { value: "Use the signed date." },
+      },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save answer" }));
+    await waitFor(() => expect(api.answerQuestion).toHaveBeenCalledOnce());
+    expect(
+      await screen.findByRole("checkbox", { name: "Report author" }),
+    ).toBeChecked();
+    fireEvent.change(
+      screen.getByRole("spinbutton", { name: /Maximum output tokens/ }),
+      {
+        target: { value: "128" },
+      },
+    );
+    expect(
+      screen.getByRole("button", { name: "Send reviewed text" }),
+    ).toBeDisabled();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Preview exact prompt" }),
+    );
+    await waitFor(() =>
+      expect(api.previewStep).toHaveBeenCalledWith(
+        expect.objectContaining({ id: draft.id, etag: draft.etag }),
+        expect.objectContaining({ author_ids: [authorId] }),
+      ),
+    );
+    expect(
+      screen.getByRole("button", { name: "Send reviewed text" }),
+    ).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Send reviewed text" }));
+    await waitFor(() =>
+      expect(api.startStep).toHaveBeenCalledWith(
+        draft,
+        expect.objectContaining({
+          answered_question_id: question.id,
+          author_refs: [{ id: authorId, version: 2 }],
+          author_preview_digest: "resume-digest",
+        }),
+        expect.any(String),
+      ),
+    );
+  } finally {
+    authorList.mockRestore();
+  }
+});
+
+test("answer resume stays blocked when an original author grant is gone", async () => {
+  const authorId = "00000000-0000-4000-8000-000000000901";
+  const authorList = vi
+    .spyOn(AuthorDirectoryApi.prototype, "list")
+    .mockResolvedValue([]);
+  try {
+    const api = setup({ question: true, questionAuthorIds: [authorId] });
+    fireEvent.change(
+      await screen.findByRole("textbox", { name: "Your answer" }),
+      {
+        target: { value: "Use the signed date." },
+      },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save answer" }));
+    expect(
+      await screen.findByText(
+        /An author from the original question is no longer available or selected/,
+      ),
+    ).toBeVisible();
+    fireEvent.change(
+      screen.getByRole("spinbutton", { name: /Maximum output tokens/ }),
+      {
+        target: { value: "128" },
+      },
+    );
+    expect(
+      screen.getByRole("button", { name: "Preview exact prompt" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Send reviewed text" }),
+    ).toBeDisabled();
+    expect(api.previewStep).not.toHaveBeenCalled();
+    expect(api.startStep).not.toHaveBeenCalled();
+  } finally {
+    authorList.mockRestore();
+  }
 });

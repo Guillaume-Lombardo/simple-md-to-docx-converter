@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import hashlib
 import json
 import os
 import stat
@@ -12,7 +13,7 @@ import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, NoReturn
 from urllib.parse import urlencode
 from uuid import UUID, uuid4
 
@@ -44,6 +45,7 @@ _MODEL_STEP_ERROR_CODES = frozenset(
 _MAXIMUM_IDEMPOTENCY_KEY_CHARACTERS = 128
 _FIRST_VISIBLE_ASCII = 33
 _LAST_VISIBLE_ASCII = 126
+_SHA256_HEX_CHARACTERS = 64
 
 
 @dataclass
@@ -116,8 +118,8 @@ class _RejectSecret(argparse.Action):
 
 
 def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    """Register Composer capabilities and connection-management parity."""
-    composer = subparsers.add_parser("composer", help="Manage Composer connections.")
+    """Register Composer capabilities, drafts, knowledge and typed filling."""
+    composer = subparsers.add_parser("composer", help="Manage Composer work.")
     commands = composer.add_subparsers(dest="composer_command", metavar="COMMAND")
 
     capabilities = commands.add_parser(
@@ -134,6 +136,173 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     _register_model_steps(commands)
     _register_proposals(commands)
     _register_revisions(commands)
+    _register_authors(commands)
+    _register_fill_templates(commands)
+    _register_fill_plans(commands)
+
+
+def _register_authors(
+    commands: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
+    authors = commands.add_parser("authors", help="Manage private author entries.")
+    actions = authors.add_subparsers(dest="authors_command", metavar="COMMAND")
+    listing = actions.add_parser("list", help="List authorized authors.")
+    _pagination(listing)
+    _profile(listing)
+    _bind(listing, "authors list", _list_authors, offset=0, limit=50)
+    show = actions.add_parser("show", help="Show an authorized author.")
+    show.add_argument("author_id", action=_Store, metavar="AUTHOR_ID")
+    _profile(show)
+    _bind(show, "authors show", _show_author)
+    create = actions.add_parser("create", help="Create a private author entry.")
+    create.add_argument("--name", required=True, action=_Store)
+    create.add_argument("--fields-file", required=True, action=_Store, metavar="PATH")
+    _profile(create)
+    _bind(create, "authors create", _create_author)
+    update = actions.add_parser("update", help="Replace an author's name and fields.")
+    update.add_argument("author_id", action=_Store, metavar="AUTHOR_ID")
+    update.add_argument("--name", required=True, action=_Store)
+    update.add_argument("--fields-file", required=True, action=_Store, metavar="PATH")
+    _etag(update)
+    _profile(update)
+    _bind(update, "authors update", _update_author)
+    for name in ("grant", "revoke"):
+        action = actions.add_parser(name, help=f"{name.title()} a named author grant.")
+        action.add_argument("author_id", action=_Store, metavar="AUTHOR_ID")
+        action.add_argument("user_id", action=_Store, metavar="USER_ID")
+        _etag(action)
+        _profile(action)
+        _bind(action, f"authors {name}", _author_grant, granted=name == "grant")
+
+
+def _register_fill_templates(
+    commands: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
+    templates = commands.add_parser(
+        "fill-templates", help="Manage typed DOCX templates."
+    )
+    actions = templates.add_subparsers(dest="fill_templates_command", metavar="COMMAND")
+    listing = actions.add_parser("list", help="List authorized typed templates.")
+    _pagination(listing)
+    _profile(listing)
+    _bind(listing, "fill-templates list", _list_fill_templates, offset=0, limit=50)
+    show = actions.add_parser("show", help="Show a typed template.")
+    show.add_argument("template_id", action=_Store, metavar="TEMPLATE_ID")
+    _profile(show)
+    _bind(show, "fill-templates show", _show_fill_template)
+    create = actions.add_parser("create", help="Upload a typed DOCX template.")
+    create.add_argument("docx", action=_Store, metavar="DOCX")
+    create.add_argument("--name", required=True, action=_Store)
+    create.add_argument("--schema-file", required=True, action=_Store, metavar="PATH")
+    _profile(create)
+    _bind(create, "fill-templates create", _create_fill_template)
+    replace = actions.add_parser(
+        "replace", help="Publish a new typed template version."
+    )
+    replace.add_argument("template_id", action=_Store, metavar="TEMPLATE_ID")
+    replace.add_argument("docx", action=_Store, metavar="DOCX")
+    replace.add_argument("--schema-file", required=True, action=_Store, metavar="PATH")
+    _etag(replace)
+    _profile(replace)
+    _bind(replace, "fill-templates replace", _replace_fill_template)
+    versions = actions.add_parser("versions", help="List exact template versions.")
+    versions.add_argument("template_id", action=_Store, metavar="TEMPLATE_ID")
+    _pagination(versions)
+    _profile(versions)
+    _bind(
+        versions,
+        "fill-templates versions",
+        _list_fill_template_versions,
+        offset=0,
+        limit=50,
+    )
+    version = actions.add_parser("version", help="Show an exact template version.")
+    version.add_argument("template_id", action=_Store, metavar="TEMPLATE_ID")
+    version.add_argument("version_id", action=_Store, metavar="VERSION_ID")
+    _profile(version)
+    _bind(version, "fill-templates version", _show_fill_template_version)
+    download = actions.add_parser("download", help="Download an exact DOCX version.")
+    download.add_argument("template_id", action=_Store, metavar="TEMPLATE_ID")
+    download.add_argument("version_id", action=_Store, metavar="VERSION_ID")
+    download.add_argument("--output", required=True, action=_Store)
+    _force(download)
+    _profile(download)
+    _bind(download, "fill-templates download", _download_fill_template_version)
+    for name in ("grant", "revoke"):
+        action = actions.add_parser(
+            name, help=f"{name.title()} a named template grant."
+        )
+        action.add_argument("template_id", action=_Store, metavar="TEMPLATE_ID")
+        action.add_argument("user_id", action=_Store, metavar="USER_ID")
+        _etag(action)
+        _profile(action)
+        _bind(
+            action,
+            f"fill-templates {name}",
+            _fill_template_grant,
+            granted=name == "grant",
+        )
+
+
+def _register_fill_plans(
+    commands: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
+    plans = commands.add_parser("fill-plans", help="Review and publish typed fills.")
+    actions = plans.add_subparsers(dest="fill_plans_command", metavar="COMMAND")
+    listing = actions.add_parser("list", help="List draft fill plans.")
+    _draft_id(listing)
+    _pagination(listing)
+    _profile(listing)
+    _bind(listing, "fill-plans list", _list_fill_plans, offset=0, limit=50)
+    show = actions.add_parser("show", help="Show a fill plan and its questions.")
+    _draft_id(show)
+    show.add_argument("plan_id", action=_Store, metavar="PLAN_ID")
+    _profile(show)
+    _bind(show, "fill-plans show", _show_fill_plan)
+    create = actions.add_parser("create", help="Create a reviewed fill plan.")
+    _draft_id(create)
+    create.add_argument("--source-revision", required=True, action=_Store)
+    create.add_argument("--template", required=True, action=_Store)
+    create.add_argument("--template-version", required=True, action=_Store)
+    create.add_argument("--author", action=_Append, metavar="AUTHOR_ID")
+    create.add_argument("--values-file", action=_Store, metavar="PATH")
+    _etag(create)
+    _idempotency_key(create)
+    _profile(create)
+    _bind(create, "fill-plans create", _create_fill_plan, author=[])
+    update = actions.add_parser(
+        "update", help="Replace reviewed values and provenance."
+    )
+    _draft_id(update)
+    update.add_argument("plan_id", action=_Store, metavar="PLAN_ID")
+    update.add_argument("--values-file", required=True, action=_Store, metavar="PATH")
+    update.add_argument(
+        "--provenance-file", required=True, action=_Store, metavar="PATH"
+    )
+    _etag(update)
+    _idempotency_key(update)
+    _profile(update)
+    _bind(update, "fill-plans update", _update_fill_plan)
+    for name, handler in (
+        ("approve", _approve_fill_plan),
+        ("publish", _publish_fill_plan),
+    ):
+        action = actions.add_parser(name, help=f"{name.title()} a reviewed fill plan.")
+        _draft_id(action)
+        action.add_argument("plan_id", action=_Store, metavar="PLAN_ID")
+        _etag(action)
+        _idempotency_key(action)
+        _profile(action)
+        _bind(action, f"fill-plans {name}", handler)
+    regenerate = actions.add_parser(
+        "regenerate", help="Regenerate a frozen fill revision."
+    )
+    _draft_id(regenerate)
+    _revision_id(regenerate)
+    _etag(regenerate)
+    _idempotency_key(regenerate)
+    _profile(regenerate)
+    _bind(regenerate, "fill-plans regenerate", _regenerate_fill)
 
 
 def _register_drafts(
@@ -209,11 +378,19 @@ def _register_model_steps(
     source.add_argument("--stdin", action=_Flag, help="Read approved text from stdin.")
     start.add_argument("--content", action=_RejectSecret, help=argparse.SUPPRESS)
     start.add_argument("--max-output-tokens", type=int, required=True, action=_Store)
+    start.add_argument(
+        "--author",
+        action=_Append,
+        metavar="AUTHOR_ID",
+        help="Select an authorized author.",
+    )
+    start.add_argument("--answered-question-id", action=_Store, metavar="QUESTION_ID")
+    start.add_argument("--intent", choices=("proposal", "question"), action=_Store)
     _etag(start)
     _idempotency_key(start)
     _force(start)
     _profile(start)
-    _bind(start, "model-steps start", _start_model_step)
+    _bind(start, "model-steps start", _start_model_step, author=[])
 
     status = actions.add_parser("status", help="Show a durable model step.")
     _draft_id(status)
@@ -1204,20 +1381,36 @@ def _start_model_step(
         "content": content,
         "max_output_tokens": output_tokens,
     }
-    try:
-        encoded = json.dumps(
-            body, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        ).encode("utf-8")
-    except UnicodeEncodeError as error:
-        raise CliError(
-            "invalid_content", "The model text is not valid UTF-8."
-        ) from error
-    if len(encoded) > request_limit:
-        raise CliError(
-            "content_too_large", "The model request exceeds the service limit."
+    intent = command.values.get("intent")
+    if intent is not None:
+        body["intent"] = intent
+    answered_question_id = command.values.get("answered_question_id")
+    if answered_question_id is not None:
+        body["answered_question_id"] = _resource_id(
+            command, "answered_question_id", "answered question"
         )
+    author_ids = _selected_model_authors(command)
+    _bounded_model_body(body, request_limit)
+    transmitted_content = content
+    if author_ids:
+        preview = _preview_model_authors(
+            context,
+            command,
+            draft_id=draft_id,
+            author_ids=author_ids,
+            body=body,
+            request_limit=request_limit,
+        )
+        transmitted_content, refs, digest = preview
+        body["author_refs"] = refs
+        body["author_preview_digest"] = digest
+        _bounded_model_body(body, request_limit)
     _confirm_model_step(
-        context, command, endpoint=endpoint, model=model, content=content
+        context,
+        command,
+        endpoint=endpoint,
+        model=model,
+        content=transmitted_content,
     )
     try:
         response = _request(
@@ -1238,11 +1431,117 @@ def _start_model_step(
         _safe_model_step_response(response, 202, "model_step_start_failed"),
         draft_id=draft_id,
     )
-    if step["connection_id"] != connection_id or step["model_identity"] != model:
+    if (
+        step["connection_id"] != connection_id
+        or step["model_identity"] != model
+        or step["intent"] != (intent or "proposal")
+        or step["answered_question_id"] != answered_question_id
+    ):
         raise CliError("response_invalid", "The service returned an invalid response.")
     writer.success(
         f"Started Composer model step {_human(step['id'])}.", {"model_step": step}
     )
+
+
+def _selected_model_authors(command: _Command) -> tuple[str, ...]:
+    selected = [
+        _resource_id(_Command("author", {"author_id": raw}), "author_id", "author")
+        for raw in command.values["author"]
+    ]
+    if len(selected) != len(set(selected)):
+        raise CliError("invalid_author_id", "An author was selected more than once.")
+    return tuple(selected)
+
+
+def _bounded_model_body(body: dict[str, Any], limit: int) -> None:
+    try:
+        encoded = json.dumps(
+            body, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    except UnicodeEncodeError as error:
+        raise CliError(
+            "invalid_content", "The model text is not valid UTF-8."
+        ) from error
+    if len(encoded) > limit:
+        raise CliError(
+            "content_too_large", "The model request exceeds the service limit."
+        )
+
+
+def _preview_model_authors(  # noqa: PLR0913 - exact approval inputs
+    context: CommandContext,
+    command: _Command,
+    *,
+    draft_id: str,
+    author_ids: tuple[str, ...],
+    body: dict[str, Any],
+    request_limit: int,
+) -> tuple[str, list[dict[str, Any]], str]:
+    preview_body = {
+        key: body[key]
+        for key in (
+            "connection_id",
+            "approved_endpoint",
+            "approved_model",
+            "content",
+            "max_output_tokens",
+        )
+    }
+    preview_body["author_ids"] = list(author_ids)
+    _bounded_model_body(preview_body, request_limit)
+    try:
+        preview = _object(
+            _request(
+                context,
+                command,
+                "POST",
+                f"/api/v1/composer/drafts/{draft_id}/model-steps/preview",
+                body=preview_body,
+                etag=_required_string(command, "etag"),
+            ),
+            _OK,
+            "model_step_preview_failed",
+        )
+    except CliError as error:
+        raise CliError(
+            "model_step_preview_failed", "The model prompt could not be previewed."
+        ) from error
+    transmitted = preview.get("transmitted_content")
+    refs = preview.get("author_refs")
+    digest = preview.get("preview_digest")
+    if (
+        not isinstance(transmitted, str)
+        or not transmitted.startswith(
+            body["content"]
+            + "\n\nSelected author records (reviewed data; preserve provenance):\n"
+        )
+        or not isinstance(refs, list)
+        or len(refs) != len(author_ids)
+        or not isinstance(digest, str)
+        or len(digest) != _SHA256_HEX_CHARACTERS
+    ):
+        raise CliError("response_invalid", "The service returned an invalid response.")
+    try:
+        encoded = transmitted.encode("utf-8")
+    except UnicodeEncodeError as error:
+        raise CliError(
+            "response_invalid", "The service returned an invalid response."
+        ) from error
+    if len(encoded) > request_limit or hashlib.sha256(encoded).hexdigest() != digest:
+        raise CliError("response_invalid", "The service returned an invalid response.")
+    approved_refs: list[dict[str, Any]] = []
+    for expected, ref in zip(author_ids, refs, strict=True):
+        if (
+            not isinstance(ref, dict)
+            or ref.get("id") != expected
+            or type(ref.get("version")) is not int
+            or ref["version"] < 1
+        ):
+            raise CliError(
+                "response_invalid", "The service returned an invalid response."
+            )
+        approved_refs.append({"id": expected, "version": ref["version"]})
+    return transmitted, approved_refs, digest
 
 
 def _status_model_step(
@@ -2157,3 +2456,546 @@ def _draft_multipart(
         )
     )
     return b"".join(chunks), f"multipart/form-data; boundary={boundary}"
+
+
+_FILL_TEMPLATES = "/api/v1/composer/fill-templates"
+_AUTHORS = "/api/v1/composer/authors"
+_DOCX_MEDIA = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+def _private_json(
+    context: CommandContext, command: _Command, key: str
+) -> dict[str, Any]:
+    maximum = _capability_limit(context, command, "maximum_model_request_bytes")
+    content = _read_private_json_file(Path(_required_string(command, key)), maximum)
+    try:
+        value = json.loads(
+            content,
+            parse_constant=_reject_json_constant,
+            object_pairs_hook=_unique_json_pairs,
+        )
+    except (ValueError, UnicodeDecodeError, RecursionError) as error:
+        raise CliError("invalid_json_file", "The JSON file is invalid.") from error
+    if type(value) is not dict or any(type(item) is not str for item in value):
+        raise CliError("invalid_json_file", "The JSON file must contain an object.")
+    return value
+
+
+def _reject_json_constant(value: str) -> NoReturn:
+    del value
+    raise ValueError("Non-finite JSON value")
+
+
+def _unique_json_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate JSON key")
+        result[key] = value
+    return result
+
+
+def _read_private_json_file(path: Path, maximum: int) -> bytes:
+    try:
+        content = _read_model_content_file(path, maximum_bytes=maximum)
+    except CliError as error:
+        raise CliError(
+            "json_file_unreadable",
+            "The JSON file must be a readable current-user-only regular file.",
+        ) from error
+    if not content or len(content) > maximum:
+        raise CliError("invalid_json_file", "The JSON file is empty or too large.")
+    return content
+
+
+def _bounded_body(
+    context: CommandContext, command: _Command, body: dict[str, Any]
+) -> dict[str, Any]:
+    maximum = _capability_limit(context, command, "maximum_model_request_bytes")
+    try:
+        encoded = json.dumps(
+            body, separators=(",", ":"), ensure_ascii=True, allow_nan=False
+        ).encode("utf-8")
+    except (TypeError, ValueError, UnicodeError, RecursionError) as error:
+        raise CliError("invalid_request", "The JSON request is invalid.") from error
+    if len(encoded) > maximum:
+        raise CliError(
+            "request_too_large", "The JSON request exceeds the service limit."
+        )
+    return body
+
+
+def _list_authors(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    payload = _paginated_get(context, command, _AUTHORS, "authors")
+    writer.success(
+        _human_items(
+            payload["authors"], ("id", "name", "version"), "No authorized authors."
+        ),
+        payload,
+    )
+
+
+def _show_author(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    author_id = _resource_id(command, "author_id", "author")
+    author = _object(
+        _request(context, command, "GET", f"{_AUTHORS}/{author_id}"),
+        _OK,
+        "author_read_failed",
+    )
+    writer.success(_human_record(author, ("id", "name", "version")), {"author": author})
+
+
+def _author_body(context: CommandContext, command: _Command) -> dict[str, Any]:
+    name = _required_string(command, "name")
+    if not name.strip():
+        raise CliError("invalid_request", "The author name is invalid.")
+    return _bounded_body(
+        context,
+        command,
+        {"name": name, "fields": _private_json(context, command, "fields_file")},
+    )
+
+
+def _create_author(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    author = _object(
+        _request(
+            context,
+            command,
+            "POST",
+            _AUTHORS,
+            body=_author_body(context, command),
+            csrf=True,
+        ),
+        _CREATED,
+        "author_create_failed",
+    )
+    writer.success(
+        f"Created author {_human(_response_id(author))}.", {"author": author}
+    )
+
+
+def _update_author(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    author_id = _resource_id(command, "author_id", "author")
+    author = _object(
+        _request(
+            context,
+            command,
+            "PATCH",
+            f"{_AUTHORS}/{author_id}",
+            body=_author_body(context, command),
+            csrf=True,
+            etag=_required_string(command, "etag"),
+        ),
+        _OK,
+        "author_update_failed",
+    )
+    writer.success("Author updated.", {"author": author})
+
+
+def _author_grant(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    author_id = _resource_id(command, "author_id", "author")
+    user_id = _resource_id(command, "user_id", "user")
+    granted = _flag(command, "granted")
+    author = _object(
+        _request(
+            context,
+            command,
+            "PUT" if granted else "DELETE",
+            f"{_AUTHORS}/{author_id}/grants/{user_id}",
+            csrf=True,
+            etag=_required_string(command, "etag"),
+        ),
+        _OK,
+        "author_grant_failed",
+    )
+    writer.success(
+        "Author grant added." if granted else "Author grant revoked.",
+        {"author": author},
+    )
+
+
+def _template_upload_limit(context: CommandContext, command: _Command) -> int:
+    result = _object(
+        _request(context, command, "GET", "/api/v1/template-context"),
+        _OK,
+        "template_context_failed",
+    )
+    return _capability_value(result, "template_max_archive_bytes")
+
+
+def _typed_template_upload(
+    context: CommandContext, command: _Command, *, create: bool
+) -> tuple[bytes, str]:
+    path = Path(_required_string(command, "docx"))
+    if path.suffix.casefold() != ".docx":
+        raise CliError("invalid_upload", "The typed template must be a DOCX file.")
+    content = _read_source(path, maximum_bytes=_template_upload_limit(context, command))
+    schema = _private_json(context, command, "schema_file")
+    schema_text = json.dumps(
+        schema, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
+    name = _required_string(command, "name") if create else None
+    if name is not None and (
+        not name.strip() or any(character in name for character in "\r\n")
+    ):
+        raise CliError("invalid_request", "The typed template name is invalid.")
+    boundary = f"markweave-{uuid4().hex}"
+    while (
+        boundary.encode() in content
+        or boundary in schema_text
+        or (name is not None and boundary in name)
+    ):
+        boundary = f"markweave-{uuid4().hex}"
+    chunks: list[bytes] = []
+    for field_name, value in (("name", name), ("schema", schema_text)):
+        if value is None:
+            continue
+        chunks.extend(
+            (
+                f"--{boundary}\r\n".encode(),
+                f'Content-Disposition: form-data; name="{field_name}"\r\n\r\n'.encode(),
+                value.encode("utf-8"),
+                b"\r\n",
+            )
+        )
+    chunks.extend(
+        (
+            f"--{boundary}\r\n".encode(),
+            b'Content-Disposition: form-data; name="file"; filename="template.docx"\r\n',
+            f"Content-Type: {_DOCX_MEDIA}\r\n\r\n".encode(),
+            content,
+            b"\r\n",
+            f"--{boundary}--\r\n".encode(),
+        )
+    )
+    return b"".join(chunks), f"multipart/form-data; boundary={boundary}"
+
+
+def _list_fill_templates(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    payload = _paginated_get(context, command, _FILL_TEMPLATES, "templates")
+    writer.success(
+        _human_items(
+            payload["templates"], ("id", "name", "version"), "No typed templates."
+        ),
+        payload,
+    )
+
+
+def _show_fill_template(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    template_id = _resource_id(command, "template_id", "template")
+    record = _object(
+        _request(context, command, "GET", f"{_FILL_TEMPLATES}/{template_id}"),
+        _OK,
+        "typed_template_read_failed",
+    )
+    writer.success(
+        _human_record(record, ("id", "name", "version")), {"template": record}
+    )
+
+
+def _create_fill_template(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    content, media = _typed_template_upload(context, command, create=True)
+    record = _object(
+        _request(
+            context,
+            command,
+            "POST",
+            _FILL_TEMPLATES,
+            csrf=True,
+            encoded_body=content,
+            content_type=media,
+        ),
+        _CREATED,
+        "typed_template_create_failed",
+    )
+    writer.success(
+        f"Created typed template {_human(_response_id(record))}.", {"template": record}
+    )
+
+
+def _replace_fill_template(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    template_id = _resource_id(command, "template_id", "template")
+    content, media = _typed_template_upload(context, command, create=False)
+    record = _object(
+        _request(
+            context,
+            command,
+            "POST",
+            f"{_FILL_TEMPLATES}/{template_id}/versions",
+            csrf=True,
+            etag=_required_string(command, "etag"),
+            encoded_body=content,
+            content_type=media,
+        ),
+        _CREATED,
+        "typed_template_replace_failed",
+    )
+    writer.success("Typed template version created.", {"template": record})
+
+
+def _list_fill_template_versions(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    template_id = _resource_id(command, "template_id", "template")
+    payload = _paginated_get(
+        context, command, f"{_FILL_TEMPLATES}/{template_id}/versions", "versions"
+    )
+    writer.success(
+        _human_items(
+            payload["versions"],
+            ("id", "number", "schema_version"),
+            "No template versions.",
+        ),
+        payload,
+    )
+
+
+def _show_fill_template_version(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    template_id = _resource_id(command, "template_id", "template")
+    version_id = _resource_id(command, "version_id", "template version")
+    version = _object(
+        _request(
+            context,
+            command,
+            "GET",
+            f"{_FILL_TEMPLATES}/{template_id}/versions/{version_id}",
+        ),
+        _OK,
+        "typed_template_version_read_failed",
+    )
+    writer.success(
+        _human_record(version, ("id", "number", "schema_version")), {"version": version}
+    )
+
+
+def _download_fill_template_version(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    template_id = _resource_id(command, "template_id", "template")
+    version_id = _resource_id(command, "version_id", "template version")
+    destination = Path(_required_string(command, "output"))
+    response = _client(context, command).download(
+        f"{_FILL_TEMPLATES}/{template_id}/versions/{version_id}/content",
+        destination,
+        overwrite=_flag(command, "force"),
+        validate_headers=_validate_typed_docx_headers,
+    )
+    if response.status != _OK:
+        raise _api_error(response, "typed_template_download_failed")
+    writer.success(
+        f"Downloaded typed template to {destination}.",
+        {"output": str(destination), "bytes_written": response.bytes_written},
+    )
+
+
+def _validate_typed_docx_headers(headers: dict[str, str]) -> None:
+    if (
+        headers.get("x-content-type-options", "").casefold() != "nosniff"
+        or headers.get("content-type", "").split(";", 1)[0].casefold() != _DOCX_MEDIA
+    ):
+        raise CliError(
+            "response_invalid", "The service returned an invalid DOCX response."
+        )
+
+
+def _fill_template_grant(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    template_id = _resource_id(command, "template_id", "template")
+    user_id = _resource_id(command, "user_id", "user")
+    granted = _flag(command, "granted")
+    record = _object(
+        _request(
+            context,
+            command,
+            "PUT" if granted else "DELETE",
+            f"{_FILL_TEMPLATES}/{template_id}/grants/{user_id}",
+            csrf=True,
+            etag=_required_string(command, "etag"),
+        ),
+        _OK,
+        "typed_template_grant_failed",
+    )
+    writer.success(
+        "Typed template grant added." if granted else "Typed template grant revoked.",
+        {"template": record},
+    )
+
+
+def _fill_plan_path(command: _Command, *, include_plan: bool = False) -> str:
+    path = f"/api/v1/composer/drafts/{_draft(command)}/fill-plans"
+    return (
+        f"{path}/{_resource_id(command, 'plan_id', 'fill plan')}"
+        if include_plan
+        else path
+    )
+
+
+def _list_fill_plans(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    payload = _paginated_get(context, command, _fill_plan_path(command), "plans")
+    writer.success(
+        _human_items(payload["plans"], ("id", "state", "version"), "No fill plans."),
+        payload,
+    )
+
+
+def _show_fill_plan(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    plan = _object(
+        _request(context, command, "GET", _fill_plan_path(command, include_plan=True)),
+        _OK,
+        "fill_plan_read_failed",
+    )
+    writer.success(_human_record(plan, ("id", "state", "version")), {"plan": plan})
+
+
+def _create_fill_plan(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    authors = [
+        _resource_id(_Command("author", {"author_id": value}), "author_id", "author")
+        for value in command.values["author"]
+    ]
+    values = (
+        _private_json(context, command, "values_file")
+        if isinstance(command.values.get("values_file"), str)
+        else {}
+    )
+    body = _bounded_body(
+        context,
+        command,
+        {
+            "source_revision_id": _resource_id(command, "source_revision", "revision"),
+            "template_id": _resource_id(command, "template", "template"),
+            "template_version_id": _resource_id(
+                command, "template_version", "template version"
+            ),
+            "author_ids": authors,
+            "values": values,
+        },
+    )
+    plan = _object(
+        _request(
+            context,
+            command,
+            "POST",
+            _fill_plan_path(command),
+            body=body,
+            csrf=True,
+            etag=_required_string(command, "etag"),
+            idempotency_key=_required_string(command, "idempotency_key"),
+        ),
+        _CREATED,
+        "fill_plan_create_failed",
+    )
+    writer.success(f"Created fill plan {_human(_response_id(plan))}.", {"plan": plan})
+
+
+def _update_fill_plan(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    body = _bounded_body(
+        context,
+        command,
+        {
+            "values": _private_json(context, command, "values_file"),
+            "provenance": _private_json(context, command, "provenance_file"),
+        },
+    )
+    plan = _object(
+        _request(
+            context,
+            command,
+            "PATCH",
+            _fill_plan_path(command, include_plan=True),
+            body=body,
+            csrf=True,
+            etag=_required_string(command, "etag"),
+            idempotency_key=_required_string(command, "idempotency_key"),
+        ),
+        _OK,
+        "fill_plan_update_failed",
+    )
+    writer.success("Fill plan updated.", {"plan": plan})
+
+
+def _fill_plan_mutation(
+    context: CommandContext, command: _Command, path: str, expected: int, fallback: str
+) -> dict[str, Any]:
+    return _object(
+        _request(
+            context,
+            command,
+            "POST",
+            path,
+            body={},
+            csrf=True,
+            etag=_required_string(command, "etag"),
+            idempotency_key=_required_string(command, "idempotency_key"),
+        ),
+        expected,
+        fallback,
+    )
+
+
+def _approve_fill_plan(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    plan = _fill_plan_mutation(
+        context,
+        command,
+        _fill_plan_path(command, include_plan=True) + "/approve",
+        _OK,
+        "fill_plan_approve_failed",
+    )
+    writer.success("Fill plan approved.", {"plan": plan})
+
+
+def _publish_fill_plan(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    revision = _fill_plan_mutation(
+        context,
+        command,
+        _fill_plan_path(command, include_plan=True) + "/publish",
+        _CREATED,
+        "fill_plan_publish_failed",
+    )
+    writer.success("Typed DOCX revision published.", {"revision": revision})
+
+
+def _regenerate_fill(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    draft_id, revision_id = _draft(command), _revision(command)
+    revision = _fill_plan_mutation(
+        context,
+        command,
+        f"/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/regenerations",
+        _CREATED,
+        "fill_regeneration_failed",
+    )
+    writer.success("Typed DOCX revision regenerated.", {"revision": revision})

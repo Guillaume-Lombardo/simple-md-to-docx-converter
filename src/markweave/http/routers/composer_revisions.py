@@ -103,6 +103,7 @@ def _revision_response(revision: ComposerRevision) -> ComposerRevisionResponse:
         ),
         restored_from_revision_id=revision.restored_from_revision_id,
         created_at=revision.created_at,
+        typed_fill_snapshot=snapshot.typed_fill_snapshot,
     )
 
 

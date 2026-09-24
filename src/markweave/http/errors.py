@@ -30,6 +30,7 @@ from markweave.composer.revisions import (
     ComposerNotFoundError,
 )
 from markweave.composer.secrets import SecretError
+from markweave.composer.typed_templates import TypedTemplateError
 from markweave.jobs.errors import (
     JobConflictError,
     JobNotFoundError,
@@ -40,6 +41,11 @@ from markweave.jobs.errors import (
 )
 from markweave.malware import MalwareDetectedError, MalwareScannerUnavailableError
 from markweave.persistence.composer import ComposerCapacityError
+from markweave.persistence.composer.typed_templates import (
+    TypedTemplateArtifactError,
+    TypedTemplateConflictError,
+    TypedTemplateNotFoundError,
+)
 from markweave.persistence.errors import PersistenceError
 from markweave.reversion_jobs.errors import (
     ReversionJobConflictError,
@@ -241,6 +247,24 @@ def install_error_handlers(app: FastAPI) -> None:
             "The Composer artifact is unavailable.",
         ),
         (
+            TypedTemplateNotFoundError,
+            404,
+            "COMPOSER_TYPED_TEMPLATE_NOT_FOUND",
+            "The typed template was not found.",
+        ),
+        (
+            TypedTemplateConflictError,
+            412,
+            "COMPOSER_TYPED_TEMPLATE_CHANGED",
+            "The typed template has changed.",
+        ),
+        (
+            TypedTemplateArtifactError,
+            503,
+            "COMPOSER_TYPED_TEMPLATE_UNAVAILABLE",
+            "The typed template content is unavailable.",
+        ),
+        (
             SecretError,
             503,
             "COMPOSER_CREDENTIAL_UNAVAILABLE",
@@ -276,6 +300,22 @@ def install_error_handlers(app: FastAPI) -> None:
             )
 
         app.add_exception_handler(error_class, handler)
+
+    @app.exception_handler(TypedTemplateError)
+    def typed_template_validation_handler(
+        _request: Request, error: TypedTemplateError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=413 if error.code == "limit_exceeded" else 422,
+            content={
+                "error": {
+                    "code": f"COMPOSER_TYPED_{error.code.upper()}",
+                    "message": "The typed template or values are invalid.",
+                    "paths": list(error.paths),
+                }
+            },
+            headers={"Cache-Control": "private, no-store"},
+        )
 
     @app.exception_handler(PersistenceError)
     def persistence_error_handler(

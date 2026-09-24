@@ -162,6 +162,7 @@ class RevisionSnapshot:
     model_identity: str | None
     provenance: str
     operation: str
+    typed_fill_snapshot: str | None = None
 
     def __post_init__(self) -> None:
         if not self.operation.strip():

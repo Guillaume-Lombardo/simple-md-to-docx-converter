@@ -13,10 +13,15 @@ from sqlalchemy import Engine, func, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from markweave.composer.author_knowledge import (
+    AuthorKnowledgeConflictError,
+    AuthorKnowledgeNotFoundError,
+)
 from markweave.composer.connections import ConnectionAuthorizationError
 from markweave.composer.drafts import ComposerProposal
 from markweave.composer.revisions import ComposerConflictError, ComposerNotFoundError
 from markweave.persistence.composer.audit import SYSTEM_ACTOR_ID, record_content_audit
+from markweave.persistence.composer.author_knowledge import SqlAuthorKnowledgeRepository
 from markweave.persistence.composer.common import (
     PageOrder,
     owned_draft,
@@ -76,6 +81,8 @@ class ComposerModelStep:
     intent: str = "proposal"
     answered_question_id: UUID | None = None
     question_id: UUID | None = None
+    author_refs: tuple[tuple[UUID, int], ...] = ()
+    author_preview_digest: str | None = None
 
     @property
     def status(self) -> str:
@@ -110,6 +117,11 @@ def _step(row: ComposerModelStepRow) -> ComposerModelStep:
         row.intent,
         UUID(row.answered_question_id) if row.answered_question_id else None,
         UUID(row.question_id) if row.question_id else None,
+        tuple(
+            (UUID(item["id"]), int(item["version"]))
+            for item in json.loads(row.author_refs)
+        ),
+        row.author_preview_digest,
     )
 
 
@@ -132,7 +144,7 @@ def _owned_step(
 class SqlComposerModelStepRepository:
     """SQL-only step state shared by standalone and distributed profiles."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - explicit clock, metrics and author gate ports
         self,
         engine: Engine,
         *,
@@ -140,6 +152,7 @@ class SqlComposerModelStepRepository:
         new_id: Callable[[], UUID] = uuid4,
         on_expiration: Callable[[int], None] | None = None,
         on_recovery: Callable[[int], None] | None = None,
+        authors: SqlAuthorKnowledgeRepository | None = None,
     ) -> None:
         """Observe committed lease expirations and stale-step sweeps after commit."""
         self._engine = engine
@@ -147,6 +160,7 @@ class SqlComposerModelStepRepository:
         self._new_id = new_id
         self._on_expiration = on_expiration
         self._on_recovery = on_recovery
+        self._authors = authors
 
     def start_model_step(  # noqa: PLR0912, PLR0913, PLR0915 - atomic admission and retry fences
         self,
@@ -163,6 +177,8 @@ class SqlComposerModelStepRepository:
         lease: timedelta,
         intent: str = "proposal",
         answered_question_id: UUID | None = None,
+        author_refs: tuple[tuple[UUID, int], ...] = (),
+        author_preview_digest: str | None = None,
     ) -> tuple[ComposerModelStep, bool]:
         """Admit at most the configured global number of unexpired running calls."""
 
@@ -177,6 +193,12 @@ class SqlComposerModelStepRepository:
             or max_active <= 0
             or lease <= timedelta(0)
             or intent not in {"proposal", "question"}
+            or (bool(author_refs) != bool(author_preview_digest))
+            or (
+                author_preview_digest is not None
+                and _DIGEST.fullmatch(author_preview_digest) is None
+            )
+            or len({item[0] for item in author_refs}) != len(author_refs)
         ):
             raise ValueError("Composer model step admission is invalid")
         expired = False
@@ -210,6 +232,8 @@ class SqlComposerModelStepRepository:
                         payload_digest=payload_digest,
                         intent=intent,
                         answered_question_id=answered_question_id,
+                        author_refs=author_refs,
+                        author_preview_digest=author_preview_digest,
                     ):
                         raise ComposerConflictError(
                             "Model step idempotency key was reused"
@@ -240,6 +264,18 @@ class SqlComposerModelStepRepository:
                             or draft.version != question.base_version + 2
                         ):
                             raise ComposerConflictError("Question answer changed")
+                        source_step = database.get(
+                            ComposerModelStepRow, question.model_step_id
+                        )
+                        if (
+                            source_step is None
+                            or source_step.draft_id != str(draft_id)
+                            or source_step.owner_id != str(owner_id)
+                            or not set(self._author_refs(source_step)).issubset(
+                                set(author_refs)
+                            )
+                        ):
+                            raise ComposerConflictError("Author access changed")
                         prior_resume = database.scalar(
                             select(ComposerModelStepRow.id).where(
                                 ComposerModelStepRow.draft_id == str(draft_id),
@@ -264,6 +300,7 @@ class SqlComposerModelStepRepository:
                         approved_model=approved_model,
                         expected_generation=None,
                     )
+                    self._authorize_authors(database, owner_id, author_refs)
                     active = database.scalar(
                         select(func.count(ComposerModelStepRow.id)).where(
                             ComposerModelStepRow.state == "running",
@@ -294,6 +331,8 @@ class SqlComposerModelStepRepository:
                         answered_question_id=(
                             str(answered_question_id) if answered_question_id else None
                         ),
+                        author_refs=self._author_refs_json(author_refs),
+                        author_preview_digest=author_preview_digest,
                         proposal_id=None,
                         question_id=None,
                         safe_error_code=None,
@@ -383,6 +422,7 @@ class SqlComposerModelStepRepository:
                     approved_model=row.model,
                     expected_generation=row.connection_generation,
                 )
+                self._authorize_authors(database, owner_id, self._author_refs(row))
         except (
             ComposerConflictError,
             ComposerNotFoundError,
@@ -533,7 +573,19 @@ class SqlComposerModelStepRepository:
             if row.answer_message_id
             else None
         )
-        return question_from_row(row, answer_content=answer.content if answer else None)
+        source = database.get(ComposerModelStepRow, row.model_step_id)
+        if source is None:
+            raise ComposerConflictError("Question source is unavailable")
+        return question_from_row(
+            row,
+            answer_content=answer.content if answer else None,
+            source_author_ids=tuple(
+                author_id
+                for author_id, _version in SqlComposerModelStepRepository._author_refs(
+                    source
+                )
+            ),
+        )
 
     def cancel_model_step(
         self,
@@ -598,7 +650,13 @@ class SqlComposerModelStepRepository:
                         prior_question is not None
                         and prior_question.text == proposed_value
                     ):
-                        return question_from_row(prior_question, answer_content=None)
+                        return question_from_row(
+                            prior_question,
+                            answer_content=None,
+                            source_author_ids=tuple(
+                                author_id for author_id, _ in self._author_refs(row)
+                            ),
+                        )
                     raise ComposerConflictError("Model step result changed")
                 if row.state != "running" or utc(row.expires_at) <= utc(now):
                     raise ComposerConflictError("Model step is no longer active")
@@ -613,6 +671,9 @@ class SqlComposerModelStepRepository:
                     approved_endpoint=row.approved_endpoint,
                     approved_model=row.model,
                     expected_generation=row.connection_generation,
+                )
+                self._authorize_authors(
+                    database, owner_id, self._author_refs(row), for_update=True
                 )
                 if row.intent == "question":
                     proposed_value = validated_question(proposed_value)
@@ -650,7 +711,13 @@ class SqlComposerModelStepRepository:
                             created_at=now,
                         )
                     database.flush()
-                    return question_from_row(question, answer_content=None)
+                    return question_from_row(
+                        question,
+                        answer_content=None,
+                        source_author_ids=tuple(
+                            author_id for author_id, _ in self._author_refs(row)
+                        ),
+                    )
                 proposal = ComposerProposalRow(
                     id=str(self._new_id()),
                     draft_id=str(draft_id),
@@ -850,6 +917,8 @@ class SqlComposerModelStepRepository:
         payload_digest: str,
         intent: str,
         answered_question_id: UUID | None,
+        author_refs: tuple[tuple[UUID, int], ...],
+        author_preview_digest: str | None,
     ) -> bool:
         return (
             row.connection_id == str(connection_id)
@@ -860,7 +929,49 @@ class SqlComposerModelStepRepository:
             and row.intent == intent
             and row.answered_question_id
             == (str(answered_question_id) if answered_question_id else None)
+            and row.author_refs
+            == SqlComposerModelStepRepository._author_refs_json(author_refs)
+            and row.author_preview_digest == author_preview_digest
         )
+
+    @staticmethod
+    def _author_refs_json(refs: tuple[tuple[UUID, int], ...]) -> str:
+        return json.dumps(
+            [{"id": str(author_id), "version": version} for author_id, version in refs],
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    @staticmethod
+    def _author_refs(row: ComposerModelStepRow) -> tuple[tuple[UUID, int], ...]:
+        return tuple(
+            (UUID(item["id"]), int(item["version"]))
+            for item in json.loads(row.author_refs)
+        )
+
+    def _authorize_authors(
+        self,
+        database: Session,
+        owner_id: UUID,
+        refs: tuple[tuple[UUID, int], ...],
+        *,
+        for_update: bool = False,
+    ) -> None:
+        if not refs:
+            return
+        if self._authors is None:
+            raise ComposerConflictError("Author directory is unavailable")
+        for author_id, version in refs:
+            try:
+                self._authors.require_access(
+                    database,
+                    owner_id,
+                    author_id,
+                    expected_version=version,
+                    for_update=for_update,
+                )
+            except AuthorKnowledgeNotFoundError, AuthorKnowledgeConflictError:
+                raise ComposerConflictError("Author access changed") from None
 
     @staticmethod
     def _connection(database: Session, connection_id: UUID) -> ComposerConnectionRow:
