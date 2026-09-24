@@ -110,6 +110,27 @@ async function exerciseStructuredPptx(page) {
   const input = page.getByLabel(/Source document/);
   await input.setInputFiles(source);
   await page.getByText("Selected markweave-t83-edited.pptx").waitFor();
+  await page
+    .getByRole("button", { name: "Open selected source in Composer" })
+    .click();
+  await page.waitForURL(/\/composer\?draft=[0-9a-f-]{36}$/);
+  const documentUrl = await page.evaluate(
+    () => performance.getEntriesByType("navigation")[0]?.name,
+  );
+  assert.equal(new URL(documentUrl).pathname, "/composer");
+  await page.getByRole("heading", { name: "Composer", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Capture source revision" }).click();
+  await page.getByText(/Original source captured/).waitFor();
+  await page.getByText("PPTX preview").waitFor();
+  const nativePreview = page.frameLocator('iframe[title^="PPTX revision"]');
+  await nativePreview.getByText("Slide 1 of 2").waitFor();
+  await nativePreview.getByRole("button", { name: "Next slide" }).click();
+  await nativePreview.getByText("Slide 2 of 2").waitFor();
+  await page.getByRole("link", { name: "2md, Experimental" }).click();
+  await page.waitForURL("**/revert");
+  await page.getByText("Selected markweave-t83-edited.pptx").waitFor();
+  await page.reload({ waitUntil: "networkidle" });
+  await page.getByText("Selected markweave-t83-edited.pptx").waitFor();
   const extraction = page.getByRole("group", { name: "PowerPoint extraction" });
   const anydoc = extraction.getByRole("radio", {
     name: "Standard document extraction",
@@ -155,6 +176,15 @@ async function exerciseStructuredPptx(page) {
     ],
     { timeout: 10_000 },
   );
+  await page
+    .getByRole("button", { name: "Open Markdown result in Composer" })
+    .click();
+  await page.waitForURL(/\/composer\?draft=[0-9a-f-]{36}$/);
+  await page.getByRole("heading", { name: "Composer", exact: true }).waitFor();
+  await page.getByText("application/zip", { exact: false }).waitFor();
+  await page.getByRole("link", { name: "2md, Experimental" }).click();
+  await page.waitForURL("**/revert");
+  await page.getByText("Selected markweave-t83-edited.pptx").waitFor();
 }
 
 test(

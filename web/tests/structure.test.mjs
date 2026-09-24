@@ -91,10 +91,12 @@ test("no application route duplicates the FastAPI API", async () => {
 
 test("shell links target only delivered application routes", async () => {
   const shell = await readFile("components/primitives.tsx", "utf8");
-  const destinations = [...shell.matchAll(/<Link[\s\S]*?href="([^"]+)"/g)].map(
-    (match) => match[1],
-  );
+  const destinations = [
+    ...shell.matchAll(/<(?:NavigationLink|a)\b[^>]*\bhref="(\/[^\"]+)"/g),
+  ].map((match) => match[1]);
   assert.deepEqual(destinations, [
+    "/convert",
+    "/composer",
     "/convert",
     "/composer/connections",
     "/presentations",
@@ -121,17 +123,30 @@ test("Revert remains a browser-only same-origin FastAPI client", async () => {
 test("authentication keeps authority and secrets outside browser persistence", async () => {
   const controller = await readFile("src/auth/controller.ts", "utf8");
   const context = await readFile("src/auth/context.tsx", "utf8");
+  const cleanup = await readFile("src/auth/local-drafts.ts", "utf8");
   for (const source of [controller, context]) {
     assert.doesNotMatch(source, /localStorage|sessionStorage|indexedDB/);
     assert.doesNotMatch(source, /setInterval|setTimeout/);
   }
+  assert.match(controller, /clearOwnerDraftInputs\(previous\.user\.id\)/);
+  assert.match(
+    controller,
+    /ownerId\s*\?\s*Promise\.resolve\(\)\.then\(\(\) => clearOwnerDraftInputs\(ownerId\)\)/,
+  );
+  assert.match(cleanup, /key\?\.startsWith\("composer:"\)/);
+  assert.match(cleanup, /key\.split\(":"\)\[2\] === ownerId/);
+  assert.match(cleanup, /sessionStorage\.removeItem\(key\)/);
+  assert.doesNotMatch(
+    cleanup,
+    /sessionStorage\.setItem|localStorage|indexedDB/,
+  );
   assert.doesNotMatch(controller, /session_token|sessionToken/);
   assert.doesNotMatch(context, /session_token|sessionToken/);
   await assert.rejects(stat("app/api"), { code: "ENOENT" });
   assert.deepEqual(
-    (await readdir("app", { recursive: true })).filter((path) =>
-      /(?:route\.(?:js|ts)|actions?\.(?:js|ts))$/.test(path),
-    ),
-    ["foundation-response/route.ts"],
+    (await readdir("app", { recursive: true }))
+      .filter((path) => /(?:route\.(?:js|ts)|actions?\.(?:js|ts))$/.test(path))
+      .sort(),
+    ["composer-preview/route.ts", "foundation-response/route.ts"],
   );
 });

@@ -11,6 +11,7 @@ export default defineConfig([
     "coverage/**",
     "next-env.d.ts",
     "out/**",
+    "public/composer-preview/**",
     "src/api/generated/**",
     "tests/fixtures/generated/**",
   ]),

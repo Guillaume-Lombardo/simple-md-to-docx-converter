@@ -549,7 +549,7 @@ class ConnectionService:
         )
         _check_cancelled(cancel_event)
 
-    def chat(
+    def chat(  # noqa: PLR0913 - explicit pre-dispatch authorization fence
         self,
         actor: ConnectionActor,
         connection_id: UUID,
@@ -557,6 +557,7 @@ class ConnectionService:
         *,
         max_output_tokens: int,
         cancel_event: Event | None = None,
+        before_dispatch: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
         """Return a completion only while the caller's operation remains active.
 
@@ -568,6 +569,9 @@ class ConnectionService:
         )
         if record.selected_model is None:
             raise ConnectionConfigurationError("A permitted model must be selected")
+        if before_dispatch is not None:
+            before_dispatch()
+        _check_cancelled(cancel_event)
         try:
             response = self._egress.chat(
                 record.endpoint,

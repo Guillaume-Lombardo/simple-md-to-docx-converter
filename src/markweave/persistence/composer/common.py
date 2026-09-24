@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from typing import Literal
 from uuid import UUID
 
 from sqlalchemy import Engine, select
@@ -24,6 +25,7 @@ from markweave.persistence.schema import (
 
 DEFAULT_PAGE_LIMIT = 50
 MAX_PAGE_LIMIT = 100
+PageOrder = Literal["asc", "desc"]
 
 
 def validate_page(limit: int, offset: int) -> None:
@@ -37,6 +39,13 @@ def validate_page(limit: int, offset: int) -> None:
         raise ValueError("Composer page limit must be between 1 and 100")
     if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
         raise ValueError("Composer page offset must be non-negative")
+
+
+def validate_page_order(order: PageOrder) -> None:
+    """Allow only the two explicit SQL history orders."""
+
+    if order not in ("asc", "desc"):
+        raise ValueError("Composer page order must be asc or desc")
 
 
 def utc(value: datetime) -> datetime:

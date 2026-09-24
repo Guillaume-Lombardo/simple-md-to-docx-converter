@@ -25,6 +25,7 @@ class ConversionErrorCode(StrEnum):
     INVALID_PDF = "invalid_pdf"
     TEMPLATE_INTEGRITY = "template_integrity"
     SOURCE_INTEGRITY = "source_integrity"
+    RUNTIME_VERSION_MISMATCH = "runtime_version_mismatch"
 
 
 class ConversionError(RuntimeError):

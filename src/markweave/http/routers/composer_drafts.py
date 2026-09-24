@@ -2,7 +2,7 @@
 
 from hashlib import sha256
 from pathlib import PurePath
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from fastapi import APIRouter, Depends, File, Form, Header, Query, Response, UploadFile
@@ -15,6 +15,10 @@ from markweave.composer.drafts import (
     ComposerMessage,
     ComposerProposal,
     ProposalState,
+)
+from markweave.composer.sources import (
+    markdown_from_archive,
+    markdown_from_reversion_result,
 )
 from markweave.http.composer_errors import (
     ComposerPreconditionRequiredError,
@@ -39,12 +43,14 @@ from markweave.http.dependencies import HttpDependencies
 from markweave.http.errors import error_responses
 from markweave.jobs.models import JobOutput
 from markweave.persistence.composer import SqlComposerRepository
+from markweave.reversions.models import ReverseOutputMode
 
 _MEDIA_TYPES = {
     ".md": "text/markdown",
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     ".pdf": "application/pdf",
+    ".zip": "application/zip",
 }
 _SOURCE_EXTENSIONS = frozenset(_MEDIA_TYPES)
 _MAXIMUM_TITLE_CHARACTERS = 256
@@ -191,6 +197,10 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:  # noqa: PLR0915
             )
         except UnicodeDecodeError:
             raise ComposerRequestError from None
+        if filename.lower().endswith(".zip"):
+            original_markdown = await run_in_threadpool(
+                markdown_from_archive, data, dependencies.settings
+            )
         draft_content = original_markdown if content is None else content
         _new_work_allowed(dependencies, user)
         draft = await run_in_threadpool(
@@ -256,6 +266,76 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:  # noqa: PLR0915
             origin_job_id=job.id,
             origin_result_object_id=job.result_object_id,
             origin_result_sha256=sha256(data).hexdigest(),
+        )
+        response.headers["Location"] = f"/api/v1/composer/drafts/{draft.id}"
+        response.headers["ETag"] = draft.etag
+        response.headers["Cache-Control"] = "private, no-store"
+        return _draft_response(draft)
+
+    @router.post(
+        "/api/v1/composer/drafts/from-reversion/{job_id}",
+        response_model=ComposerDraftResponse,
+        status_code=201,
+        tags=["composer"],
+        responses=error_responses(401, 403, 404, 409, 413, 422, 503),
+    )
+    async def handoff_reversion(
+        job_id: UUID,
+        payload: ComposerHandoffRequest,
+        response: Response,
+        user: Annotated[User, Depends(dependencies.mutation_actor)],
+    ) -> ComposerDraftResponse:
+        maximum = dependencies.settings.composer_upload_max_bytes
+        runtime = dependencies.components.reversions
+        if maximum is None or runtime is None:
+            raise ComposerUnavailableError
+        job, data = await run_in_threadpool(runtime.download, job_id, user.id)
+        if len(data) > maximum:
+            raise ComposerRequestTooLargeError
+        if (
+            job.result_mode is None
+            or job.result_object_id is None
+            or job.result_sha256 is None
+        ):
+            raise ComposerRequestError
+        await run_in_threadpool(dependencies.components.scanner.scan, data)
+        if sha256(data).hexdigest() != job.result_sha256:
+            raise ComposerRequestError
+        if job.result_mode is ReverseOutputMode.MARKDOWN:
+            try:
+                markdown = data.decode("utf-8")
+            except UnicodeDecodeError:
+                raise ComposerRequestError from None
+            if not markdown or "\x00" in markdown:
+                raise ComposerRequestError
+            media_type, extension = "text/markdown", "md"
+        elif job.result_mode in {
+            ReverseOutputMode.MARKDOWN_WITH_ASSETS,
+            ReverseOutputMode.MARKDOWN_WITH_UNAVAILABLE_ASSETS,
+        }:
+            markdown = await run_in_threadpool(
+                markdown_from_reversion_result, data, dependencies.settings
+            )
+            media_type, extension = "application/zip", "zip"
+        else:
+            raise ComposerRequestError
+        draft_title = _title(payload.title, f"{job.source_stem}.{extension}")
+        _new_work_allowed(dependencies, user)
+        draft = await run_in_threadpool(
+            _store(dependencies).create_draft_with_source,
+            user.id,
+            data,
+            (
+                f"{dependencies.settings.malware_scanning_mode.value}:"
+                f"reversion:{job.id}:{uuid4()}"
+            ),
+            title=draft_title,
+            content=markdown,
+            media_type=media_type,
+            source_kind="reversion_result",
+            origin_job_id=job.id,
+            origin_result_object_id=job.result_object_id,
+            origin_result_sha256=job.result_sha256,
         )
         response.headers["Location"] = f"/api/v1/composer/drafts/{draft.id}"
         response.headers["ETag"] = draft.etag
@@ -334,19 +414,20 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:  # noqa: PLR0915
         tags=["composer"],
         responses=error_responses(401, 404, 503),
     )
-    def list_messages(
+    def list_messages(  # noqa: PLR0913, PLR0917 - explicit FastAPI page fields
         draft_id: UUID,
         response: Response,
         user: Annotated[User, Depends(dependencies.current_user)],
         limit: Annotated[int, Query(ge=1, le=100)] = 50,
         offset: Annotated[int, Query(ge=0, le=_MAXIMUM_OFFSET)] = 0,
+        order: Literal["asc", "desc"] = "asc",
     ) -> ComposerMessageListResponse:
         response.headers["Cache-Control"] = "private, no-store"
         return ComposerMessageListResponse(
             messages=tuple(
                 _message_response(message)
                 for message in _store(dependencies).list_messages(
-                    user.id, draft_id, limit=limit, offset=offset
+                    user.id, draft_id, limit=limit, offset=offset, order=order
                 )
             ),
             limit=limit,
@@ -400,19 +481,20 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:  # noqa: PLR0915
         tags=["composer"],
         responses=error_responses(401, 404, 503),
     )
-    def list_proposals(
+    def list_proposals(  # noqa: PLR0913, PLR0917 - explicit FastAPI page fields
         draft_id: UUID,
         response: Response,
         user: Annotated[User, Depends(dependencies.current_user)],
         limit: Annotated[int, Query(ge=1, le=100)] = 50,
         offset: Annotated[int, Query(ge=0, le=_MAXIMUM_OFFSET)] = 0,
+        order: Literal["asc", "desc"] = "asc",
     ) -> ComposerProposalListResponse:
         response.headers["Cache-Control"] = "private, no-store"
         return ComposerProposalListResponse(
             proposals=tuple(
                 _proposal_response(proposal)
                 for proposal in _store(dependencies).list_proposals(
-                    user.id, draft_id, limit=limit, offset=offset
+                    user.id, draft_id, limit=limit, offset=offset, order=order
                 )
             ),
             limit=limit,

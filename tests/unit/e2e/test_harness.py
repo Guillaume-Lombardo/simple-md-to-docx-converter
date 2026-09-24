@@ -21,6 +21,7 @@ ADMISSION_FIXTURE = Path("tests/e2e/frontend-admission-fixture.mjs").resolve()
 RUNTIME_FAILURE_BROWSER = Path(
     "tests/e2e/browser-next-runtime-failures.test.mjs"
 ).resolve()
+BROWSER_RUNNER_SMOKE = Path("tests/e2e/browser-runner-smoke.mjs").resolve()
 
 
 @pytest.mark.unit
@@ -346,15 +347,389 @@ def test_every_final_image_container_monitor_inherits_owned_directory() -> None:
         if line.lstrip().startswith("podman run")
     ]
 
-    assert len(podman_runs) == 17
+    assert len(podman_runs) == 19
     assert all(
-        '"$temporary_directory" "$temporary_directory_identity"' in lines[index - 1]
+        any(
+            '"$temporary_directory" "$temporary_directory_identity"' in line
+            for line in lines[max(0, index - 3) : index]
+        )
         for index in podman_runs
     )
     assert 'rm -f -- "$repository/oom"' not in runner
     removal_index = runner.index("if ! e2e_remove_harness_directory")
     worktree_index = runner.index("if ! e2e_require_worktree_state_unchanged")
     assert removal_index < worktree_index
+
+
+@pytest.mark.unit
+def test_browser_driver_has_its_own_bounded_cgroup_and_current_backend_network() -> (
+    None
+):
+    runner = RUNNER.read_text(encoding="utf-8")
+    browser = runner.split("run_browser_test() {", 1)[1].split(
+        "\nstart_production_router() {", 1
+    )[0]
+    shared = runner.split("application_volumes=(", 1)[1].split(
+        "\napplication_mode=serve", 1
+    )[0]
+    assert (
+        "--memory=768m"
+        in runner.split("hardened_runtime=(", 1)[1].split("\nrun_browser_test() {", 1)[
+            0
+        ]
+    )
+    assert 'app_memory_limit="$(podman inspect "$backend_container"' in browser
+    assert 'podman exec "$backend_container" cat /sys/fs/cgroup/memory.max' in browser
+    assert '"$app_memory_limit" != 805306368' in browser
+    assert '--network "container:$backend_container"' in browser
+    assert "--memory=2g --cpus=2 --pids-limit=512 --shm-size=256m" in browser
+    assert "timeout --signal=TERM --kill-after=15s 25m" in browser
+    assert '--entrypoint /bin/sh "$image"' in browser
+    assert "umask 0077" in browser
+    assert 'for directory in "$HOME" "$TMPDIR" "$XDG_CACHE_HOME"' in browser
+    assert '"$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_RUNTIME_DIR"' in browser
+    assert 'mkdir -p -- "$directory"' in browser
+    assert 'chmod 0700 -- "$directory"' in browser
+    assert (
+        browser.index('chmod 0700 -- "$directory"')
+        < browser.index('memory_limit="$(cat /sys/fs/cgroup/memory.max)"')
+        < browser.index('node --test "$test_file"')
+    )
+    assert "--read-only --cap-drop=all --security-opt=no-new-privileges" in browser
+    assert '--security-opt="seccomp=$seccomp_profile"' in browser
+    assert '"$test_file" =~ ^/e2e/browser-[a-z0-9-]+\\.test\\.mjs$' in browser
+    assert '"$test_file" == /e2e/browser-runner-smoke.mjs' in browser
+    assert "runner_memory_max=%s" in browser
+    assert "application_memory_max=%s" in browser
+    assert "runner_memory_peak=%s" in browser
+    assert "/sys/fs/cgroup/memory.events" in browser
+    assert (
+        'printf "runner_memory_peak=%s\\n" "$peak" >> "$evidence" || receipt_failed=1'
+        in browser
+    )
+    assert (
+        'cat /sys/fs/cgroup/memory.events >> "$evidence" || receipt_failed=1' in browser
+    )
+    assert 'if [ "$result" -eq 0 ]; then exit 1; fi' in browser
+    assert 'exit "$result"' in browser
+    assert 'podman rm --force "$browser_runner_name"' in browser
+    assert (
+        'podman rm --force "$browser_runner_name"'
+        in runner.split("cleanup() {", 1)[1].split("\ntrap cleanup EXIT", 1)[0]
+    )
+    assert (
+        '"$browser_runner_name"'
+        in runner.split("refuse_existing_resources() {", 1)[1].split(
+            "\nwait_for_url() {", 1
+        )[0]
+    )
+    for mount in (
+        "/e2e:ro,z",
+        "/node_modules:ro,z",
+        "/evidence:rw,z",
+        "/browser-artifacts:rw,z",
+        "/browser-session:rw,z",
+    ):
+        assert mount in browser and mount in shared
+    assert "/data:" not in browser
+    assert "/run/secrets/" not in browser
+    assert '"$test_file" == /e2e/browser-next-composer-real.test.mjs' in browser
+    assert '"$test_file" == /e2e/browser-next-composer-resilience.test.mjs' in browser
+    assert browser.count("/run/composer-e2e-client.key:ro,z") == 1
+    assert 'run_browser_test "$expiry_application_name"' in runner
+    assert runner.count('run_browser_test "$application_name"') == 32
+    assert runner.count('run_browser_test "$expiry_application_name"') == 2
+    assert runner.count("node --test") == 1
+    assert "node --test /e2e/browser-" not in runner
+
+
+@pytest.mark.unit
+def test_opt_in_browser_runner_smoke_is_terminal_and_retains_exact_evidence() -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    fixture = BROWSER_RUNNER_SMOKE.read_text(encoding="utf-8")
+    assert (
+        'browser_runner_smoke_only="${MARKWEAVE_E2E_BROWSER_RUNNER_SMOKE_ONLY:-0}"'
+        in runner
+    )
+    assert (
+        '"$browser_runner_smoke_only" != 0 && "$browser_runner_smoke_only" != 1'
+        in runner
+    )
+    initial_ready = runner.index('wait_for_url "$base_url/health/ready"')
+    smoke = runner.index('if [[ "$browser_runner_smoke_only" == 1 ]]', initial_ready)
+    service = runner.index('if [[ "$composer_scenario_only" == 1 ]]', smoke)
+    phase = runner[smoke:service]
+    assert (
+        phase.index("start_frontend")
+        < phase.index('start_production_router "$application_name"')
+        < phase.index(
+            'run_browser_test "$application_name" /e2e/browser-runner-smoke.mjs'
+        )
+    )
+    assert (
+        'test -s "$temporary_directory/browser-artifacts/browser-runner-smoke.png"'
+        in phase
+    )
+    assert (
+        'test -s "$temporary_directory/browser-artifacts/browser-runner-smoke-cgroup-001.txt"'
+        in phase
+    )
+    assert '"$artifact_directory/"' in phase
+    assert "browser_smoke_succeeded=true\n  succeeded=true" in phase
+    assert phase.rstrip().endswith("exit 0\nfi")
+    cleanup = runner.split("cleanup() {", 1)[1].split("\ntrap cleanup EXIT", 1)[0]
+    assert '"$succeeded" == true && "$browser_smoke_succeeded" != true' in cleanup
+    assert "await page.goto(`${baseURL}/login`" in fixture
+    assert "assert.equal(response?.status(), 200)" in fixture
+    assert 'assert.equal(await page.title(), "Markweave")' in fixture
+    assert '"content-security-policy"' in fixture
+    assert "await page.screenshot({ path: screenshot, fullPage: true })" in fixture
+    assert "assert.ok((await stat(screenshot)).size > 0)" in fixture
+
+
+@pytest.mark.unit
+def test_composer_scenario_replays_real_browser_with_canonical_runtime() -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    assert (
+        'composer_scenario_only="${MARKWEAVE_E2E_COMPOSER_SCENARIO_ONLY:-0}"' in runner
+    )
+    assert '"$composer_scenario_only" != 0 && "$composer_scenario_only" != 1' in runner
+    assert (
+        '"$browser_runner_smoke_only" == 1 && "$composer_scenario_only" == 1' in runner
+    )
+    initial_ready = runner.index('wait_for_url "$base_url/health/ready"')
+    scenario = runner.index('if [[ "$composer_scenario_only" == 1 ]]', initial_ready)
+    service = runner.index(
+        'bash "$repository/scripts/container/wait-for-fake-clamav.sh"',
+        runner.index("\nfi\n", scenario),
+    )
+    phase = runner[scenario:service]
+    assert phase.index('podman rm --force "$application_name"') < phase.index(
+        "start_frontend"
+    )
+    assert phase.index(
+        '"${hardened_runtime[@]}" "${application_volumes[@]}" "${application_settings[@]}"'
+    ) < phase.index("--env MARKWEAVE_PUBLIC_ORIGIN=http://localhost:3100")
+    assert phase.index('wait_for_url "http://127.0.0.1:$(podman port') < phase.index(
+        'start_production_router "$application_name"'
+    )
+    assert (
+        phase.index('start_production_router "$application_name"')
+        < phase.index(
+            'run_browser_test "$application_name" /e2e/browser-next-composer-connections.test.mjs'
+        )
+        < phase.index(
+            'run_browser_test "$application_name" /e2e/browser-next-composer-real.test.mjs'
+        )
+        < phase.index(
+            'run_browser_test "$application_name" /e2e/browser-next-composer-pairing.test.mjs'
+        )
+    )
+    for environment in (
+        "--env MARKWEAVE_E2E_BASE_URL=http://localhost:3100",
+        '--env MARKWEAVE_E2E_PROFILE="$profile"',
+        '--env "MARKWEAVE_E2E_COMPOSER_PROVIDER_ADDRESS=$composer_provider_address"',
+        '--env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json"',
+    ):
+        assert environment in phase
+    assert (
+        'test -s "$temporary_directory/browser-artifacts/browser-next-composer-real-cgroup-001.txt"'
+        in phase
+    )
+    for browser in ("connections", "pairing"):
+        assert (
+            'test -s "$temporary_directory/browser-artifacts/browser-next-composer-'
+            f'{browser}-cgroup-001.txt"' in phase
+        )
+    assert 'test -s "$browser_session_directory/composer-$profile.json"' in phase
+    assert (
+        'cp -a -- "$temporary_directory/browser-artifacts/." "$artifact_directory/"'
+        in phase
+    )
+    assert (
+        'cp -a -- "$browser_session_directory/composer-$profile.json" "$artifact_directory/"'
+        in phase
+    )
+    assert 'podman logs "$resource" >"$artifact_directory/$resource.log"' in phase
+    assert "composer_scenario_succeeded=true\n  succeeded=true" in phase
+    assert phase.rstrip().endswith("exit 0\nfi")
+    cleanup = runner.split("cleanup() {", 1)[1].split("\ntrap cleanup EXIT", 1)[0]
+    assert '"$composer_scenario_succeeded" != true' in cleanup
+    assert (
+        runner.count(
+            'run_browser_test "$application_name" /e2e/browser-next-composer-real.test.mjs'
+        )
+        == 2
+    )
+    canonical = runner.rindex(
+        'run_browser_test "$application_name" /e2e/browser-next-composer-real.test.mjs'
+    )
+    assert scenario < service < canonical
+
+
+@pytest.mark.parametrize(
+    ("scenario_mode", "smoke_mode", "message"),
+    [
+        ("yes", "0", "MARKWEAVE_E2E_COMPOSER_SCENARIO_ONLY must be 0 or 1."),
+        (
+            "1",
+            "1",
+            "Browser runner smoke and Composer scenario modes are mutually exclusive.",
+        ),
+    ],
+)
+def test_composer_scenario_rejects_invalid_modes_before_runtime_setup(
+    scenario_mode: str, smoke_mode: str, message: str
+) -> None:
+    result = subprocess.run(
+        [str(RUNNER), "standalone"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ
+        | {
+            "MARKWEAVE_E2E_COMPOSER_SCENARIO_ONLY": scenario_mode,
+            "MARKWEAVE_E2E_BROWSER_RUNNER_SMOKE_ONLY": smoke_mode,
+        },
+    )
+    assert result.returncode == 2
+    assert message in result.stderr
+
+
+@pytest.mark.unit
+def test_composer_browser_mounts_only_checksum_verified_small_corpus(
+    tmp_path: Path,
+) -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    stage = runner.split("for corpus_file in docx/text.docx pdf/text.pdf; do", 1)[
+        1
+    ].split("\ndone", 1)[0]
+    stage = "for corpus_file in docx/text.docx pdf/text.pdf; do" + stage + "\ndone"
+    repository = tmp_path / "repository"
+    corpus = repository / "spikes" / "anydoc" / "corpus"
+    for filename in ("docx/text.docx", "pdf/text.pdf"):
+        source = corpus / filename
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_bytes(filename.encode())
+    temporary_directory = tmp_path / "harness"
+    temporary_directory.mkdir()
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            "set -euo pipefail\n"
+            'repository="$1"\n'
+            'temporary_directory="$2"\n'
+            'composer_corpus_directory="$temporary_directory/composer-corpus"\n'
+            + stage,
+            "composer-corpus-stage",
+            str(repository),
+            str(temporary_directory),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    staged = temporary_directory / "composer-corpus"
+    assert {
+        path.relative_to(staged).as_posix()
+        for path in staged.rglob("*")
+        if path.is_file()
+    } == {
+        "docx/text.docx",
+        "pdf/text.pdf",
+    }
+    for filename in ("docx/text.docx", "pdf/text.pdf"):
+        assert (staged / filename).read_bytes() == (corpus / filename).read_bytes()
+    browser = runner.split("run_browser_test() {", 1)[1].split(
+        "\nstart_production_router() {", 1
+    )[0]
+    real = browser.split(
+        'if [[ "$test_file" == /e2e/browser-next-composer-real.test.mjs ]]; then', 1
+    )[1].split("\n  elif", 1)[0]
+    assert '--volume "$composer_corpus_directory:/spikes/anydoc/corpus:ro,z"' in real
+    assert browser.count("/spikes/anydoc/corpus:ro,z") == 1
+    assert "$repository/spikes/anydoc/corpus:/spikes/anydoc/corpus" not in browser
+    shared = runner.split("application_volumes=(", 1)[1].split(
+        "\napplication_mode=serve", 1
+    )[0]
+    assert "/spikes/anydoc/corpus" not in shared
+
+
+@pytest.mark.unit
+def test_repeated_browser_phases_reserve_distinct_cgroup_receipts(
+    tmp_path: Path,
+) -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    reservation = (
+        "reserve_browser_cgroup_receipt() {"
+        + runner.split("reserve_browser_cgroup_receipt() {", 1)[1].split(
+            "\nrun_browser_test() {", 1
+        )[0]
+    )
+    (tmp_path / "browser-artifacts").mkdir()
+    script = (
+        'temporary_directory="$1"\n'
+        + reservation
+        + "\nreserve_browser_cgroup_receipt browser-next-composer-resilience\n"
+        + "reserve_browser_cgroup_receipt browser-next-composer-resilience\n"
+        + "reserve_browser_cgroup_receipt browser-next-reversion\n"
+    )
+    result = subprocess.run(
+        ["bash", "-c", script, "browser-receipts", str(tmp_path)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout.splitlines() == [
+        "/browser-artifacts/browser-next-composer-resilience-cgroup-001.txt",
+        "/browser-artifacts/browser-next-composer-resilience-cgroup-002.txt",
+        "/browser-artifacts/browser-next-reversion-cgroup-001.txt",
+    ]
+    assert len(list((tmp_path / "browser-artifacts").glob("*.reserved"))) == 3
+
+
+@pytest.mark.unit
+def test_smoke_receipt_stem_matches_the_branch_evidence_path(tmp_path: Path) -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    reservation = (
+        "reserve_browser_cgroup_receipt() {"
+        + runner.split("reserve_browser_cgroup_receipt() {", 1)[1].split(
+            "\nrun_browser_test() {", 1
+        )[0]
+    )
+    start = runner.index('  test_stem="${test_stem%.mjs}"')
+    end = runner.index("  if ! receipt_path=", start)
+    normalization = runner[start:end]
+    (tmp_path / "browser-artifacts").mkdir()
+    script = (
+        'temporary_directory="$1"\n'
+        + reservation
+        + "\ntest_file=/e2e/browser-runner-smoke.mjs\n"
+        + 'test_stem="${test_file##*/}"\n'
+        + normalization
+        + 'reserve_browser_cgroup_receipt "$test_stem"\n'
+        + "test_file=/e2e/browser-next-composer-real.test.mjs\n"
+        + 'test_stem="${test_file##*/}"\n'
+        + normalization
+        + 'reserve_browser_cgroup_receipt "$test_stem"\n'
+    )
+    result = subprocess.run(
+        ["bash", "-c", script, "browser-receipts", str(tmp_path)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    smoke_receipt, normal_receipt = result.stdout.splitlines()
+    assert smoke_receipt == "/browser-artifacts/browser-runner-smoke-cgroup-001.txt"
+    assert normal_receipt == (
+        "/browser-artifacts/browser-next-composer-real-cgroup-001.txt"
+    )
+    smoke_branch = runner.split('if [[ "$browser_runner_smoke_only" == 1 ]]', 1)[
+        1
+    ].split("\nfi", 1)[0]
+    assert f'test -s "$temporary_directory{smoke_receipt}"' in smoke_branch
 
 
 @pytest.mark.unit
@@ -372,7 +747,7 @@ def test_composer_final_image_provider_and_restore_preserve_harness_guards() -> 
     assert '--network "$network_name"' in provider_block
     assert '--user "$runtime_uid:0" --read-only' in provider_block
     assert "--cap-drop=all --security-opt=no-new-privileges" in provider_block
-    assert '--volume "$composer_provider_directory:/provider:ro,Z"' in provider_block
+    assert '--volume "$composer_provider_directory:/provider:ro,z"' in provider_block
 
     restore = runner.split("restore_composer_snapshot() {", 1)[1].split(
         "\nkill_backend_and_reconnect_router() {", 1
@@ -387,12 +762,24 @@ def test_composer_final_image_provider_and_restore_preserve_harness_guards() -> 
         'start_production_router "$application_name"'
     )
 
-    composer_browser = runner.index("/e2e/browser-next-composer-real.test.mjs")
+    composer_browser = runner.index(
+        'run_browser_test "$application_name" /e2e/browser-next-composer-real.test.mjs'
+    )
+    pairing_browser = runner.index(
+        "/e2e/browser-next-composer-pairing.test.mjs", composer_browser
+    )
     restore_call = runner.index("\nrestore_composer_snapshot\n")
     restored_browser = runner.index(
         "MARKWEAVE_E2E_COMPOSER_PHASE=restored-backup", restore_call
     )
-    assert provider_start < composer_browser < restore_call < restored_browser
+    assert (
+        provider_start
+        < composer_browser
+        < pairing_browser
+        < restore_call
+        < restored_browser
+    )
+    assert runner.count("/e2e/browser-next-composer-pairing.test.mjs") == 2
 
 
 @pytest.mark.unit
@@ -432,19 +819,21 @@ def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
     assert "AbortSignal.timeout(1000)" in runner
     assert "--env PUBLIC_HOSTS=localhost:3100" in runner
     assert "--env ROUTER_UPSTREAM_TIMEOUT_MS=30000" in runner
-    assert runner.count('start_production_router "$application_name"') == 10
+    assert runner.count('start_production_router "$application_name"') == 12
     assert runner.count('restart_backend_and_router "$application_name"') == 1
     assert runner.count('kill_backend_and_reconnect_router "$application_name"') == 1
     assert runner.count('start_production_router "$expiry_application_name"') == 1
     provisioning = runner.index("/e2e/browser-provisioning-restart.test.mjs")
-    first_router = runner.index(
+    provisioning_end = runner.index("/e2e/browser-recovery-checkpoint.test.mjs")
+    first_router = runner.rindex(
         'start_production_router "$application_name"',
         runner.index("application_mode=serve"),
+        provisioning,
     )
     assert first_router < provisioning
     assert (
         "MARKWEAVE_E2E_BASE_URL=http://localhost:3100"
-        in runner[first_router:provisioning]
+        in runner[provisioning:provisioning_end]
     )
     assert (
         'start_production_router "$application_name" http://127.0.0.1:1 \\\n'
@@ -771,7 +1160,7 @@ def test_runner_invokes_next_conversion_browser_in_both_profile_matrix() -> None
         "/e2e/browser-next-conversion-restart-prepare.test.mjs", admission_index
     )
     preparation_command_index = runner.rindex(
-        "podman exec", admission_index, preparation_index
+        'run_browser_test "$application_name"', admission_index, preparation_index
     )
     restarted_router_index = runner.index(
         'restart_backend_and_router "$application_name"', preparation_index
@@ -794,8 +1183,8 @@ def test_runner_invokes_next_conversion_browser_in_both_profile_matrix() -> None
     assert preparation_index < restarted_router_index < recovery_index
     preparation = runner[preparation_command_index:restarted_router_index]
     assert (
-        '"$application_name" node --test \\\n'
-        "  /e2e/browser-next-conversion-restart-prepare.test.mjs\n" in preparation
+        'run_browser_test "$application_name" '
+        "/e2e/browser-next-conversion-restart-prepare.test.mjs" in preparation
     )
     assert (
         runner.index("/e2e/browser-next-auth.test.mjs")
@@ -872,9 +1261,11 @@ def test_runner_invokes_next_administration_with_restored_policy_evidence(
     )
     invocation = runner[recovery_index:expiry_index]
     assert (
-        'podman exec \\\n  "$application_name" node --test '
+        'run_browser_test "$application_name" '
         "/e2e/browser-next-admin-cookie.test.mjs\n"
-        "podman exec \\\n  --env MARKWEAVE_E2E_PROFILE=" in invocation
+        'run_browser_test "$application_name" '
+        "/e2e/browser-next-admin.test.mjs \\\n"
+        "  --env MARKWEAVE_E2E_PROFILE=" in invocation
     )
     assert (
         "--env MARKWEAVE_E2E_CHECKPOINT_USER_IDLE_MINUTES="

@@ -160,6 +160,13 @@ def _register_drafts(
     handoff.add_argument("--title", action=_Store)
     _profile(handoff)
     _bind(handoff, "drafts handoff", _handoff_draft)
+    reverse_handoff = actions.add_parser(
+        "handoff-reversion", help="Create a draft from a reverse-conversion result."
+    )
+    reverse_handoff.add_argument("job_id", action=_Store, metavar="JOB_ID")
+    reverse_handoff.add_argument("--title", action=_Store)
+    _profile(reverse_handoff)
+    _bind(reverse_handoff, "drafts handoff-reversion", _handoff_reversion_draft)
     save = actions.add_parser("save", help="Save complete draft text.")
     _draft_id(save)
     save.add_argument("--title", required=True, action=_Store)
@@ -250,6 +257,15 @@ def _register_proposals(
     _etag(decide)
     _profile(decide)
     _bind(decide, "proposals decide", _decide_proposal)
+    publish = actions.add_parser(
+        "publish", help="Publish approved Markdown as an immutable revision."
+    )
+    _draft_id(publish)
+    _proposal_id(publish)
+    _etag(publish)
+    _idempotency_key(publish)
+    _profile(publish)
+    _bind(publish, "proposals publish", _publish_proposal)
 
 
 def _register_revisions(
@@ -263,6 +279,14 @@ def _register_revisions(
     _idempotency_key(capture)
     _profile(capture)
     _bind(capture, "revisions capture", _capture_revision)
+    publish_draft = actions.add_parser(
+        "publish-draft", help="Publish exact saved Markdown as an immutable revision."
+    )
+    _draft_id(publish_draft)
+    _etag(publish_draft)
+    _idempotency_key(publish_draft)
+    _profile(publish_draft)
+    _bind(publish_draft, "revisions publish-draft", _publish_draft_revision)
     listing = actions.add_parser("list", help="List draft revisions.")
     _draft_id(listing)
     _pagination(listing)
@@ -273,11 +297,20 @@ def _register_revisions(
     _revision_id(show)
     _profile(show)
     _bind(show, "revisions show", _show_revision)
+    diff = actions.add_parser("diff", help="Compare two exact revisions.")
+    _draft_id(diff)
+    _revision_id(diff)
+    diff.add_argument("--from-revision", required=True, action=_Store)
+    _profile(diff)
+    _bind(diff, "revisions diff", _diff_revision)
     download = actions.add_parser("download", help="Download an exact artifact.")
     _draft_id(download)
     _revision_id(download)
     download.add_argument(
-        "--kind", choices=("download", "preview"), required=True, action=_Store
+        "--kind",
+        choices=("source", "download", "preview"),
+        required=True,
+        action=_Store,
     )
     download.add_argument("--output", required=True, action=_Store)
     _force(download)
@@ -1057,6 +1090,28 @@ def _handoff_draft(
     )
 
 
+def _handoff_reversion_draft(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    job_id = _resource_id(command, "job_id", "reverse-conversion job")
+    title = command.values.get("title")
+    draft = _object(
+        _request(
+            context,
+            command,
+            "POST",
+            f"/api/v1/composer/drafts/from-reversion/{job_id}",
+            body={"title": title if isinstance(title, str) else None},
+            csrf=True,
+        ),
+        _CREATED,
+        "draft_handoff_failed",
+    )
+    writer.success(
+        f"Created Composer draft {_human(_response_id(draft))}.", {"draft": draft}
+    )
+
+
 def _save_draft(
     context: CommandContext, writer: OutputWriter, command: _Command
 ) -> None:
@@ -1209,8 +1264,14 @@ def _status_model_step(
         draft_id=draft_id,
         step_id=step_id,
     )
+    result_field = (
+        (("question_id",) if step["intent"] == "question" else ("proposal_id",))
+        if step["status"] == "completed"
+        else ()
+    )
     writer.success(
-        _human_record(step, ("id", "status", "created_at")), {"model_step": step}
+        _human_record(step, ("id", "status", "intent", *result_field, "created_at")),
+        {"model_step": step},
     )
 
 
@@ -1257,7 +1318,7 @@ def _approved_connection(
     return endpoint, model
 
 
-def _model_step_record(
+def _model_step_record(  # noqa: PLR0912 - validate all terminal identity combinations
     payload: dict[str, Any], *, draft_id: str, step_id: str | None = None
 ) -> dict[str, Any]:
     fields = (
@@ -1267,7 +1328,10 @@ def _model_step_record(
         "model_identity",
         "base_version",
         "status",
+        "intent",
         "proposal_id",
+        "question_id",
+        "answered_question_id",
         "error_code",
         "created_at",
         "updated_at",
@@ -1288,21 +1352,38 @@ def _model_step_record(
         or isinstance(record["base_version"], bool)
         or not isinstance(record["status"], str)
         or record["status"] not in _MODEL_STEP_STATES
+        or record["intent"] not in {"proposal", "question"}
         or not isinstance(record["created_at"], str)
         or not isinstance(record["updated_at"], str)
     ):
         raise CliError("response_invalid", "The service returned an invalid response.")
     record["id"] = identifier
     record["connection_id"] = connection_id
-    proposal_id, error_code = record["proposal_id"], record["error_code"]
-    if record["status"] == "completed":
+    proposal_id, question_id = record["proposal_id"], record["question_id"]
+    answer_id = record["answered_question_id"]
+    error_code = record["error_code"]
+    if answer_id is not None:
         try:
-            record["proposal_id"] = str(UUID(proposal_id))
+            record["answered_question_id"] = str(UUID(answer_id))
         except (TypeError, ValueError) as error:
             raise CliError(
                 "response_invalid", "The service returned an invalid response."
             ) from error
-    elif proposal_id is not None:
+    if record["status"] == "completed":
+        try:
+            if record["intent"] == "question":
+                record["question_id"] = str(UUID(question_id))
+                if proposal_id is not None:
+                    raise ValueError
+            else:
+                record["proposal_id"] = str(UUID(proposal_id))
+                if question_id is not None:
+                    raise ValueError
+        except (TypeError, ValueError) as error:
+            raise CliError(
+                "response_invalid", "The service returned an invalid response."
+            ) from error
+    elif proposal_id is not None or question_id is not None:
         raise CliError("response_invalid", "The service returned an invalid response.")
     if record["status"] == "failed":
         if not isinstance(error_code, str) or error_code not in _MODEL_STEP_ERROR_CODES:
@@ -1380,6 +1461,19 @@ def _decide_proposal(
     writer.success("Composer proposal decided.", {"proposal": proposal})
 
 
+def _publish_proposal(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    draft_id, proposal_id = _draft(command), _proposal(command)
+    revision = _revision_mutation(
+        context,
+        command,
+        f"/api/v1/composer/drafts/{draft_id}/proposals/{proposal_id}/publish",
+        "proposal_publication_failed",
+    )
+    writer.success("Composer proposal published.", {"revision": revision})
+
+
 def _capture_revision(
     context: CommandContext, writer: OutputWriter, command: _Command
 ) -> None:
@@ -1391,6 +1485,21 @@ def _capture_revision(
         "revision_capture_failed",
     )
     writer.success("Composer source revision captured.", {"revision": revision})
+
+
+def _publish_draft_revision(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    draft_id = _draft(command)
+    revision = _revision_mutation(
+        context,
+        command,
+        f"/api/v1/composer/drafts/{draft_id}/revisions/from-draft",
+        "revision_publication_failed",
+    )
+    writer.success(
+        "Composer saved Markdown revision published.", {"revision": revision}
+    )
 
 
 def _list_revisions(
@@ -1424,6 +1533,24 @@ def _show_revision(
     )
     writer.success(
         _human_record(revision, ("id", "number", "operation")), {"revision": revision}
+    )
+
+
+def _diff_revision(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    draft_id, revision_id = _draft(command), _revision(command)
+    before_id = _resource_id(command, "from_revision", "revision")
+    path = (
+        f"/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/diff?"
+        f"{urlencode({'from_revision_id': before_id})}"
+    )
+    result = _object(
+        _request(context, command, "GET", path), _OK, "revision_diff_failed"
+    )
+    writer.success(
+        f"Composer revision diff: {_human(result.get('status'))}.",
+        {"diff": result},
     )
 
 
@@ -1970,7 +2097,7 @@ def _capability_value(payload: dict[str, Any], field_name: str) -> int:
 
 
 def _read_source(path: Path, *, maximum_bytes: int) -> bytes:
-    if path.suffix.lower() not in {".md", ".docx", ".pptx", ".pdf"}:
+    if path.suffix.lower() not in {".md", ".docx", ".pptx", ".pdf", ".zip"}:
         raise CliError("invalid_upload", "The Composer source type is unsupported.")
     try:
         metadata = path.lstat()

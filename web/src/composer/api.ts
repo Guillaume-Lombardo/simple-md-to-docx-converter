@@ -14,6 +14,7 @@ export type ConnectionStatus = v.InferOutput<typeof connectionStatusSchema>;
 const capabilitiesSchema = v.object({
   instance_connections_manageable: v.boolean(),
   maximum_upload_bytes: v.nullable(v.number()),
+  maximum_output_tokens: v.nullable(v.number()),
   personal_connections_allowed: v.boolean(),
   status: connectionStatusSchema,
   status_message: v.nullable(v.string()),

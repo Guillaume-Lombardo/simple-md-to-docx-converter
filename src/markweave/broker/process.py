@@ -781,7 +781,10 @@ class BrokerProcess:
             self._server.start()
             if self._shutdown_requested.is_set():
                 self._server.request_stop()
-            self._server.wait_stopping()
+            # Python dispatches handlers on the main thread even when another
+            # thread receives the signal. Wake it while the server is idle.
+            while not self._server.wait_stopping(0.25):
+                pass
             failed = self._server.failed
             self._arm_watchdog()
             try:

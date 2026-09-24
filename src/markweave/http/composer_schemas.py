@@ -2,9 +2,12 @@
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
+
+from markweave.presentations.models import PresentationDialect
 
 
 class ComposerAvailabilityState(StrEnum):
@@ -257,6 +260,8 @@ class ComposerModelStepCreateRequest(BaseModel):
     approved_model: str = Field(min_length=1)
     content: str = Field(min_length=1)
     max_output_tokens: int = Field(gt=0)
+    intent: Literal["proposal", "question"] = "proposal"
+    answered_question_id: UUID | None = None
 
 
 class ComposerModelStepResponse(BaseModel):
@@ -267,9 +272,77 @@ class ComposerModelStepResponse(BaseModel):
     base_version: int
     status: str
     proposal_id: UUID | None
+    intent: Literal["proposal", "question"]
+    answered_question_id: UUID | None
+    question_id: UUID | None
     error_code: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class ComposerQuestionResponse(BaseModel):
+    id: UUID
+    draft_id: UUID
+    model_step_id: UUID
+    base_version: int
+    state: Literal["pending", "answered"]
+    text: str
+    answer_message_id: UUID | None
+    answer_content: str | None
+    created_at: datetime
+    answered_at: datetime | None
+
+
+class ComposerQuestionListResponse(BaseModel):
+    questions: tuple[ComposerQuestionResponse, ...]
+    limit: int
+    offset: int
+
+
+class ComposerQuestionAnswerRequest(BaseModel):
+    model_config = ConfigDict(hide_input_in_errors=True)
+
+    content: str = Field(min_length=1)
+
+
+class ComposerGenerationCreateRequest(BaseModel):
+    output: Literal["docx", "pdf", "pptx"]
+    template_id: UUID | None = None
+    template_version_id: UUID | None = None
+    presentation_dialect: PresentationDialect | None = None
+    slide_level: int | None = Field(default=None, ge=1, le=6)
+
+    @model_validator(mode="after")
+    def validate_options(self) -> ComposerGenerationCreateRequest:
+        if (self.template_id is None) is not (self.template_version_id is None):
+            raise ValueError("Template ID and version must be supplied together")
+        if self.output != "pptx" and (
+            self.presentation_dialect is not None or self.slide_level is not None
+        ):
+            raise ValueError("Presentation options require PowerPoint output")
+        return self
+
+
+class ComposerGenerationResponse(BaseModel):
+    id: UUID
+    draft_id: UUID
+    source_revision_id: UUID
+    job_id: UUID | None
+    status: str
+    output: Literal["docx", "pdf", "pptx"]
+    template_id: UUID | None
+    template_version_id: UUID | None
+    presentation_dialect: PresentationDialect | None
+    slide_level: int | None
+    result_revision_id: UUID | None
+    publishable: bool
+    created_at: datetime
+
+
+class ComposerGenerationListResponse(BaseModel):
+    generations: tuple[ComposerGenerationResponse, ...]
+    limit: int
+    offset: int
 
 
 class ComposerArtifactResponse(BaseModel):
@@ -310,3 +383,23 @@ class ComposerRevisionListResponse(BaseModel):
     revisions: tuple[ComposerRevisionSummaryResponse, ...]
     limit: int
     offset: int
+
+
+class ComposerRevisionDiffChange(BaseModel):
+    kind: str
+    before_start: int
+    before_end: int
+    after_start: int
+    after_end: int
+    before_text: str
+    after_text: str
+
+
+class ComposerRevisionDiffResponse(BaseModel):
+    from_revision_id: UUID
+    to_revision_id: UUID
+    status: str
+    reason: str | None
+    changes: tuple[ComposerRevisionDiffChange, ...]
+    scope: Literal["artifact", "approved_markdown"] = "artifact"
+    metadata_changes: tuple[str, ...] = ()

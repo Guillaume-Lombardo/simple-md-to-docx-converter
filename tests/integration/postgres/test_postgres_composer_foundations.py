@@ -4,7 +4,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import boto3
 import pytest
@@ -19,6 +19,7 @@ from markweave.composer.revisions import (
     ArtifactContent,
     ComposerConflictError,
     RevisionSnapshot,
+    direct_publish_lineage,
 )
 from markweave.composer.secrets import EncryptedCredentials
 from markweave.config import StorageProfile
@@ -120,6 +121,58 @@ def test_postgresql_s3_revision_publication_survives_restart_and_serializes_writ
         )
         assert (
             restarted.get_draft(owner, draft.id).current_revision_id == revisions[0].id
+        )
+        edited = restarted.save_draft(
+            owner,
+            draft.id,
+            if_match=restarted.get_draft(owner, draft.id).etag,
+            title="Draft",
+            content="# Human approved\n",
+        )
+        direct_snapshot = RevisionSnapshot(
+            edited.source,
+            None,
+            '{"content": "# Human approved\\n"}',
+            direct_publish_lineage(
+                revisions[0].id,
+                revisions[0].snapshot.model_identity,
+                revisions[0].snapshot.render_options,
+            ),
+            None,
+            "human:direct",
+            "publish_draft",
+        )
+        direct_artifacts = (
+            ArtifactContent("download", "text/markdown", b"# Human approved\n"),
+            ArtifactContent("preview", "text/markdown", b"# Human approved\n"),
+        )
+
+        def publish_direct(key: str) -> str:
+            try:
+                result = restarted.publish_revision(
+                    owner,
+                    draft.id,
+                    actor_id=owner,
+                    if_match=edited.etag,
+                    idempotency_key=key,
+                    snapshot=direct_snapshot,
+                    artifacts=direct_artifacts,
+                )
+                return str(result.id)
+            except ComposerConflictError:
+                return "conflict"
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            direct_results = tuple(pool.map(publish_direct, ("direct-a", "direct-b")))
+        assert sum(result != "conflict" for result in direct_results) == 1
+        direct_revision_id = next(
+            result for result in direct_results if result != "conflict"
+        )
+        assert (
+            restarted.read_artifact(
+                owner, draft.id, UUID(direct_revision_id), "download"
+            )
+            == b"# Human approved\n"
         )
     finally:
         store.close()

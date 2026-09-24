@@ -37,6 +37,19 @@ response headers before replacing a local file. See
 [Administration CLI](administration-cli.md#composer-connections) for the full command
 forms and security rules.
 
+Composer drafts accept scanned `.md`, `.zip`, `.docx`, `.pptx`, and `.pdf` sources. After reviewing
+a successful 2md result, `markweave composer drafts handoff-reversion JOB_ID` imports its
+owner-authorized Markdown or ZIP bytes with a fresh scan and immutable source trace. After reviewing
+a proposal, `markweave composer proposals publish DRAFT_ID PROPOSAL_ID --etag ETAG
+--idempotency-key KEY` publishes approved Markdown as a new immutable revision. Use
+`markweave composer revisions publish-draft DRAFT_ID --etag ETAG --idempotency-key KEY`
+to publish exact current saved Markdown, including a validated ZIP draft's retained image
+assets. Revision `source` artifacts can be downloaded with `--kind source`.
+Use
+`markweave composer revisions diff DRAFT_ID TO_REVISION_ID --from-revision FROM_REVISION_ID`
+for bounded line changes. Native Office proposals are reviewable but cannot be published as
+document edits until a qualified structured editor is available.
+
 Administrators can inspect and replace the Composer destination policy through the
 authenticated API:
 

@@ -18,6 +18,7 @@ RUN pnpm install --frozen-lockfile --ignore-scripts --filter @markweave/web...
 COPY web/app ./web/app
 COPY web/components ./web/components
 COPY web/public ./web/public
+COPY web/scripts ./web/scripts
 COPY web/src ./web/src
 COPY pyproject.toml ./pyproject.toml
 COPY web/project-version.mjs ./web/project-version.mjs

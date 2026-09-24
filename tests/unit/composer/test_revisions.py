@@ -47,6 +47,18 @@ def test_source_requires_exact_scan_proof_and_digest() -> None:
             uuid4(),
             "b" * 64,
         )
+    with pytest.raises(ValueError, match="reverse result source media type"):
+        SourceReference(
+            "reversion_result",
+            uuid4(),
+            owner,
+            "a" * 64,
+            "scan-pass",
+            "application/pdf",
+            uuid4(),
+            uuid4(),
+            "a" * 64,
+        )
 
 
 def test_artifact_requires_complete_bytes_and_fixed_kind() -> None:

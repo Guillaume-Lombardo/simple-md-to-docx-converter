@@ -14,6 +14,20 @@ readonly published_reverse_attempt_image="${MARKWEAVE_E2E_REVERSE_ATTEMPT_IMAGE:
 readonly local_reverse_attempt_image="${MARKWEAVE_E2E_LOCAL_REVERSE_ATTEMPT_IMAGE:-}"
 readonly local_image="${MARKWEAVE_E2E_LOCAL_IMAGE:-}"
 readonly local_frontend_image="${MARKWEAVE_E2E_LOCAL_FRONTEND_IMAGE:-}"
+readonly browser_runner_smoke_only="${MARKWEAVE_E2E_BROWSER_RUNNER_SMOKE_ONLY:-0}"
+readonly composer_scenario_only="${MARKWEAVE_E2E_COMPOSER_SCENARIO_ONLY:-0}"
+if [[ "$browser_runner_smoke_only" != 0 && "$browser_runner_smoke_only" != 1 ]]; then
+  echo "MARKWEAVE_E2E_BROWSER_RUNNER_SMOKE_ONLY must be 0 or 1." >&2
+  exit 2
+fi
+if [[ "$composer_scenario_only" != 0 && "$composer_scenario_only" != 1 ]]; then
+  echo "MARKWEAVE_E2E_COMPOSER_SCENARIO_ONLY must be 0 or 1." >&2
+  exit 2
+fi
+if [[ "$browser_runner_smoke_only" == 1 && "$composer_scenario_only" == 1 ]]; then
+  echo "Browser runner smoke and Composer scenario modes are mutually exclusive." >&2
+  exit 2
+fi
 if [[ -n "$published_image" ]] &&
   [[ ! "$published_image" =~ ^ghcr\.io/guillaume-lombardo/md-converter:[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]]; then
   echo "MARKWEAVE_E2E_IMAGE must be an immutable version-and-digest Markweave image." >&2
@@ -85,6 +99,7 @@ readonly expiry_application_name="$prefix-expiry-api"
 readonly insecure_application_name="$prefix-insecure-api"
 readonly frontend_name="$prefix-frontend"
 readonly router_name="$prefix-router"
+readonly browser_runner_name="$prefix-browser-runner"
 readonly frontend_image="${published_frontend_image:-${local_frontend_image:-localhost/markweave-web:t64-$profile}}"
 readonly reverse_attempt_image="${published_reverse_attempt_image:-${local_reverse_attempt_image:-localhost/md-converter-reverse-attempt:t73-$profile}}"
 readonly clamav_name="$prefix-clamav"
@@ -118,6 +133,7 @@ node_runtime_directory="$temporary_directory/node_modules"
 browser_session_directory="$temporary_directory/browser-session"
 provisioning_file="$temporary_directory/users.csv"
 composer_provider_directory="$temporary_directory/composer-provider"
+composer_corpus_directory="$temporary_directory/composer-corpus"
 composer_key_file="$temporary_directory/composer-key"
 provisioned_username="e2e-provisioned-$profile"
 provisioned_initial_password="Provisioned-$profile-initial"
@@ -129,6 +145,8 @@ reverse_pause_pid=""
 reverse_diagnostics_pid=""
 created=()
 succeeded=false
+browser_smoke_succeeded=false
+composer_scenario_succeeded=false
 
 # shellcheck source=scripts/e2e/runtime-settings.sh
 source "$repository/scripts/e2e/runtime-settings.sh"
@@ -272,6 +290,7 @@ cleanup() {
       wait "$resource" || true
     fi
   done
+  podman rm --force "$browser_runner_name" >/dev/null 2>&1 || true
   # The router joins the backend container's network namespace. Podman does
   # not guarantee dependency order within a multi-container removal request,
   # so detach that child before iterating over its possible parent entries.
@@ -298,7 +317,8 @@ cleanup() {
       broker_cleanup_proven=false
     fi
   fi
-  if [[ "$succeeded" == true ]]; then
+  if [[ "$succeeded" == true && "$browser_smoke_succeeded" != true && \
+    "$composer_scenario_succeeded" != true ]]; then
     if ! remove_artifacts; then
       exit_code=1
     fi
@@ -325,7 +345,7 @@ refuse_existing_resources() {
     "$composer_provider_name" \
     "$postgres_name" "$rustfs_name" \
     "$expiry_application_name" "$insecure_application_name" "$worker_one_name" \
-    "$worker_two_name" "$frontend_name" "$router_name"; do
+    "$worker_two_name" "$frontend_name" "$router_name" "$browser_runner_name"; do
     if podman container exists "$name"; then
       echo "Refusing to replace pre-existing container $name." >&2
       exit 1
@@ -435,6 +455,149 @@ hardened_runtime=(
   --tmpfs /work:rw,nosuid,nodev,size=256m,mode=0770
   --shm-size=128m
 )
+
+reserve_browser_cgroup_receipt() {
+  local test_stem="$1"
+  local index=1
+  local receipt_directory="$temporary_directory/browser-artifacts"
+  local reservation receipt
+  while ((index <= 100)); do
+    printf -v reservation '%s/.%s-cgroup-%03d.reserved' \
+      "$receipt_directory" "$test_stem" "$index"
+    printf -v receipt '/browser-artifacts/%s-cgroup-%03d.txt' \
+      "$test_stem" "$index"
+    if [[ -e "$receipt_directory/${receipt##*/}" ]]; then
+      ((index += 1))
+      continue
+    fi
+    if mkdir -m 0700 -- "$reservation" 2>/dev/null; then
+      printf '%s\n' "$receipt"
+      return 0
+    fi
+    if [[ ! -e "$reservation" ]]; then
+      echo "Could not reserve a browser cgroup receipt." >&2
+      return 1
+    fi
+    ((index += 1))
+  done
+  echo "Browser cgroup receipt sequence exhausted." >&2
+  return 1
+}
+
+run_browser_test() {
+  local backend_container="$1"
+  local test_file="$2"
+  local test_stem="${test_file##*/}"
+  local app_memory_limit app_cgroup_limit receipt_path
+  local -a browser_credentials=()
+  shift 2
+  [[ "$test_file" =~ ^/e2e/browser-[a-z0-9-]+\.test\.mjs$ || \
+    "$test_file" == /e2e/browser-runner-smoke.mjs ]] || {
+    echo "Refusing an unexpected browser test path." >&2
+    return 1
+  }
+  if [[ "$test_file" == /e2e/browser-next-composer-real.test.mjs ]]; then
+    browser_credentials=(
+      --volume "$composer_provider_directory/server.crt:/run/composer-e2e-ca.crt:ro,z"
+      --volume "$composer_provider_directory/client.crt:/run/composer-e2e-client.crt:ro,z"
+      --volume "$composer_provider_directory/client.key:/run/composer-e2e-client.key:ro,z"
+      --volume "$composer_corpus_directory:/spikes/anydoc/corpus:ro,z"
+    )
+  elif [[ "$test_file" == /e2e/browser-next-composer-resilience.test.mjs ]]; then
+    browser_credentials=(
+      --volume "$composer_provider_directory/server.crt:/run/composer-e2e-ca.crt:ro,z"
+    )
+  fi
+  test_stem="${test_stem%.mjs}"
+  test_stem="${test_stem%.test}"
+  if ! receipt_path="$(reserve_browser_cgroup_receipt "$test_stem")"; then
+    return 1
+  fi
+  app_memory_limit="$(podman inspect "$backend_container" --format '{{.HostConfig.Memory}}')"
+  if [[ "$app_memory_limit" != 805306368 ]]; then
+    echo "The application container did not retain its 768 MiB memory limit." >&2
+    return 1
+  fi
+  app_cgroup_limit="$(podman exec "$backend_container" cat /sys/fs/cgroup/memory.max)"
+  if [[ "$app_cgroup_limit" != "$app_memory_limit" ]]; then
+    echo "The application memory cgroup differs from its configured limit." >&2
+    return 1
+  fi
+  printf 'Browser runner for %s: application memory.max=%s, runner memory.max=2147483648.\n' \
+    "$test_stem" "$app_memory_limit"
+  # Override the image entrypoint so this container can only run the selected
+  # browser test, never an application or worker process.
+  if e2e_run_in_harness_directory \
+    "$temporary_directory" "$temporary_directory_identity" \
+    timeout --signal=TERM --kill-after=15s 25m \
+    podman run --rm --name "$browser_runner_name" \
+    --network "container:$backend_container" --user "$runtime_uid:0" \
+    --read-only --cap-drop=all --security-opt=no-new-privileges \
+    --security-opt="seccomp=$seccomp_profile" \
+    --memory=2g --cpus=2 --pids-limit=512 --shm-size=256m \
+    --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777 \
+    --tmpfs /work:rw,nosuid,nodev,size=256m,mode=0770 \
+    --volume "$browser_runtime_directory:/e2e:ro,z" \
+    --volume "$node_runtime_directory:/node_modules:ro,z" \
+    --volume "$evidence_directory:/evidence:rw,z" \
+    --volume "$temporary_directory/browser-artifacts:/browser-artifacts:rw,z" \
+    --volume "$browser_session_directory:/browser-session:rw,z" \
+    "${browser_credentials[@]}" \
+    --env "MARKWEAVE_E2E_APP_MEMORY_LIMIT=$app_cgroup_limit" \
+    "$@" --entrypoint /bin/sh "$image" -c '
+      evidence="$1"
+      test_file="$2"
+      # The image entrypoint normally prepares these private browser paths.
+      # This driver deliberately skips that entrypoint, so prepare them here.
+      umask 0077
+      if [ "$HOME" != /work/home ] || [ "$TMPDIR" != /work/tmp ] || \
+        [ "$XDG_CACHE_HOME" != /work/xdg/cache ] || \
+        [ "$XDG_CONFIG_HOME" != /work/xdg/config ] || \
+        [ "$XDG_DATA_HOME" != /work/xdg/data ] || \
+        [ "$XDG_RUNTIME_DIR" != /work/xdg/runtime ]; then
+        echo "Browser runner environment directories differ from the image contract." >&2
+        exit 1
+      fi
+      for directory in "$HOME" "$TMPDIR" "$XDG_CACHE_HOME" \
+        "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_RUNTIME_DIR"; do
+        if ! mkdir -p -- "$directory" || ! chmod 0700 -- "$directory"; then
+          echo "Could not prepare a private browser runtime directory." >&2
+          exit 1
+        fi
+      done
+      memory_limit="$(cat /sys/fs/cgroup/memory.max)"
+      if ! printf "application_memory_max=%s\nrunner_memory_max=%s\n" \
+        "$MARKWEAVE_E2E_APP_MEMORY_LIMIT" "$memory_limit" > "$evidence"; then
+        echo "Could not write the browser runner cgroup limit receipt." >&2
+        exit 1
+      fi
+      if [ "$memory_limit" != 2147483648 ]; then
+        echo "Browser runner memory cgroup does not match 2 GiB." >&2
+        exit 1
+      fi
+      node --test "$test_file"
+      result=$?
+      receipt_failed=0
+      if peak="$(cat /sys/fs/cgroup/memory.peak)"; then
+        printf "runner_memory_peak=%s\n" "$peak" >> "$evidence" || receipt_failed=1
+      else
+        receipt_failed=1
+      fi
+      cat /sys/fs/cgroup/memory.events >> "$evidence" || receipt_failed=1
+      if [ "$receipt_failed" -ne 0 ]; then
+        echo "Browser runner cgroup peak/events receipt is incomplete (browser status $result)." >&2
+        if [ "$result" -eq 0 ]; then exit 1; fi
+      fi
+      exit "$result"
+    ' browser-runner "$receipt_path" "$test_file"; then
+    return 0
+  else
+    local runner_exit=$?
+    podman rm --force "$browser_runner_name" >/dev/null 2>&1 || true
+    echo "Browser runner $test_stem exited with status $runner_exit." >&2
+    return "$runner_exit"
+  fi
+}
 
 start_production_router() {
   local backend_container="$1"
@@ -633,12 +796,11 @@ prove_composer_key_loss_continuity() {
   wait_for_url "http://127.0.0.1:$(podman port "$application_name" 8080/tcp | sed 's/.*://')/health/ready" \
     "$application_name" '"status":"ready"'
   start_production_router "$application_name"
-  podman exec \
+  run_browser_test "$application_name" /e2e/browser-next-composer-resilience.test.mjs \
     --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
     --env MARKWEAVE_E2E_PROFILE="$profile" \
     --env MARKWEAVE_E2E_COMPOSER_PHASE=key-unavailable \
-    --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json" \
-    "$application_name" node --test /e2e/browser-next-composer-resilience.test.mjs
+    --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json"
   podman rm --force "$router_name" >/dev/null
   podman stop --time 15 "$application_name" >/dev/null
   if [[ "$profile" == distributed ]]; then
@@ -656,12 +818,11 @@ prove_composer_key_loss_continuity() {
   wait_for_url "http://127.0.0.1:$(podman port "$application_name" 8080/tcp | sed 's/.*://')/health/ready" \
     "$application_name" '"status":"ready"'
   start_production_router "$application_name"
-  podman exec \
+  run_browser_test "$application_name" /e2e/browser-next-composer-resilience.test.mjs \
     --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
     --env MARKWEAVE_E2E_PROFILE="$profile" \
     --env MARKWEAVE_E2E_COMPOSER_PHASE=key-restored \
-    --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json" \
-    "$application_name" node --test /e2e/browser-next-composer-resilience.test.mjs
+    --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json"
 }
 
 kill_backend_and_reconnect_router() {
@@ -831,6 +992,12 @@ podman unshare chown "$runtime_uid:0" \
   "$composer_provider_directory/server.key" \
   "$composer_provider_directory/client.key" "$composer_key_file"
 cp -a "$repository/tests/e2e" "$browser_runtime_directory"
+for corpus_file in docx/text.docx pdf/text.pdf; do
+  install -D -m 0444 -- "$repository/spikes/anydoc/corpus/$corpus_file" \
+    "$composer_corpus_directory/$corpus_file"
+  test "$(sha256sum "$repository/spikes/anydoc/corpus/$corpus_file" | cut -d ' ' -f 1)" = \
+    "$(sha256sum "$composer_corpus_directory/$corpus_file" | cut -d ' ' -f 1)"
+done
 COREPACK_ENABLE_NETWORK=0 pnpm install --frozen-lockfile --ignore-scripts --filter md-converter-web-tests
 cp -a "$repository/node_modules" "$node_runtime_directory"
 chmod -R a+rX "$browser_runtime_directory" "$node_runtime_directory"
@@ -943,8 +1110,8 @@ e2e_run_in_harness_directory \
   --network-alias e2e-llm --user "$runtime_uid:0" --read-only \
   --cap-drop=all --security-opt=no-new-privileges --pids-limit=64 \
   --memory=128m --cpus=0.5 \
-  --volume "$browser_runtime_directory:/e2e:ro,Z" \
-  --volume "$composer_provider_directory:/provider:ro,Z" \
+  --volume "$browser_runtime_directory:/e2e:ro,z" \
+  --volume "$composer_provider_directory:/provider:ro,z" \
   --entrypoint /opt/md-converter/venv/bin/python \
   "$image" /e2e/composer_https_provider.py >/dev/null
 composer_provider_ready=false
@@ -1047,17 +1214,19 @@ else
   )
 fi
 
+# Browser-only fixture and receipt directories are shared with the separate
+# browser driver. Keep application data and credential mounts private below.
 application_volumes=(
-  --volume "$browser_runtime_directory:/e2e:ro,Z"
-  --volume "$node_runtime_directory:/node_modules:ro,Z"
-  --volume "$evidence_directory:/evidence:rw,Z"
-  --volume "$temporary_directory/browser-artifacts:/browser-artifacts:rw,Z"
-  --volume "$browser_session_directory:/browser-session:rw,Z"
+  --volume "$browser_runtime_directory:/e2e:ro,z"
+  --volume "$node_runtime_directory:/node_modules:ro,z"
+  --volume "$evidence_directory:/evidence:rw,z"
+  --volume "$temporary_directory/browser-artifacts:/browser-artifacts:rw,z"
+  --volume "$browser_session_directory:/browser-session:rw,z"
   --volume "$provisioning_file:/run/secrets/users.csv:ro,Z"
   --volume "$composer_key_file:/run/secrets/composer-key:ro,Z"
-  --volume "$composer_provider_directory/server.crt:/run/composer-e2e-ca.crt:ro,Z"
-  --volume "$composer_provider_directory/client.crt:/run/composer-e2e-client.crt:ro,Z"
-  --volume "$composer_provider_directory/client.key:/run/composer-e2e-client.key:ro,Z"
+  --volume "$composer_provider_directory/server.crt:/run/composer-e2e-ca.crt:ro,z"
+  --volume "$composer_provider_directory/client.crt:/run/composer-e2e-client.crt:ro,z"
+  --volume "$composer_provider_directory/client.key:/run/composer-e2e-client.key:ro,z"
 )
 if [[ "$profile" == standalone ]]; then
   application_volumes+=(--volume "$data_directory:/data:rw,Z" "${reverse_worker_runtime[@]}")
@@ -1127,6 +1296,89 @@ fi
 application_port="$(podman port "$application_name" 8080/tcp | sed 's/.*://')"
 base_url="http://127.0.0.1:$application_port"
 wait_for_url "$base_url/health/ready" "$application_name" '"status":"ready"'
+if [[ "$browser_runner_smoke_only" == 1 ]]; then
+  # This opt-in probe starts only the exact frontend/router pair and browser
+  # driver, then exits before service workflows and checkpoint mutations.
+  created=("$router_name" "$frontend_name" "${created[@]}")
+  start_frontend
+  start_production_router "$application_name"
+  run_browser_test "$application_name" /e2e/browser-runner-smoke.mjs \
+    --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100
+  podman unshare chown -R 0:0 -- "$temporary_directory/browser-artifacts"
+  test -s "$temporary_directory/browser-artifacts/browser-runner-smoke.png"
+  test -s "$temporary_directory/browser-artifacts/browser-runner-smoke-cgroup-001.txt"
+  mkdir -p -- "$artifact_directory"
+  cp -a -- "$temporary_directory/browser-artifacts/browser-runner-smoke.png" \
+    "$temporary_directory/browser-artifacts/browser-runner-smoke-cgroup-001.txt" \
+    "$artifact_directory/"
+  printf 'profile=%s\nresult=browser-runner-smoke-passed\n' "$profile" \
+    >"$artifact_directory/summary.txt"
+  browser_smoke_succeeded=true
+  succeeded=true
+  echo "Final-image $profile browser runner smoke passed; evidence: $artifact_directory."
+  exit 0
+fi
+if [[ "$composer_scenario_only" == 1 ]]; then
+  # Match the canonical browser phase's public origin without replaying its
+  # preceding service workflows or discarding the initialized data volume.
+  bash "$repository/scripts/container/wait-for-fake-clamav.sh" \
+    "$clamav_name" "$profile-mapped" "$application_name" e2e-clamav
+  podman rm --force "$application_name" >/dev/null
+  created=("$router_name" "$frontend_name" "${created[@]}")
+  start_frontend
+  e2e_run_in_harness_directory \
+    "$temporary_directory" "$temporary_directory_identity" \
+    podman run --detach --name "$application_name" --network "$network_name" \
+    --network-alias application --publish 127.0.0.1::8080 \
+    "${scanner_host_mapping[@]}" \
+    "${hardened_runtime[@]}" "${application_volumes[@]}" "${application_settings[@]}" \
+    --env MARKWEAVE_PUBLIC_ORIGIN=http://localhost:3100 \
+    "$image" "$application_mode" >/dev/null
+  wait_for_url "http://127.0.0.1:$(podman port "$application_name" 8080/tcp | sed 's/.*://')/health/ready" \
+    "$application_name" '"status":"ready"'
+  start_production_router "$application_name"
+  run_browser_test "$application_name" /e2e/browser-next-composer-connections.test.mjs \
+    --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
+    --env MARKWEAVE_E2E_PROFILE="$profile"
+  run_browser_test "$application_name" /e2e/browser-next-composer-real.test.mjs \
+    --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
+    --env MARKWEAVE_E2E_PROFILE="$profile" \
+    --env "MARKWEAVE_E2E_COMPOSER_PROVIDER_ADDRESS=$composer_provider_address" \
+    --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json"
+  run_browser_test "$application_name" /e2e/browser-next-composer-pairing.test.mjs \
+    --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
+    --env MARKWEAVE_E2E_PROFILE="$profile" \
+    --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json"
+  if podman logs "$application_name" 2>&1 | grep -Fq 'composer-e2e-write-only-secret'; then
+    echo "Composer credential appeared in application logs." >&2
+    exit 1
+  fi
+  if podman logs "$composer_provider_name" 2>&1 | grep -Fq 'composer-e2e-write-only-secret'; then
+    echo "Composer credential appeared in provider logs." >&2
+    exit 1
+  fi
+  podman unshare chown -R 0:0 -- "$temporary_directory/browser-artifacts"
+  test -s "$temporary_directory/browser-artifacts/browser-next-composer-real-cgroup-001.txt"
+  test -s "$temporary_directory/browser-artifacts/browser-next-composer-connections-cgroup-001.txt"
+  test -s "$temporary_directory/browser-artifacts/browser-next-composer-pairing-cgroup-001.txt"
+  test -s "$browser_session_directory/composer-$profile.json"
+  podman unshare chown -R 0:0 -- "$browser_session_directory"
+  mkdir -p -- "$artifact_directory"
+  cp -a -- "$temporary_directory/browser-artifacts/." "$artifact_directory/"
+  cp -a -- "$browser_session_directory/composer-$profile.json" "$artifact_directory/"
+  for resource in "$application_name" "$frontend_name" "$router_name" "$composer_provider_name"; do
+    podman logs "$resource" >"$artifact_directory/$resource.log" 2>&1
+    podman inspect "$resource" \
+      --format 'name={{.Name}} state={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' \
+      >"$artifact_directory/$resource.state"
+  done
+  printf 'profile=%s\nresult=composer-scenario-passed\n' "$profile" \
+    >"$artifact_directory/summary.txt"
+  composer_scenario_succeeded=true
+  succeeded=true
+  echo "Final-image $profile Composer scenario passed; evidence: $artifact_directory."
+  exit 0
+fi
 bash "$repository/scripts/container/wait-for-fake-clamav.sh" \
   "$clamav_name" "$profile-mapped" "$application_name" e2e-clamav
 podman exec "$application_name" python \
@@ -1403,42 +1655,40 @@ e2e_run_in_harness_directory \
 wait_for_url "http://127.0.0.1:$(podman port "$application_name" 8080/tcp | sed 's/.*://')/health/ready" \
   "$application_name" '"status":"ready"'
 start_production_router "$application_name"
-podman exec \
+run_browser_test "$application_name" /e2e/browser-provisioning-restart.test.mjs \
   --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
   --env MARKWEAVE_E2E_PROVISIONED_USERNAME="$provisioned_username" \
   --env MARKWEAVE_E2E_PROVISIONED_OLD_PASSWORD="$provisioned_renewed_password" \
-  --env MARKWEAVE_E2E_PROVISIONED_PASSWORD="$provisioned_replacement_password" \
-  "$application_name" node --test /e2e/browser-provisioning-restart.test.mjs
-podman exec \
+  --env MARKWEAVE_E2E_PROVISIONED_PASSWORD="$provisioned_replacement_password"
+run_browser_test "$application_name" /e2e/browser-recovery-checkpoint.test.mjs \
   --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
   --env MARKWEAVE_E2E_RECOVERY_STATE=/browser-session/admin.json \
   --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts \
   --env MARKWEAVE_E2E_ADMIN_USERNAME=e2e-admin \
-  --env MARKWEAVE_E2E_ADMIN_PASSWORD=e2e-admin-password \
-  "$application_name" node --test /e2e/browser-recovery-checkpoint.test.mjs
+  --env MARKWEAVE_E2E_ADMIN_PASSWORD=e2e-admin-password
 kill_backend_and_reconnect_router "$application_name"
-podman exec \
+run_browser_test "$application_name" /e2e/browser-recovery.test.mjs \
   --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
   --env MARKWEAVE_E2E_RECOVERY_STATE=/browser-session/admin.json \
-  --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts \
-  "$application_name" node --test /e2e/browser-recovery.test.mjs
-podman exec \
+  --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts
+run_browser_test "$application_name" /e2e/browser-next-auth.test.mjs \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
-  --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts \
-  "$application_name" node --test /e2e/browser-next-auth.test.mjs
-podman exec \
+  --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts
+run_browser_test "$application_name" /e2e/browser-next-composer-connections.test.mjs \
   --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
-  --env MARKWEAVE_E2E_PROFILE="$profile" \
-  "$application_name" node --test /e2e/browser-next-composer-connections.test.mjs
-podman exec \
+  --env MARKWEAVE_E2E_PROFILE="$profile"
+run_browser_test "$application_name" /e2e/browser-next-composer-real.test.mjs \
   --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
   --env "MARKWEAVE_E2E_COMPOSER_PROVIDER_ADDRESS=$composer_provider_address" \
-  --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json" \
-  "$application_name" node --test /e2e/browser-next-composer-real.test.mjs
+  --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json"
+run_browser_test "$application_name" /e2e/browser-next-composer-pairing.test.mjs \
+  --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json"
 if podman logs "$application_name" 2>&1 | \
   grep -Fq 'composer-e2e-write-only-secret'; then
   echo "Composer credential appeared in application logs." >&2
@@ -1451,19 +1701,18 @@ if podman logs "$composer_provider_name" 2>&1 | \
 fi
 provider_events="$(podman logs "$composer_provider_name")"
 if [[ "$(grep -Fc '"operation": "chat", "status": 503' <<<"$provider_events")" -ne 2 || \
-  "$(grep -Fc '"operation": "chat", "status": 200' <<<"$provider_events")" -ne 7 || \
+  "$(grep -Fc '"operation": "chat", "status": 200' <<<"$provider_events")" -ne 10 || \
   "$(grep -Fc '"operation": "authorization", "status": 401' <<<"$provider_events")" -ne 2 ]]; then
   echo "Composer HTTPS provider did not observe the expected outage and retry calls." >&2
   exit 1
 fi
 podman stop --time 5 "$clamav_name" >/dev/null
 probe_scanner_outage_routes
-if ! podman exec \
+if ! run_browser_test "$application_name" /e2e/browser-next-composer-resilience.test.mjs \
   --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
   --env MARKWEAVE_E2E_COMPOSER_PHASE=scanner-unavailable \
-  --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json" \
-  "$application_name" node --test /e2e/browser-next-composer-resilience.test.mjs; then
+  --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json"; then
   probe_scanner_outage_routes || true
   exit 1
 fi
@@ -1479,15 +1728,14 @@ bash "$repository/scripts/container/wait-for-fake-clamav.sh" \
 wait_for_url "http://127.0.0.1:$(podman port "$application_name" 8080/tcp | sed 's/.*://')/health/ready" \
   "$application_name" '"status":"ready"'
 restore_composer_snapshot
-podman exec \
+run_browser_test "$application_name" /e2e/browser-next-composer-resilience.test.mjs \
   --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
   --env MARKWEAVE_E2E_COMPOSER_PHASE=restored-backup \
-  --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json" \
-  "$application_name" node --test /e2e/browser-next-composer-resilience.test.mjs
+  --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json"
 prove_composer_key_loss_continuity
 provider_events="$(podman logs "$composer_provider_name")"
-if [[ "$(grep -Fc '"operation": "chat", "status": 200' <<<"$provider_events")" -ne 12 ]]; then
+if [[ "$(grep -Fc '"operation": "chat", "status": 200' <<<"$provider_events")" -ne 15 ]]; then
   echo "Restored Composer calls, cancelled step, replacement step, and occupying connection test did not reach the provider." >&2
   exit 1
 fi
@@ -1496,27 +1744,26 @@ if podman logs "$application_name" 2>&1 | \
   echo "Restored Composer credential appeared in application logs." >&2
   exit 1
 fi
-podman exec \
+run_browser_test "$application_name" /e2e/browser-next-conversion.test.mjs \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
   --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts \
-  --env MARKWEAVE_E2E_CONVERSION_STATE=/browser-session/next-conversion.json \
-  "$application_name" node --test /e2e/browser-next-conversion.test.mjs
-podman exec \
+  --env MARKWEAVE_E2E_CONVERSION_STATE=/browser-session/next-conversion.json
+run_browser_test "$application_name" /e2e/browser-next-conversion-failure.test.mjs \
+  --env MARKWEAVE_E2E_PROFILE="$profile"
+run_browser_test "$application_name" /e2e/browser-next-reversion.test.mjs \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
-  "$application_name" node --test /e2e/browser-next-conversion-failure.test.mjs
-podman exec \
-  --env MARKWEAVE_E2E_PROFILE="$profile" \
-  --env MARKWEAVE_E2E_REVERSE_PHASE=primary \
-  "$application_name" node --test /e2e/browser-next-reversion.test.mjs
+  --env MARKWEAVE_E2E_REVERSE_PHASE=primary
 uv run python -m tests.e2e.reverse_cli_workflow \
   --container "$application_name" --profile "$profile" --phase structured-pptx
-podman exec \
+podman cp "$application_name:/tmp/markweave-t83-edited.pptx" \
+  "$evidence_directory/markweave-t83-edited.pptx"
+chmod a+r "$evidence_directory/markweave-t83-edited.pptx"
+run_browser_test "$application_name" /e2e/browser-next-reversion.test.mjs \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
   --env MARKWEAVE_E2E_REVERSE_PHASE=structured \
-  --env MARKWEAVE_E2E_STRUCTURED_PPTX_SOURCE=/tmp/markweave-t83-edited.pptx \
-  "$application_name" node --test /e2e/browser-next-reversion.test.mjs
-podman exec "$application_name" node --test /e2e/browser-next-presentations.test.mjs
-podman exec "$application_name" node --test /e2e/browser-workspace-ui.test.mjs
+  --env MARKWEAVE_E2E_STRUCTURED_PPTX_SOURCE=/evidence/markweave-t83-edited.pptx
+run_browser_test "$application_name" /e2e/browser-next-presentations.test.mjs
+run_browser_test "$application_name" /e2e/browser-workspace-ui.test.mjs
 
 uv run python -m tests.e2e.reverse_cli_workflow \
   --container "$application_name" --profile "$profile" --phase expiry
@@ -1553,22 +1800,19 @@ if [[ "$profile" == standalone ]]; then
   wait_for_embedded_worker_idle "$application_name"
 fi
 start_production_router "$application_name"
-podman exec \
+run_browser_test "$application_name" /e2e/browser-next-composer-resilience.test.mjs \
   --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
   --env MARKWEAVE_E2E_COMPOSER_PHASE=restart \
-  --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json" \
-  "$application_name" node --test /e2e/browser-next-composer-resilience.test.mjs
-podman exec \
-  --env MARKWEAVE_E2E_PROFILE="$profile" \
-  "$application_name" node --test /e2e/browser-next-conversion-admission.test.mjs
+  --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json"
+run_browser_test "$application_name" /e2e/browser-next-conversion-admission.test.mjs \
+  --env MARKWEAVE_E2E_PROFILE="$profile"
 
 uv run python -m tests.e2e.conversion_cli_workflow \
   --container "$application_name" --profile "$profile" --reverse-held-queue --reverse-upload-max-bytes 1024
-podman exec \
+run_browser_test "$application_name" /e2e/browser-next-reversion.test.mjs \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
-  --env MARKWEAVE_E2E_REVERSE_PHASE=admission \
-  "$application_name" node --test /e2e/browser-next-reversion.test.mjs
+  --env MARKWEAVE_E2E_REVERSE_PHASE=admission
 
 # Restore the ordinary profile runtime before restart and expiry recovery.
 podman rm --force "$router_name" >/dev/null
@@ -1588,51 +1832,43 @@ fi
 wait_for_url "http://127.0.0.1:$(podman port "$application_name" 8080/tcp | sed 's/.*://')/health/ready" \
   "$application_name" '"status":"ready"'
 start_production_router "$application_name"
-podman exec \
+run_browser_test "$application_name" /e2e/browser-next-conversion-restart-prepare.test.mjs \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
-  --env MARKWEAVE_E2E_CONVERSION_STATE=/browser-session/next-conversion.json \
-  "$application_name" node --test \
-  /e2e/browser-next-conversion-restart-prepare.test.mjs
+  --env MARKWEAVE_E2E_CONVERSION_STATE=/browser-session/next-conversion.json
 restart_backend_and_router "$application_name"
 podman exec "$application_name" node -e \
   'fetch("http://localhost:3100/api/v1/session").then(r => process.exit(r.status === 401 ? 0 : 1))'
-podman exec \
+run_browser_test "$application_name" /e2e/browser-next-conversion-restart.test.mjs \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
-  --env MARKWEAVE_E2E_CONVERSION_STATE=/browser-session/next-conversion.json \
-  "$application_name" node --test /e2e/browser-next-conversion-restart.test.mjs
+  --env MARKWEAVE_E2E_CONVERSION_STATE=/browser-session/next-conversion.json
 
 # Keep the T62 durable-result checkpoint inside its deliberate 60-second
 # retention window. The longer administration journey runs only after restart
 # recovery has proved the original result remains authoritative.
-podman exec \
-  "$application_name" node --test /e2e/browser-next-admin-cookie.test.mjs
-podman exec \
+run_browser_test "$application_name" /e2e/browser-next-admin-cookie.test.mjs
+run_browser_test "$application_name" /e2e/browser-next-admin.test.mjs \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
   --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts \
   --env MARKWEAVE_E2E_CHECKPOINT_USER_IDLE_MINUTES="$checkpoint_user_idle_minutes" \
   --env MARKWEAVE_E2E_CHECKPOINT_ADMIN_IDLE_MINUTES="$checkpoint_admin_idle_minutes" \
-  --env MARKWEAVE_E2E_CHECKPOINT_POLICY_REVISION="$checkpoint_policy_revision" \
-  "$application_name" node --test /e2e/browser-next-admin.test.mjs
+  --env MARKWEAVE_E2E_CHECKPOINT_POLICY_REVISION="$checkpoint_policy_revision"
 
 # Prove asymmetric runtime failures and the custom-server admission boundary
 # through the production router against the exact final images.
 run_reverse_lifecycle broker-restart true
-e2e_podman exec \
-  --env MARKWEAVE_E2E_RUNTIME_FAILURE=frontend-outage \
-  "$application_name" node --test /e2e/browser-next-runtime-failures.test.mjs
+run_browser_test "$application_name" /e2e/browser-next-runtime-failures.test.mjs \
+  --env MARKWEAVE_E2E_RUNTIME_FAILURE=frontend-outage
 start_frontend
 start_production_router "$application_name"
-podman exec \
+run_browser_test "$application_name" /e2e/browser-next-reversion.test.mjs \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
   --env MARKWEAVE_E2E_REVERSE_PHASE=recovered \
   --env MARKWEAVE_E2E_REVERSE_RECOVERY_STATE=/browser-session/reverse-broker-restart.json \
-  --env MARKWEAVE_E2E_REVERSE_RESULT_RECEIPT=/browser-session/reverse-broker-restart-result.json \
-  "$application_name" node --test /e2e/browser-next-reversion.test.mjs
+  --env MARKWEAVE_E2E_REVERSE_RESULT_RECEIPT=/browser-session/reverse-broker-restart-result.json
 start_production_router "$application_name" http://127.0.0.1:1 \
   "$(admission_frontend_origin)" 502
-e2e_podman exec \
-  --env MARKWEAVE_E2E_RUNTIME_FAILURE=backend-outage \
-  "$application_name" node --test /e2e/browser-next-runtime-failures.test.mjs
+run_browser_test "$application_name" /e2e/browser-next-runtime-failures.test.mjs \
+  --env MARKWEAVE_E2E_RUNTIME_FAILURE=backend-outage
 
 e2e_podman rm --force "$router_name" >/dev/null
 e2e_podman rm --force "$frontend_name" >/dev/null
@@ -1643,8 +1879,8 @@ e2e_run_in_harness_directory \
   --network-alias frontend --user "$runtime_uid:0" --read-only --cap-drop=all \
   --security-opt=no-new-privileges --pids-limit=64 --memory=256m --cpus=0.5 \
   --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m \
-  --volume "$browser_runtime_directory:/e2e:ro,Z" \
-  --volume "$evidence_directory:/evidence:rw,Z" \
+  --volume "$browser_runtime_directory:/e2e:ro,z" \
+  --volume "$evidence_directory:/evidence:rw,z" \
   "$frontend_image" node /e2e/frontend-admission-fixture.mjs >/dev/null
 for _ in $(seq 1 120); do
   [[ -f "$evidence_directory/frontend-admission-ready" ]] && break
@@ -1662,9 +1898,8 @@ fi
 admission_origin="$(admission_frontend_origin)"
 start_production_router "$application_name" http://127.0.0.1:8080 \
   "$admission_origin" 401 false
-e2e_podman exec \
-  --env MARKWEAVE_E2E_RUNTIME_FAILURE=admission \
-  "$application_name" node --test /e2e/browser-next-runtime-failures.test.mjs &
+run_browser_test "$application_name" /e2e/browser-next-runtime-failures.test.mjs \
+  --env MARKWEAVE_E2E_RUNTIME_FAILURE=admission &
 admission_test_pid=$!
 # The browser test owns a 25-second pre-admission deadline. Give it five more
 # seconds to publish the drain request or exit through its cleanup path.
@@ -1704,12 +1939,10 @@ uv run python -m tests.e2e.service_workflow verify-session-expiration \
   --base-url "$expiry_base_url" --profile "$profile" \
   --artifact-dir "$temporary_directory/browser-artifacts"
 start_production_router "$expiry_application_name"
-podman exec \
-  --env MARKWEAVE_E2E_PROFILE="$profile" \
-  "$expiry_application_name" node --test /e2e/browser-next-auth-expiry.test.mjs
-podman exec \
-  --env MARKWEAVE_E2E_PROFILE="$profile" \
-  "$expiry_application_name" node --test /e2e/browser-next-conversion-expiry.test.mjs
+run_browser_test "$expiry_application_name" /e2e/browser-next-auth-expiry.test.mjs \
+  --env MARKWEAVE_E2E_PROFILE="$profile"
+run_browser_test "$expiry_application_name" /e2e/browser-next-conversion-expiry.test.mjs \
+  --env MARKWEAVE_E2E_PROFILE="$profile"
 
 # Prove the final image's explicit insecure exception without a scanner. The
 # published port remains loopback-only even though login origins are ignored.

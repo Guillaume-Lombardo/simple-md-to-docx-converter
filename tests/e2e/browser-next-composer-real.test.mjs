@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import https from "node:https";
 import test from "node:test";
@@ -85,6 +86,63 @@ async function api(page, method, path, options = {}) {
 function exactStatus(result, status) {
   assert.equal(result.status, status, result.text);
   return result.json;
+}
+
+async function waitForGeneratedRevision(page, draftPath, previousId, output) {
+  const mediaType = {
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    pdf: "application/pdf",
+    pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  }[output];
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    const current = exactStatus(await api(page, "GET", draftPath), 200);
+    if (
+      current.current_revision_id &&
+      current.current_revision_id !== previousId
+    ) {
+      const candidate = exactStatus(
+        await api(
+          page,
+          "GET",
+          `${draftPath}/revisions/${current.current_revision_id}`,
+        ),
+        200,
+      );
+      if (
+        candidate.operation.startsWith("generate:") &&
+        candidate.artifacts.some(
+          (artifact) =>
+            artifact.kind === "download" && artifact.media_type === mediaType,
+        )
+      )
+        return candidate;
+    }
+    await delay(1500);
+  }
+  assert.fail(
+    `${output.toUpperCase()} generation did not publish a matching revision`,
+  );
+}
+
+async function assertMatchingRevisionArtifacts(page, draftPath, revision) {
+  const path = `${draftPath}/revisions/${revision.id}/artifacts`;
+  const [preview, download] = await Promise.all([
+    page.request.get(`${path}/preview`),
+    page.request.get(`${path}/download`),
+  ]);
+  assert.equal(preview.status(), 200);
+  assert.equal(download.status(), 200);
+  const [previewBytes, downloadBytes] = await Promise.all([
+    preview.body(),
+    download.body(),
+  ]);
+  assert.deepEqual(previewBytes, downloadBytes);
+  const digest = createHash("sha256").update(downloadBytes).digest("hex");
+  assert.equal(
+    revision.artifacts.find((artifact) => artifact.kind === "download")?.sha256,
+    digest,
+  );
+  return downloadBytes;
 }
 
 async function createUser(adminPage, name) {
@@ -199,7 +257,7 @@ async function createConnection(
   await page.goto(
     `${baseURL}/${scope === "instance" ? "admin/llm" : "composer/connections"}`,
     {
-    waitUntil: "networkidle",
+      waitUntil: "networkidle",
     },
   );
   const createForm = page.locator("form").filter({
@@ -383,6 +441,27 @@ test("Composer uses real final-image routing, TLS egress and durable owner revis
   );
   try {
     await login(adminPage, "e2e-admin", "e2e-admin-password");
+    const [childBundle, notices] = await Promise.all([
+      adminPage.request.get(`${baseURL}/composer-preview/frame-client.js`),
+      adminPage.request.get(
+        `${baseURL}/composer-preview/THIRD_PARTY_NOTICES.txt`,
+      ),
+    ]);
+    assert.equal(childBundle.status(), 200);
+    assert.match(childBundle.headers()["content-type"], /javascript/);
+    assert.ok((await childBundle.body()).length > 1_000);
+    assert.equal(notices.status(), 200);
+    const noticeText = await notices.text();
+    for (const dependency of [
+      "docx-preview@0.4.1",
+      "@aiden0z/pptx-renderer@1.3.0",
+      "pdfjs-dist@6.3.289",
+      "jszip@3.10.2",
+    ])
+      assert.ok(
+        noticeText.includes(dependency),
+        `${dependency} notice missing`,
+      );
     const adminIdentity = exactStatus(
       await api(adminPage, "GET", "/api/v1/session"),
       200,
@@ -849,10 +928,439 @@ test("Composer uses real final-image routing, TLS egress and durable owner revis
       await api(adminPage, "POST", `${backupPath}/test`, { json: {} }),
       200,
     );
+    await adminPage.goto(`${baseURL}/composer?draft=${draft.id}`, {
+      waitUntil: "networkidle",
+    });
+    await adminPage
+      .getByRole("heading", { name: "Composer", exact: true })
+      .waitFor();
+    const restoredDownloadPath = `${draftPath}/revisions/${restored.id}/artifacts/download`;
+    const restoredDownload = adminPage.getByRole("button", {
+      name: "Download revision 2",
+    });
+    await restoredDownload.waitFor();
+    const [restoredResponse, browserDownload] = await Promise.all([
+      adminPage.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === restoredDownloadPath &&
+          response.request().method() === "GET",
+      ),
+      adminPage.waitForEvent("download"),
+      restoredDownload.click(),
+    ]);
+    assert.equal(restoredResponse.status(), 200);
+    assert.equal(
+      browserDownload.suggestedFilename(),
+      `revision-${restored.id}.md`,
+    );
+    await adminPage
+      .getByRole("textbox", { name: "Message or answer" })
+      .fill("Please suggest a concise title based on the approved text.");
+    await adminPage.getByRole("button", { name: "Save message" }).click();
+    await adminPage.getByText(/Message saved/).waitFor();
+    await adminPage
+      .getByRole("combobox", { name: "Connection" })
+      .selectOption(backupConnection.id);
+    await adminPage
+      .getByRole("textbox", {
+        name: "Exact approved text for transmission",
+      })
+      .fill("Use only this approved sentence as the basis for a suggestion.");
+    await adminPage
+      .getByRole("spinbutton", { name: /Maximum output tokens/ })
+      .fill("128");
+    await adminPage.getByRole("button", { name: "Send reviewed text" }).click();
+    const firstPending = adminPage
+      .locator("details")
+      .filter({ hasText: "Suggestion · pending" })
+      .last();
+    await firstPending.locator("summary").waitFor({ timeout: 15_000 });
+    await firstPending.locator("summary").click();
+    await firstPending
+      .locator("span.whitespace-pre-wrap")
+      .filter({ hasText: "Connection healthy" })
+      .waitFor();
+    await adminPage.getByRole("button", { name: "Accept" }).click();
+    await adminPage.getByText(/Your decision was saved/).waitFor();
+    await adminPage
+      .getByRole("button", { name: "Publish approved text" })
+      .click();
+    await adminPage.getByText(/Approved text published/).waitFor();
+    const publishedDraft = exactStatus(
+      await api(adminPage, "GET", draftPath),
+      200,
+    );
+    const published = exactStatus(
+      await api(
+        adminPage,
+        "GET",
+        `${draftPath}/revisions/${publishedDraft.current_revision_id}`,
+      ),
+      200,
+    );
+    assert.equal(published.number, 3);
+    assert.equal(
+      (
+        await api(
+          adminPage,
+          "GET",
+          `${draftPath}/revisions/${published.id}/artifacts/download`,
+        )
+      ).text,
+      "Connection healthy",
+    );
+    const unsentMessage = "Unsent human chat note survives navigation.";
+    const unsavedEdit = "Connection healthy\n\nHuman-reviewed addition.";
+    await adminPage
+      .getByRole("textbox", { name: "Message or answer" })
+      .fill(unsentMessage);
+    await adminPage
+      .getByRole("textbox", { name: "Editable Markdown" })
+      .fill(unsavedEdit);
+    const workspace = adminPage.getByRole("group", { name: "Workspace" });
+    const [convertResponse] = await Promise.all([
+      adminPage.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/convert" &&
+          response.request().resourceType() === "document",
+      ),
+      workspace.getByRole("link", { name: "Convert" }).click(),
+    ]);
+    await adminPage.getByRole("heading", { name: "Convert" }).waitFor();
+    assert.equal(
+      new URL(
+        await adminPage.evaluate(
+          () => performance.getEntriesByType("navigation")[0]?.name,
+        ),
+      ).pathname,
+      "/convert",
+    );
+    assert.doesNotMatch(
+      convertResponse.headers()["content-security-policy"] ?? "",
+      /frame-src 'self'/,
+    );
+    assert.match(
+      convertResponse.headers()["content-security-policy"] ?? "",
+      /default-src 'none'/,
+    );
+    await adminPage.evaluate(() => {
+      window.__composerReturnDocument = true;
+    });
+    await workspace.getByRole("link", { name: "Composer" }).click();
+    await adminPage
+      .getByRole("textbox", { name: "Editable Markdown" })
+      .waitFor();
+    const composerDocumentUrl = await adminPage.evaluate(
+      () => performance.getEntriesByType("navigation")[0]?.name,
+    );
+    assert.equal(new URL(composerDocumentUrl).pathname, "/composer");
+    assert.equal(
+      await adminPage.evaluate(() => window.__composerReturnDocument),
+      undefined,
+    );
+    assert.equal(
+      await adminPage
+        .getByRole("textbox", { name: "Message or answer" })
+        .inputValue(),
+      unsentMessage,
+    );
+    assert.equal(
+      await adminPage
+        .getByRole("textbox", { name: "Editable Markdown" })
+        .inputValue(),
+      unsavedEdit,
+    );
+    const [revertResponse] = await Promise.all([
+      adminPage.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/revert" &&
+          response.request().resourceType() === "document",
+      ),
+      adminPage.getByRole("link", { name: "2md, Experimental" }).click(),
+    ]);
+    await adminPage.waitForURL("**/revert");
+    assert.equal(
+      new URL(
+        await adminPage.evaluate(
+          () => performance.getEntriesByType("navigation")[0]?.name,
+        ),
+      ).pathname,
+      "/revert",
+    );
+    assert.doesNotMatch(
+      revertResponse.headers()["content-security-policy"] ?? "",
+      /frame-src 'self'/,
+    );
+    assert.match(
+      revertResponse.headers()["content-security-policy"] ?? "",
+      /default-src 'none'/,
+    );
+    const [composerResponse] = await Promise.all([
+      adminPage.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/composer" &&
+          response.request().resourceType() === "document",
+      ),
+      adminPage
+        .getByRole("group", { name: "Workspace" })
+        .getByRole("link", { name: "Composer" })
+        .click(),
+    ]);
+    assert.match(
+      composerResponse.headers()["content-security-policy"] ?? "",
+      /frame-src 'self'/,
+    );
+    await adminPage
+      .getByRole("textbox", { name: "Editable Markdown" })
+      .waitFor();
+    assert.equal(
+      await adminPage
+        .getByRole("textbox", { name: "Message or answer" })
+        .inputValue(),
+      unsentMessage,
+    );
+    assert.equal(
+      await adminPage
+        .getByRole("textbox", { name: "Editable Markdown" })
+        .inputValue(),
+      unsavedEdit,
+    );
+    await adminPage.reload({ waitUntil: "networkidle" });
+    assert.equal(
+      await adminPage
+        .getByRole("textbox", { name: "Message or answer" })
+        .inputValue(),
+      unsentMessage,
+    );
+    assert.equal(
+      await adminPage
+        .getByRole("textbox", { name: "Editable Markdown" })
+        .inputValue(),
+      unsavedEdit,
+    );
+    assert.equal(
+      exactStatus(await api(adminPage, "GET", draftPath), 200).content,
+      "Connection healthy",
+      "Unsaved human text must not silently mutate the approved server draft",
+    );
+    await adminPage
+      .getByRole("combobox", { name: "Model step purpose" })
+      .selectOption("question");
+    await adminPage
+      .getByRole("textbox", {
+        name: "Exact approved text for transmission",
+      })
+      .fill("E2E ask for the missing report date.");
+    await adminPage.getByRole("button", { name: "Send reviewed text" }).click();
+    const pendingQuestion = adminPage
+      .locator("details")
+      .filter({ hasText: "Which date should this report use?" });
+    await pendingQuestion.locator("summary").waitFor({ timeout: 15_000 });
+    await adminPage.reload({ waitUntil: "networkidle" });
+    await pendingQuestion.locator("summary").waitFor();
+    await pendingQuestion
+      .getByRole("textbox", { name: "Your answer" })
+      .fill("Use 23 September 2026.");
+    assert.equal(
+      exactStatus(await api(adminPage, "GET", draftPath), 200)
+        .current_revision_id,
+      published.id,
+    );
+    await pendingQuestion.getByRole("button", { name: "Save answer" }).click();
+    await adminPage.getByText(/Your answer was saved/).waitFor();
+    assert.equal(
+      await adminPage
+        .getByRole("textbox", {
+          name: "Exact approved text for transmission",
+        })
+        .inputValue(),
+      "Question: Which date should this report use?\nAnswer: Use 23 September 2026.",
+    );
+    await adminPage.getByRole("button", { name: "Send reviewed text" }).click();
+    const resumedProposal = adminPage
+      .locator("details")
+      .filter({ hasText: "Suggestion · pending" })
+      .last();
+    await resumedProposal.locator("summary").waitFor({ timeout: 15_000 });
+    await resumedProposal.locator("summary").click();
+    await resumedProposal.getByRole("button", { name: "Reject" }).click();
+    await adminPage.getByText(/Suggestion rejected/).waitFor();
+    assert.equal(
+      exactStatus(await api(adminPage, "GET", draftPath), 200)
+        .current_revision_id,
+      published.id,
+    );
+    let generationPosts = 0;
+    let modelPostsDuringGeneration = 0;
+    adminPage.on("request", (request) => {
+      if (request.method() !== "POST") return;
+      if (
+        /\/revisions\/[^/]+\/generations$/.test(new URL(request.url()).pathname)
+      )
+        generationPosts += 1;
+      if (/\/model-steps$/.test(new URL(request.url()).pathname))
+        modelPostsDuringGeneration += 1;
+    });
+    let previousRevisionId = published.id;
+    const generatedRevisions = [];
+    for (const output of ["docx", "pdf", "pptx"]) {
+      const outputChoice = adminPage.getByRole("combobox", {
+        name: "Output format",
+      });
+      if ((await outputChoice.inputValue()) !== output)
+        await outputChoice.selectOption(output);
+      const generate = adminPage.getByRole("button", {
+        name: `Generate ${output.toUpperCase()}`,
+      });
+      await generate.click({ trial: true });
+      assert.equal(await generate.isEnabled(), true);
+      const acceptedGeneration = adminPage.waitForResponse(
+        (response) =>
+          /\/revisions\/[^/]+\/generations$/.test(
+            new URL(response.url()).pathname,
+          ) &&
+          response.request().method() === "POST" &&
+          response.status() === 202,
+      );
+      await generate.click();
+      const submitted = await acceptedGeneration;
+      const generation = await submitted.json();
+      assert.equal(generation.output, output);
+      assert.equal(generation.source_revision_id.length, 36);
+      if (output === "docx") {
+        await adminPage.reload({ waitUntil: "networkidle" });
+        const recovered = exactStatus(
+          await api(
+            adminPage,
+            "GET",
+            `${draftPath}/generations?limit=20&offset=0`,
+          ),
+          200,
+        ).generations;
+        assert.equal(
+          recovered.filter((item) => item.id === generation.id).length,
+          1,
+          "Refresh must recover one durable generation identity",
+        );
+        assert.equal(
+          recovered.find((item) => item.id === generation.id)?.job_id,
+          generation.job_id,
+        );
+      }
+      const generated = await waitForGeneratedRevision(
+        adminPage,
+        draftPath,
+        previousRevisionId,
+        output,
+      );
+      generatedRevisions.push({ format: output, id: generated.id });
+      previousRevisionId = generated.id;
+      assert.equal(
+        JSON.parse(generated.approved_values).content,
+        unsavedEdit,
+        "Generation must freeze the accepted text plus the human edit",
+      );
+      const bytes = await assertMatchingRevisionArtifacts(
+        adminPage,
+        draftPath,
+        generated,
+      );
+      assert.equal(
+        bytes.subarray(0, output === "pdf" ? 4 : 2).toString(),
+        output === "pdf" ? "%PDF" : "PK",
+      );
+      await adminPage
+        .getByRole("button", { name: "Download this revision" })
+        .waitFor();
+      if (output === "pdf") {
+        await adminPage.getByLabel("PDF page 1", { exact: true }).waitFor();
+      } else {
+        const frame = adminPage.frameLocator(
+          `iframe[title^="${output.toUpperCase()} revision"]`,
+        );
+        await (output === "pptx" ? frame.locator("#document") : frame)
+          .getByText("Human-reviewed addition.", { exact: true })
+          .waitFor();
+        assert.equal(
+          await frame.locator("body").evaluate(() => window.origin),
+          "null",
+        );
+      }
+      assert.equal(
+        generationPosts,
+        ["docx", "pdf", "pptx"].indexOf(output) + 1,
+      );
+      assert.equal(modelPostsDuringGeneration, 0);
+    }
+    await adminPage.goto(`${baseURL}/composer`, { waitUntil: "networkidle" });
+    const docx = await readFile(
+      new URL("../../spikes/anydoc/corpus/docx/text.docx", import.meta.url),
+    );
+    await adminPage.getByLabel("Markdown or Office source").setInputFiles({
+      name: "text.docx",
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      buffer: docx,
+    });
+    await adminPage.getByRole("button", { name: "Create draft" }).click();
+    await adminPage.getByText(/source passed upload validation/).waitFor();
+    await adminPage
+      .getByRole("button", { name: "Capture source revision" })
+      .click();
+    await adminPage.getByText(/Original source captured/).waitFor();
+    const wordFrame = adminPage.frameLocator('iframe[title^="DOCX revision"]');
+    await wordFrame.getByText("Fixture Document").waitFor();
+    await wordFrame.getByText("Fourth, continuing the count").waitFor();
+    assert.equal(
+      await wordFrame.locator("body").evaluate(() => window.origin),
+      "null",
+    );
+    await adminPage.goto(`${baseURL}/composer`, { waitUntil: "networkidle" });
+    const pdf = await readFile(
+      new URL("../../spikes/anydoc/corpus/pdf/text.pdf", import.meta.url),
+    );
+    await adminPage.getByLabel("Markdown or Office source").setInputFiles({
+      name: "text.pdf",
+      mimeType: "application/pdf",
+      buffer: pdf,
+    });
+    await adminPage.getByRole("button", { name: "Create draft" }).click();
+    await adminPage.getByText(/source passed upload validation/).waitFor();
+    await adminPage
+      .getByRole("button", { name: "Capture source revision" })
+      .click();
+    await adminPage.getByText(/Original source captured/).waitFor();
+    await adminPage.getByText(/^PDF revision [0-9a-f-]{36} preview$/).waitFor();
+    await adminPage.getByLabel("PDF page 1", { exact: true }).waitFor();
     await writeFile(
       statePath,
-      `${JSON.stringify({ draftId: draft.id, revisionId: first.id, restoredId: restored.id, connectionId: adminConnection.connection.id, backupConnectionId: backupConnection.id, source })}\n`,
+      `${JSON.stringify({ draftId: draft.id, revisionId: first.id, restoredId: restored.id, generatedRevisions, connectionId: adminConnection.connection.id, backupConnectionId: backupConnection.id, source })}\n`,
       { mode: 0o600 },
+    );
+    const [loginResponse] = await Promise.all([
+      adminPage.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/login" &&
+          response.request().resourceType() === "document",
+      ),
+      adminPage.getByRole("button", { name: "Sign out" }).click(),
+    ]);
+    await adminPage.getByRole("heading", { name: "Sign in" }).waitFor();
+    assert.equal(
+      new URL(
+        await adminPage.evaluate(
+          () => performance.getEntriesByType("navigation")[0]?.name,
+        ),
+      ).pathname,
+      "/login",
+    );
+    assert.doesNotMatch(
+      loginResponse.headers()["content-security-policy"] ?? "",
+      /frame-src 'self'/,
+    );
+    assert.match(
+      loginResponse.headers()["content-security-policy"] ?? "",
+      /default-src 'none'/,
     );
   } finally {
     await Promise.all(contexts.map((context) => context.close()));

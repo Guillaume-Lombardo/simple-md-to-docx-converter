@@ -1,826 +1,946 @@
 [
   {
-    "include_in_schema": false,
+    "path": "/openapi.json",
     "methods": [
       "GET",
       "HEAD"
     ],
     "name": "openapi",
-    "path": "/openapi.json",
-    "response_class": null,
-    "status_code": null
+    "include_in_schema": false,
+    "status_code": null,
+    "response_class": null
   },
   {
-    "include_in_schema": false,
+    "path": "/docs",
     "methods": [
       "GET",
       "HEAD"
     ],
     "name": "swagger_ui_html",
-    "path": "/docs",
-    "response_class": null,
-    "status_code": null
+    "include_in_schema": false,
+    "status_code": null,
+    "response_class": null
   },
   {
-    "include_in_schema": false,
+    "path": "/docs/oauth2-redirect",
     "methods": [
       "GET",
       "HEAD"
     ],
     "name": "swagger_ui_redirect",
-    "path": "/docs/oauth2-redirect",
-    "response_class": null,
-    "status_code": null
+    "include_in_schema": false,
+    "status_code": null,
+    "response_class": null
   },
   {
-    "include_in_schema": false,
+    "path": "/redoc",
     "methods": [
       "GET",
       "HEAD"
     ],
     "name": "redoc_html",
-    "path": "/redoc",
-    "response_class": null,
-    "status_code": null
+    "include_in_schema": false,
+    "status_code": null,
+    "response_class": null
   },
   {
-    "include_in_schema": true,
+    "path": "/health/live",
     "methods": [
       "GET"
     ],
     "name": "live",
-    "path": "/health/live",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/health/ready",
     "methods": [
       "GET"
     ],
     "name": "ready",
-    "path": "/health/ready",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/metrics",
     "methods": [
       "GET"
     ],
     "name": "metrics",
-    "path": "/metrics",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/audit",
     "methods": [
       "GET"
     ],
     "name": "list_audit_records",
-    "path": "/api/v1/audit",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/login",
     "methods": [
       "POST"
     ],
     "name": "api_login",
-    "path": "/api/v1/login",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/logout",
     "methods": [
       "POST"
     ],
     "name": "api_logout",
-    "path": "/api/v1/logout",
-    "response_class": "JSONResponse",
-    "status_code": 204
+    "include_in_schema": true,
+    "status_code": 204,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/session",
     "methods": [
       "GET"
     ],
     "name": "api_session",
-    "path": "/api/v1/session",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/password",
     "methods": [
       "POST"
     ],
     "name": "change_own_password",
-    "path": "/api/v1/password",
-    "response_class": "JSONResponse",
-    "status_code": 204
+    "include_in_schema": true,
+    "status_code": 204,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/admin/composer-policy",
     "methods": [
       "GET"
     ],
     "name": "get_policy",
-    "path": "/api/v1/admin/composer-policy",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/admin/composer-policy",
     "methods": [
       "PUT"
     ],
     "name": "put_policy",
-    "path": "/api/v1/admin/composer-policy",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/admin/composer-policy/resolve",
     "methods": [
       "POST"
     ],
     "name": "resolve_destination",
-    "path": "/api/v1/admin/composer-policy/resolve",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/composer/capabilities",
     "methods": [
       "GET"
     ],
     "name": "capabilities",
-    "path": "/api/v1/composer/capabilities",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/composer/connections",
     "methods": [
       "GET"
     ],
     "name": "list_connections",
-    "path": "/api/v1/composer/connections",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/composer/connections",
     "methods": [
       "POST"
     ],
     "name": "create_connection",
-    "path": "/api/v1/composer/connections",
-    "response_class": "JSONResponse",
-    "status_code": 201
+    "include_in_schema": true,
+    "status_code": 201,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/composer/connections/{connection_id}",
     "methods": [
       "GET"
     ],
     "name": "get_connection",
-    "path": "/api/v1/composer/connections/{connection_id}",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/composer/connections/{connection_id}",
     "methods": [
       "PATCH"
     ],
     "name": "update_connection",
-    "path": "/api/v1/composer/connections/{connection_id}",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/composer/connections/{connection_id}/credentials",
     "methods": [
       "PUT"
     ],
     "name": "write_credentials",
-    "path": "/api/v1/composer/connections/{connection_id}/credentials",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/composer/connections/{connection_id}",
     "methods": [
       "DELETE"
     ],
     "name": "revoke_connection",
-    "path": "/api/v1/composer/connections/{connection_id}",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/composer/connections/{connection_id}/models",
     "methods": [
       "GET"
     ],
     "name": "discover_models",
-    "path": "/api/v1/composer/connections/{connection_id}/models",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/composer/connections/{connection_id}/test",
     "methods": [
       "POST"
     ],
     "name": "test_connection",
-    "path": "/api/v1/composer/connections/{connection_id}/test",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/composer/personal-permissions",
     "methods": [
       "GET"
     ],
     "name": "list_personal_permissions",
-    "path": "/api/v1/composer/personal-permissions",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/composer/personal-permissions/{user_id}",
     "methods": [
       "GET"
     ],
     "name": "get_personal_permission",
-    "path": "/api/v1/composer/personal-permissions/{user_id}",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/composer/personal-permissions/{user_id}",
     "methods": [
       "PUT"
     ],
     "name": "set_personal_permission",
-    "path": "/api/v1/composer/personal-permissions/{user_id}",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/composer/drafts",
     "methods": [
       "POST"
     ],
     "name": "create_draft",
-    "path": "/api/v1/composer/drafts",
-    "response_class": "JSONResponse",
-    "status_code": 201
+    "include_in_schema": true,
+    "status_code": 201,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/composer/drafts/from-conversion/{job_id}",
     "methods": [
       "POST"
     ],
     "name": "handoff_conversion",
-    "path": "/api/v1/composer/drafts/from-conversion/{job_id}",
-    "response_class": "JSONResponse",
-    "status_code": 201
+    "include_in_schema": true,
+    "status_code": 201,
+    "response_class": "JSONResponse"
   },
   {
+    "path": "/api/v1/composer/drafts/from-reversion/{job_id}",
+    "methods": [
+      "POST"
+    ],
+    "name": "handoff_reversion",
     "include_in_schema": true,
+    "status_code": 201,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/drafts",
     "methods": [
       "GET"
     ],
     "name": "list_drafts",
-    "path": "/api/v1/composer/drafts",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/composer/drafts/{draft_id}",
     "methods": [
       "GET"
     ],
     "name": "get_draft",
-    "path": "/api/v1/composer/drafts/{draft_id}",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/composer/drafts/{draft_id}",
     "methods": [
       "PUT"
     ],
     "name": "save_draft",
-    "path": "/api/v1/composer/drafts/{draft_id}",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/composer/drafts/{draft_id}/messages",
     "methods": [
       "GET"
     ],
     "name": "list_messages",
-    "path": "/api/v1/composer/drafts/{draft_id}/messages",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/composer/drafts/{draft_id}/messages",
     "methods": [
       "POST"
     ],
     "name": "add_message",
-    "path": "/api/v1/composer/drafts/{draft_id}/messages",
-    "response_class": "JSONResponse",
-    "status_code": 201
+    "include_in_schema": true,
+    "status_code": 201,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/composer/drafts/{draft_id}/proposals",
     "methods": [
       "GET"
     ],
     "name": "list_proposals",
-    "path": "/api/v1/composer/drafts/{draft_id}/proposals",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/composer/drafts/{draft_id}/proposals/{proposal_id}",
     "methods": [
       "GET"
     ],
     "name": "get_proposal",
-    "path": "/api/v1/composer/drafts/{draft_id}/proposals/{proposal_id}",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/composer/drafts/{draft_id}/proposals/{proposal_id}/decision",
     "methods": [
       "POST"
     ],
     "name": "decide_proposal",
-    "path": "/api/v1/composer/drafts/{draft_id}/proposals/{proposal_id}/decision",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
+    "path": "/api/v1/composer/drafts/{draft_id}/revisions/{source_revision_id}/generations",
+    "methods": [
+      "POST"
+    ],
+    "name": "create_generation",
     "include_in_schema": true,
+    "status_code": 202,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/drafts/{draft_id}/generations",
+    "methods": [
+      "GET"
+    ],
+    "name": "list_generations",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/drafts/{draft_id}/generations/{generation_id}",
+    "methods": [
+      "GET"
+    ],
+    "name": "get_generation",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/drafts/{draft_id}/generations/{generation_id}",
+    "methods": [
+      "DELETE"
+    ],
+    "name": "cancel_generation",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/drafts/{draft_id}/generations/{generation_id}/publish",
+    "methods": [
+      "POST"
+    ],
+    "name": "publish_generation",
+    "include_in_schema": true,
+    "status_code": 201,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/drafts/{draft_id}/model-steps",
     "methods": [
       "POST"
     ],
     "name": "start_model_step",
-    "path": "/api/v1/composer/drafts/{draft_id}/model-steps",
-    "response_class": "JSONResponse",
-    "status_code": 202
+    "include_in_schema": true,
+    "status_code": 202,
+    "response_class": "JSONResponse"
   },
   {
+    "path": "/api/v1/composer/drafts/{draft_id}/questions",
+    "methods": [
+      "GET"
+    ],
+    "name": "list_questions",
     "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/drafts/{draft_id}/questions/{question_id}",
+    "methods": [
+      "GET"
+    ],
+    "name": "get_question",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/drafts/{draft_id}/questions/{question_id}/answer",
+    "methods": [
+      "POST"
+    ],
+    "name": "answer_question",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/drafts/{draft_id}/model-steps/{step_id}",
     "methods": [
       "GET"
     ],
     "name": "get_model_step",
-    "path": "/api/v1/composer/drafts/{draft_id}/model-steps/{step_id}",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/composer/drafts/{draft_id}/model-steps/{step_id}",
     "methods": [
       "DELETE"
     ],
     "name": "cancel_model_step",
-    "path": "/api/v1/composer/drafts/{draft_id}/model-steps/{step_id}",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/composer/drafts/{draft_id}/revisions/from-source",
     "methods": [
       "POST"
     ],
     "name": "capture_source",
-    "path": "/api/v1/composer/drafts/{draft_id}/revisions/from-source",
-    "response_class": "JSONResponse",
-    "status_code": 201
+    "include_in_schema": true,
+    "status_code": 201,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/composer/drafts/{draft_id}/revisions",
     "methods": [
       "GET"
     ],
     "name": "list_revisions",
-    "path": "/api/v1/composer/drafts/{draft_id}/revisions",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}",
     "methods": [
       "GET"
     ],
     "name": "get_revision",
-    "path": "/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
+    "path": "/api/v1/composer/drafts/{draft_id}/proposals/{proposal_id}/publish",
+    "methods": [
+      "POST"
+    ],
+    "name": "publish_proposal",
     "include_in_schema": true,
+    "status_code": 201,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/drafts/{draft_id}/revisions/from-draft",
+    "methods": [
+      "POST"
+    ],
+    "name": "publish_draft",
+    "include_in_schema": true,
+    "status_code": 201,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/diff",
+    "methods": [
+      "GET"
+    ],
+    "name": "diff_revision",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/artifacts/{kind}",
     "methods": [
       "GET"
     ],
     "name": "read_artifact",
-    "path": "/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/artifacts/{kind}",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/restore",
     "methods": [
       "POST"
     ],
     "name": "restore_revision",
-    "path": "/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/restore",
-    "response_class": "JSONResponse",
-    "status_code": 201
+    "include_in_schema": true,
+    "status_code": 201,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/admin/users",
     "methods": [
       "GET"
     ],
     "name": "list_users",
-    "path": "/api/v1/admin/users",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/admin/users",
     "methods": [
       "POST"
     ],
     "name": "create_user",
-    "path": "/api/v1/admin/users",
-    "response_class": "JSONResponse",
-    "status_code": 201
+    "include_in_schema": true,
+    "status_code": 201,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/admin/users/{user_id}/active",
     "methods": [
       "PATCH"
     ],
     "name": "set_user_active",
-    "path": "/api/v1/admin/users/{user_id}/active",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/admin/users/{user_id}/password",
     "methods": [
       "POST"
     ],
     "name": "reset_user_password",
-    "path": "/api/v1/admin/users/{user_id}/password",
-    "response_class": "JSONResponse",
-    "status_code": 204
+    "include_in_schema": true,
+    "status_code": 204,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/admin/users/{user_id}/password-change-required",
     "methods": [
       "PATCH"
     ],
     "name": "set_user_password_change_required",
-    "path": "/api/v1/admin/users/{user_id}/password-change-required",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/admin/session-policy",
     "methods": [
       "GET"
     ],
     "name": "get_session_policy",
-    "path": "/api/v1/admin/session-policy",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/admin/session-policy",
     "methods": [
       "PUT"
     ],
     "name": "update_session_policy",
-    "path": "/api/v1/admin/session-policy",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/conversion-options",
     "methods": [
       "GET"
     ],
     "name": "get_conversion_options",
-    "path": "/api/v1/conversion-options",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/conversions",
     "methods": [
       "POST"
     ],
     "name": "create_conversion",
-    "path": "/api/v1/conversions",
-    "response_class": "JSONResponse",
-    "status_code": 202
+    "include_in_schema": true,
+    "status_code": 202,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/conversions",
     "methods": [
       "GET"
     ],
     "name": "list_conversions",
-    "path": "/api/v1/conversions",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/conversions/{job_id}",
     "methods": [
       "GET"
     ],
     "name": "get_conversion",
-    "path": "/api/v1/conversions/{job_id}",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/conversions/{job_id}",
     "methods": [
       "DELETE"
     ],
     "name": "cancel_conversion",
-    "path": "/api/v1/conversions/{job_id}",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/conversions/{job_id}/result",
     "methods": [
       "GET"
     ],
     "name": "download_conversion",
-    "path": "/api/v1/conversions/{job_id}/result",
-    "response_class": "Response",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "Response"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/conversions/{job_id}/result/manifest",
     "methods": [
       "GET"
     ],
     "name": "download_conversion_manifest",
-    "path": "/api/v1/conversions/{job_id}/result/manifest",
-    "response_class": "Response",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "Response"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/presentation-plan",
     "methods": [
       "POST"
     ],
     "name": "preview_presentation",
-    "path": "/api/v1/presentation-plan",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/presentation-reference",
     "methods": [
       "GET"
     ],
     "name": "download_presentation_reference",
-    "path": "/api/v1/presentation-reference",
-    "response_class": "Response",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "Response"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/reversions/capabilities",
     "methods": [
       "GET"
     ],
     "name": "get_reversion_capabilities",
-    "path": "/api/v1/reversions/capabilities",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/reversions",
     "methods": [
       "POST"
     ],
     "name": "create_reversion",
-    "path": "/api/v1/reversions",
-    "response_class": "JSONResponse",
-    "status_code": 202
+    "include_in_schema": true,
+    "status_code": 202,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/reversions",
     "methods": [
       "GET"
     ],
     "name": "list_reversions",
-    "path": "/api/v1/reversions",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/reversions/{job_id}",
     "methods": [
       "GET"
     ],
     "name": "get_reversion",
-    "path": "/api/v1/reversions/{job_id}",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/reversions/{job_id}",
     "methods": [
       "DELETE"
     ],
     "name": "cancel_reversion",
-    "path": "/api/v1/reversions/{job_id}",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/reversions/{job_id}/result",
     "methods": [
       "GET"
     ],
     "name": "download_reversion",
-    "path": "/api/v1/reversions/{job_id}/result",
-    "response_class": "Response",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "Response"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/template-context",
     "methods": [
       "GET"
     ],
     "name": "get_template_administration_context",
-    "path": "/api/v1/template-context",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/templates",
     "methods": [
       "GET"
     ],
     "name": "list_templates",
-    "path": "/api/v1/templates",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/templates",
     "methods": [
       "POST"
     ],
     "name": "create_template",
-    "path": "/api/v1/templates",
-    "response_class": "JSONResponse",
-    "status_code": 201
+    "include_in_schema": true,
+    "status_code": 201,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/templates/{template_id}",
     "methods": [
       "GET"
     ],
     "name": "get_template",
-    "path": "/api/v1/templates/{template_id}",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/templates/{template_id}",
     "methods": [
       "PATCH"
     ],
     "name": "update_template",
-    "path": "/api/v1/templates/{template_id}",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/templates/{template_id}/content",
     "methods": [
       "PUT"
     ],
     "name": "replace_template",
-    "path": "/api/v1/templates/{template_id}/content",
-    "response_class": "JSONResponse",
-    "status_code": 201
+    "include_in_schema": true,
+    "status_code": 201,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/templates/{template_id}/versions",
     "methods": [
       "GET"
     ],
     "name": "list_template_versions",
-    "path": "/api/v1/templates/{template_id}/versions",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/templates/{template_id}/content",
     "methods": [
       "GET"
     ],
     "name": "download_current_template",
-    "path": "/api/v1/templates/{template_id}/content",
-    "response_class": "Response",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "Response"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/templates/{template_id}/versions/{version_id}/content",
     "methods": [
       "GET"
     ],
     "name": "download_template_version",
-    "path": "/api/v1/templates/{template_id}/versions/{version_id}/content",
-    "response_class": "Response",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "Response"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/templates/{template_id}/versions/{version_id}/restore",
     "methods": [
       "POST"
     ],
     "name": "restore_template_version",
-    "path": "/api/v1/templates/{template_id}/versions/{version_id}/restore",
-    "response_class": "JSONResponse",
-    "status_code": 201
+    "include_in_schema": true,
+    "status_code": 201,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/templates/{template_id}/archive",
     "methods": [
       "POST"
     ],
     "name": "archive_template",
-    "path": "/api/v1/templates/{template_id}/archive",
-    "response_class": "JSONResponse",
-    "status_code": null
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/templates/{template_id}",
     "methods": [
       "DELETE"
     ],
     "name": "delete_template",
-    "path": "/api/v1/templates/{template_id}",
-    "response_class": "JSONResponse",
-    "status_code": 204
+    "include_in_schema": true,
+    "status_code": 204,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/templates/{template_id}/preferred",
     "methods": [
       "PUT"
     ],
     "name": "set_preferred_template",
-    "path": "/api/v1/templates/{template_id}/preferred",
-    "response_class": "JSONResponse",
-    "status_code": 204
+    "include_in_schema": true,
+    "status_code": 204,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/template-preference",
     "methods": [
       "DELETE"
     ],
     "name": "clear_preferred_template",
-    "path": "/api/v1/template-preference",
-    "response_class": "JSONResponse",
-    "status_code": 204
+    "include_in_schema": true,
+    "status_code": 204,
+    "response_class": "JSONResponse"
   },
   {
-    "include_in_schema": true,
+    "path": "/api/v1/templates/{template_id}/system-fallback",
     "methods": [
       "PUT"
     ],
     "name": "set_system_fallback_template",
-    "path": "/api/v1/templates/{template_id}/system-fallback",
-    "response_class": "JSONResponse",
-    "status_code": 204
+    "include_in_schema": true,
+    "status_code": 204,
+    "response_class": "JSONResponse"
   }
 ]

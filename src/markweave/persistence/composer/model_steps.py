@@ -7,7 +7,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from sqlalchemy import Engine, func, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -17,16 +17,30 @@ from markweave.composer.connections import ConnectionAuthorizationError
 from markweave.composer.drafts import ComposerProposal
 from markweave.composer.revisions import ComposerConflictError, ComposerNotFoundError
 from markweave.persistence.composer.audit import SYSTEM_ACTOR_ID, record_content_audit
-from markweave.persistence.composer.common import owned_draft, proposal_from_row, utc
+from markweave.persistence.composer.common import (
+    PageOrder,
+    owned_draft,
+    proposal_from_row,
+    utc,
+    validate_page,
+    validate_page_order,
+)
+from markweave.persistence.composer.questions import (
+    ComposerQuestion,
+    question_from_row,
+    validated_question,
+)
 from markweave.persistence.errors import PersistenceError
 from markweave.persistence.schema import (
     ComposerConnectionGrantRow,
     ComposerConnectionRow,
     ComposerCredentialRow,
+    ComposerMessageRow,
     ComposerModelStepGateRow,
     ComposerModelStepRow,
     ComposerPersonalPermissionRow,
     ComposerProposalRow,
+    ComposerQuestionRow,
     UserRow,
 )
 from markweave.persistence.sql import serialize_sqlite_write
@@ -59,6 +73,9 @@ class ComposerModelStep:
     created_at: datetime
     updated_at: datetime
     expires_at: datetime
+    intent: str = "proposal"
+    answered_question_id: UUID | None = None
+    question_id: UUID | None = None
 
     @property
     def status(self) -> str:
@@ -90,6 +107,9 @@ def _step(row: ComposerModelStepRow) -> ComposerModelStep:
         utc(row.created_at),
         utc(row.updated_at),
         utc(row.expires_at),
+        row.intent,
+        UUID(row.answered_question_id) if row.answered_question_id else None,
+        UUID(row.question_id) if row.question_id else None,
     )
 
 
@@ -128,7 +148,7 @@ class SqlComposerModelStepRepository:
         self._on_expiration = on_expiration
         self._on_recovery = on_recovery
 
-    def start_model_step(  # noqa: PLR0912, PLR0913 - atomic admission and retry fences
+    def start_model_step(  # noqa: PLR0912, PLR0913, PLR0915 - atomic admission and retry fences
         self,
         owner_id: UUID,
         draft_id: UUID,
@@ -141,6 +161,8 @@ class SqlComposerModelStepRepository:
         payload_digest: str,
         max_active: int,
         lease: timedelta,
+        intent: str = "proposal",
+        answered_question_id: UUID | None = None,
     ) -> tuple[ComposerModelStep, bool]:
         """Admit at most the configured global number of unexpired running calls."""
 
@@ -154,6 +176,7 @@ class SqlComposerModelStepRepository:
             or not isinstance(max_active, int)
             or max_active <= 0
             or lease <= timedelta(0)
+            or intent not in {"proposal", "question"}
         ):
             raise ValueError("Composer model step admission is invalid")
         expired = False
@@ -185,6 +208,8 @@ class SqlComposerModelStepRepository:
                         approved_model=approved_model,
                         if_match=if_match,
                         payload_digest=payload_digest,
+                        intent=intent,
+                        answered_question_id=answered_question_id,
                     ):
                         raise ComposerConflictError(
                             "Model step idempotency key was reused"
@@ -199,6 +224,36 @@ class SqlComposerModelStepRepository:
                 else:
                     if if_match != f'"{draft.version}"':
                         raise ComposerConflictError("Composer draft changed")
+                    if answered_question_id is not None:
+                        question = database.scalar(
+                            select(ComposerQuestionRow)
+                            .where(
+                                ComposerQuestionRow.id == str(answered_question_id),
+                                ComposerQuestionRow.draft_id == str(draft_id),
+                            )
+                            .with_for_update()
+                        )
+                        if (
+                            question is None
+                            or question.state != "answered"
+                            or question.answer_message_id is None
+                            or draft.version != question.base_version + 2
+                        ):
+                            raise ComposerConflictError("Question answer changed")
+                        prior_resume = database.scalar(
+                            select(ComposerModelStepRow.id).where(
+                                ComposerModelStepRow.draft_id == str(draft_id),
+                                ComposerModelStepRow.answered_question_id
+                                == str(answered_question_id),
+                                (ComposerModelStepRow.state == "completed")
+                                | (
+                                    (ComposerModelStepRow.state == "running")
+                                    & (ComposerModelStepRow.expires_at > now)
+                                ),
+                            )
+                        )
+                        if prior_resume is not None:
+                            raise ComposerConflictError("Question was already resumed")
                     connection = self._connection(database, connection_id)
                     self._authorize(
                         database,
@@ -235,7 +290,12 @@ class SqlComposerModelStepRepository:
                         payload_digest=payload_digest,
                         idempotency_key=idempotency_key,
                         state="running",
+                        intent=intent,
+                        answered_question_id=(
+                            str(answered_question_id) if answered_question_id else None
+                        ),
                         proposal_id=None,
+                        question_id=None,
                         safe_error_code=None,
                         created_at=now,
                         updated_at=now,
@@ -298,6 +358,183 @@ class SqlComposerModelStepRepository:
         except SQLAlchemyError:
             raise PersistenceError from None
 
+    def authorize_before_dispatch(
+        self, owner_id: UUID, draft_id: UUID, step_id: UUID
+    ) -> None:
+        """Recheck live account, grant, and step fences immediately before egress."""
+
+        try:
+            with Session(self._engine) as database, database.begin():
+                draft = owned_draft(database, owner_id, draft_id)
+                row = _owned_step(database, owner_id, draft_id, step_id, lock=False)
+                if (
+                    row.state != "running"
+                    or utc(row.expires_at) <= utc(self._clock())
+                    or draft.version != row.base_version
+                ):
+                    raise ComposerConflictError("Model step changed before dispatch")
+                connection = self._connection(database, UUID(row.connection_id))
+                self._authorize(
+                    database,
+                    owner_id,
+                    connection,
+                    expected_role=row.actor_role,
+                    approved_endpoint=row.approved_endpoint,
+                    approved_model=row.model,
+                    expected_generation=row.connection_generation,
+                )
+        except (
+            ComposerConflictError,
+            ComposerNotFoundError,
+            ConnectionAuthorizationError,
+        ):
+            raise
+        except SQLAlchemyError:
+            raise PersistenceError from None
+
+    def list_questions(
+        self,
+        owner_id: UUID,
+        draft_id: UUID,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        order: PageOrder = "asc",
+    ) -> tuple[ComposerQuestion, ...]:
+        """Read one bounded owner-scoped page with exact linked answer text."""
+
+        validate_page(limit, offset)
+        validate_page_order(order)
+        try:
+            with Session(self._engine) as database:
+                owned_draft(database, owner_id, draft_id)
+                rows = database.scalars(
+                    select(ComposerQuestionRow)
+                    .where(ComposerQuestionRow.draft_id == str(draft_id))
+                    .order_by(
+                        ComposerQuestionRow.created_at.desc()
+                        if order == "desc"
+                        else ComposerQuestionRow.created_at.asc(),
+                        ComposerQuestionRow.id.desc()
+                        if order == "desc"
+                        else ComposerQuestionRow.id.asc(),
+                    )
+                    .limit(limit)
+                    .offset(offset)
+                ).all()
+                return tuple(self._question(database, row) for row in rows)
+        except SQLAlchemyError:
+            raise PersistenceError from None
+
+    def get_question(
+        self, owner_id: UUID, draft_id: UUID, question_id: UUID
+    ) -> ComposerQuestion:
+        try:
+            with Session(self._engine) as database:
+                owned_draft(database, owner_id, draft_id)
+                row = self._owned_question(database, draft_id, question_id)
+                return self._question(database, row)
+        except SQLAlchemyError:
+            raise PersistenceError from None
+
+    def answer_question(  # noqa: PLR0913 - explicit owner and version fences
+        self,
+        owner_id: UUID,
+        draft_id: UUID,
+        question_id: UUID,
+        *,
+        content: str,
+        if_match: str,
+        idempotency_key: str,
+    ) -> tuple[ComposerQuestion, str]:
+        """Atomically append a human answer and close the exact pending question."""
+
+        if not content.strip() or not idempotency_key:
+            raise ValueError("Question answer is invalid")
+        message_id = uuid5(
+            NAMESPACE_URL,
+            f"composer-question-answer:{owner_id}:{draft_id}:{question_id}:{idempotency_key}",
+        )
+        try:
+            with Session(self._engine) as database, database.begin():
+                serialize_sqlite_write(database, self._engine)
+                draft = owned_draft(database, owner_id, draft_id, lock=True)
+                question = self._owned_question(
+                    database, draft_id, question_id, lock=True
+                )
+                if question.state == "answered":
+                    prior = database.get(ComposerMessageRow, question.answer_message_id)
+                    if (
+                        question.answer_message_id == str(message_id)
+                        and prior is not None
+                        and prior.content == content
+                    ):
+                        return self._question(database, question), f'"{draft.version}"'
+                    raise ComposerConflictError("Question was already answered")
+                if if_match != f'"{draft.version}"':
+                    raise ComposerConflictError("Composer draft changed")
+                if draft.version != question.base_version + 1:
+                    raise ComposerConflictError("Question changed before answer")
+                now = self._clock()
+                database.add(
+                    ComposerMessageRow(
+                        id=str(message_id),
+                        draft_id=str(draft_id),
+                        role="user",
+                        content=content,
+                        created_at=now,
+                    )
+                )
+                question.state = "answered"
+                question.answer_message_id = str(message_id)
+                question.answered_at = now
+                draft.version += 1
+                draft.updated_at = now
+                record_content_audit(
+                    database,
+                    event_id=self._new_id(),
+                    owner_id=owner_id,
+                    actor_id=owner_id,
+                    operation="question_answer",
+                    target_kind="composer_question",
+                    target_id=question_id,
+                    draft_id=draft_id,
+                    draft_version=draft.version,
+                    created_at=now,
+                )
+                database.flush()
+                return self._question(database, question), f'"{draft.version}"'
+        except ComposerConflictError, ComposerNotFoundError:
+            raise
+        except IntegrityError:
+            raise ComposerConflictError("Question answer changed") from None
+        except SQLAlchemyError:
+            raise PersistenceError from None
+
+    @staticmethod
+    def _owned_question(
+        database: Session, draft_id: UUID, question_id: UUID, *, lock: bool = False
+    ) -> ComposerQuestionRow:
+        statement = select(ComposerQuestionRow).where(
+            ComposerQuestionRow.id == str(question_id),
+            ComposerQuestionRow.draft_id == str(draft_id),
+        )
+        if lock:
+            statement = statement.with_for_update()
+        row = database.scalar(statement)
+        if row is None:
+            raise ComposerNotFoundError("Composer question does not exist")
+        return row
+
+    @staticmethod
+    def _question(database: Session, row: ComposerQuestionRow) -> ComposerQuestion:
+        answer = (
+            database.get(ComposerMessageRow, row.answer_message_id)
+            if row.answer_message_id
+            else None
+        )
+        return question_from_row(row, answer_content=answer.content if answer else None)
+
     def cancel_model_step(
         self,
         owner_id: UUID,
@@ -337,8 +574,8 @@ class SqlComposerModelStepRepository:
         *,
         proposed_value: str,
         provenance: str,
-    ) -> ComposerProposal:
-        """Publish one pending proposal only if every start-time fence still holds."""
+    ) -> ComposerProposal | ComposerQuestion:
+        """Publish a typed result only if every start-time fence still holds."""
 
         now = self._clock()
         try:
@@ -355,6 +592,14 @@ class SqlComposerModelStepRepository:
                     ):
                         return proposal_from_row(prior)
                     raise ComposerConflictError("Model step result changed")
+                if row.state == "completed" and row.question_id:
+                    prior_question = database.get(ComposerQuestionRow, row.question_id)
+                    if (
+                        prior_question is not None
+                        and prior_question.text == proposed_value
+                    ):
+                        return question_from_row(prior_question, answer_content=None)
+                    raise ComposerConflictError("Model step result changed")
                 if row.state != "running" or utc(row.expires_at) <= utc(now):
                     raise ComposerConflictError("Model step is no longer active")
                 if draft.version != row.base_version:
@@ -369,6 +614,43 @@ class SqlComposerModelStepRepository:
                     approved_model=row.model,
                     expected_generation=row.connection_generation,
                 )
+                if row.intent == "question":
+                    proposed_value = validated_question(proposed_value)
+                    question = ComposerQuestionRow(
+                        id=str(self._new_id()),
+                        draft_id=str(draft_id),
+                        model_step_id=row.id,
+                        base_version=row.base_version,
+                        state="pending",
+                        text=proposed_value,
+                        answer_message_id=None,
+                        created_at=now,
+                        answered_at=None,
+                    )
+                    database.add(question)
+                    row.state = "completed"
+                    row.question_id = question.id
+                    row.updated_at = now
+                    draft.version += 1
+                    draft.updated_at = now
+                    for operation, target_kind, target_id in (
+                        ("model_step_complete", "composer_model_step", step_id),
+                        ("question_create", "composer_question", UUID(question.id)),
+                    ):
+                        record_content_audit(
+                            database,
+                            event_id=self._new_id(),
+                            owner_id=owner_id,
+                            actor_id=SYSTEM_ACTOR_ID,
+                            operation=operation,
+                            target_kind=target_kind,
+                            target_id=target_id,
+                            draft_id=draft_id,
+                            draft_version=draft.version,
+                            created_at=now,
+                        )
+                    database.flush()
+                    return question_from_row(question, answer_content=None)
                 proposal = ComposerProposalRow(
                     id=str(self._new_id()),
                     draft_id=str(draft_id),
@@ -566,6 +848,8 @@ class SqlComposerModelStepRepository:
         approved_model: str,
         if_match: str,
         payload_digest: str,
+        intent: str,
+        answered_question_id: UUID | None,
     ) -> bool:
         return (
             row.connection_id == str(connection_id)
@@ -573,6 +857,9 @@ class SqlComposerModelStepRepository:
             and row.model == approved_model
             and if_match == f'"{row.base_version}"'
             and row.payload_digest == payload_digest
+            and row.intent == intent
+            and row.answered_question_id
+            == (str(answered_question_id) if answered_question_id else None)
         )
 
     @staticmethod

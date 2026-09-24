@@ -11,6 +11,7 @@ from threading import Event, Lock, Thread
 _KEY = "composer-e2e-write-only-secret"
 _MODEL = "composer-e2e-model"
 _SLOW_MODEL = "composer-e2e-slow-model"
+_QUESTION_PROMPT = "E2E ask for the missing report date."
 _MAXIMUM_REQUEST_BYTES = 16_384
 _lock = Lock()
 _slow_started = Event()
@@ -104,7 +105,16 @@ class Handler(BaseHTTPRequestHandler):
             self._send(503, {"error": "Provider temporarily unavailable"})
             return
         self._record("chat", 200)
-        self._send(200, {"choices": [{"message": {"content": "Connection healthy"}}]})
+        question = any(
+            isinstance(item, dict)
+            and item.get("role") == "user"
+            and item.get("content") == _QUESTION_PROMPT
+            for item in payload["messages"]
+        )
+        content = (
+            "Which date should this report use?" if question else "Connection healthy"
+        )
+        self._send(200, {"choices": [{"message": {"content": content}}]})
 
 
 class Server(ThreadingHTTPServer):

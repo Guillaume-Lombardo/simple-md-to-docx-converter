@@ -10,6 +10,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { AuthController, type AuthState } from "./controller";
+import { redirectProtected } from "./navigation";
 
 const AuthContext = createContext<AuthController | null>(null);
 
@@ -45,8 +46,14 @@ export function Protected({ children }: { children: ReactNode }) {
   const { controller, state } = useAuth();
   const router = useRouter();
   useEffect(() => {
-    if (state.phase === "anonymous") router.replace("/login");
-    if (state.phase === "restricted") router.replace("/change-password");
+    const destination =
+      state.phase === "anonymous"
+        ? "/login"
+        : state.phase === "restricted"
+          ? "/change-password"
+          : null;
+    if (!destination) return;
+    redirectProtected(destination, (path) => router.replace(path));
   }, [router, state.phase]);
   if (state.phase === "loading")
     return <p aria-live="polite">Loading your session…</p>;

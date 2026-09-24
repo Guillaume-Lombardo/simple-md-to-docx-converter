@@ -26,6 +26,8 @@ Start with the guide for your role:
 - [Quickstart operations](quickstart.md): local profiles, runtime selection, origins and recovery.
 - [User guide](user-guide.md): sign in, choose templates, submit conversions, cancel work, and
   download results.
+- [Composer workspace](composer.md): guided messages, reviewed proposals, exact revisions, and
+  private document previews when an authorized model connection is available.
 - [API guide](api-guide.md): authentication, CSRF protection, conversion and template endpoints,
   idempotency, errors, and result retrieval.
 - [Command-line interface](cli.md): stable output, profiles, remote command families, and local

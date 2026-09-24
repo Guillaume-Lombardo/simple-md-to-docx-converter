@@ -1171,3 +1171,135 @@ test("disposing during history loading prevents subsequent pages", async () => {
   expect(json).toHaveBeenCalledTimes(2);
   expect(controller.snapshot().recent).toEqual([]);
 });
+
+test("ZIP source is sent unchanged to Composer's scanned draft upload", async () => {
+  const draftId = "00000000-0000-4000-8000-000000000301";
+  const multipartWithMetadata = vi.fn().mockResolvedValue({
+    data: { id: draftId },
+    location: `/api/v1/composer/drafts/${draftId}`,
+    status: 201,
+  });
+  const controller = await loadedController(
+    api({
+      json: vi
+        .fn()
+        .mockResolvedValueOnce(options())
+        .mockResolvedValueOnce({ items: [] }),
+      multipartWithMetadata:
+        multipartWithMetadata as unknown as ApiTransport["multipartWithMetadata"],
+    }),
+  );
+  const source = new File(["archive"], "assets.zip", {
+    type: "application/zip",
+  });
+  controller.setSource([source]);
+  expect(await controller.createComposerDraft()).toBe(draftId);
+  expect(controller.snapshot().source).toBe(source);
+  expect(
+    (multipartWithMetadata.mock.calls[0]![1] as FormData).get("source"),
+  ).toBe(source);
+  controller.dispose();
+});
+
+test("late browser restoration cannot replace a new human file selection", async () => {
+  const controller = await loadedController(
+    api({
+      json: vi
+        .fn()
+        .mockResolvedValueOnce(options())
+        .mockResolvedValueOnce({ items: [] }),
+    }),
+  );
+  const beforeRead = controller.inputVersion();
+  const chosen = new File(["# Human"], "human.md");
+  controller.setSource([chosen]);
+  expect(
+    controller.restoreInputs(
+      {
+        source: new File(["# Old"], "old.md"),
+        output: "pdf",
+        dialect: "auto",
+        slideLevel: 2,
+        query: "",
+      },
+      beforeRead,
+    ),
+  ).toBe(false);
+  expect(controller.snapshot().source).toBe(chosen);
+  expect(controller.snapshot().output).toBe("docx");
+  controller.dispose();
+});
+
+test("changing the source fences an obsolete Composer draft response", async () => {
+  let complete!: (value: unknown) => void;
+  let signal: AbortSignal | undefined;
+  const multipartWithMetadata = vi.fn(
+    (
+      _path: string,
+      _form: FormData,
+      _schema: unknown,
+      options: { signal?: AbortSignal },
+    ) => {
+      signal = options.signal;
+      return new Promise((resolve) => {
+        complete = resolve;
+      });
+    },
+  );
+  const controller = await loadedController(
+    api({
+      json: vi
+        .fn()
+        .mockResolvedValueOnce(options())
+        .mockResolvedValueOnce({ items: [] }),
+      multipartWithMetadata:
+        multipartWithMetadata as unknown as ApiTransport["multipartWithMetadata"],
+    }),
+  );
+  controller.setSource([new File(["# Old"], "old.md")]);
+  const pending = controller.createComposerDraft();
+  controller.setSource([new File(["# New"], "new.md")]);
+  complete({
+    data: { id: "obsolete" },
+    location: "/api/v1/composer/drafts/obsolete",
+    status: 201,
+  });
+  expect(await pending).toBeUndefined();
+  expect(signal?.aborted).toBe(true);
+  expect(controller.snapshot().source?.name).toBe("new.md");
+  expect(controller.snapshot().composerPending).toBe(false);
+  controller.dispose();
+});
+
+test("a completed single-file result hands off through the conversion reference", async () => {
+  const draftId = "00000000-0000-4000-8000-000000000301";
+  const jsonWithMetadata = vi.fn().mockResolvedValue({
+    data: { id: draftId },
+    location: `/api/v1/composer/drafts/${draftId}`,
+    status: 201,
+  });
+  const controller = await loadedController(
+    api({
+      json: vi
+        .fn()
+        .mockResolvedValueOnce(options())
+        .mockResolvedValueOnce({
+          items: [job({ state: "succeeded", output: "pptx" })],
+        })
+        .mockResolvedValueOnce(job({ state: "succeeded", output: "pptx" })),
+      jsonWithMetadata,
+    }),
+  );
+  await controller.openJob(job().id);
+  expect(await controller.handoffActiveResult()).toBe(draftId);
+  expect(jsonWithMetadata).toHaveBeenCalledWith(
+    `/api/v1/composer/drafts/from-conversion/${job().id}`,
+    expect.anything(),
+    expect.objectContaining({
+      body: JSON.stringify({ title: null }),
+      csrf: true,
+      method: "POST",
+    }),
+  );
+  controller.dispose();
+});

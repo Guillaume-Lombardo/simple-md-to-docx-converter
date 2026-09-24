@@ -4,6 +4,8 @@ import hashlib
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from threading import Event
+from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -11,7 +13,11 @@ from pytest_mock import MockerFixture
 from sqlalchemy import Engine, delete, select, update
 from sqlalchemy.orm import Session
 
-from markweave.composer.connections import ConnectionAuthorizationError
+from markweave.composer.connections import (
+    ConnectionActor,
+    ConnectionAuthorizationError,
+    ConnectionService,
+)
 from markweave.composer.revisions import ComposerConflictError, ComposerNotFoundError
 from markweave.persistence.composer import (
     SYSTEM_ACTOR_ID,
@@ -20,7 +26,8 @@ from markweave.persistence.composer import (
     SqlComposerModelStepRepository,
     SqlComposerRepository,
 )
-from markweave.persistence.migrations import upgrade_database
+from markweave.persistence.composer.common import PageOrder
+from markweave.persistence.migrations import downgrade_database, upgrade_database
 from markweave.persistence.schema import (
     ComposerConnectionGrantRow,
     ComposerConnectionRow,
@@ -28,6 +35,7 @@ from markweave.persistence.schema import (
     ComposerModelStepRow,
     ComposerPersonalPermissionRow,
     ComposerProposalRow,
+    ComposerQuestionRow,
     UserRow,
 )
 from markweave.persistence.sql import create_database_engine
@@ -143,6 +151,317 @@ def _start(  # noqa: PLR0913 - explicit test admission inputs
         max_active=max_active,
         lease=timedelta(minutes=5),
     )
+
+
+def _question_step(  # noqa: PLR0913 - explicit admission test identity
+    steps: SqlComposerModelStepRepository,
+    owner: UUID,
+    draft_id: UUID,
+    connection_id: UUID,
+    *,
+    key: str = "question-step",
+    etag: str = '"1"',
+    answered_question_id: UUID | None = None,
+):
+    return steps.start_model_step(
+        owner,
+        draft_id,
+        connection_id=connection_id,
+        approved_endpoint=_ENDPOINT,
+        approved_model=_MODEL,
+        if_match=etag,
+        idempotency_key=key,
+        payload_digest=_PAYLOAD,
+        max_active=2,
+        lease=timedelta(minutes=5),
+        intent="question" if answered_question_id is None else "proposal",
+        answered_question_id=answered_question_id,
+    )
+
+
+def test_question_history_newest_first_is_bounded_and_owner_scoped(
+    tmp_path: Path,
+) -> None:
+    engine, drafts, steps, owner, other, connection_id = _setup(tmp_path)
+    try:
+        draft = _draft(drafts, owner)
+        now = datetime.now(UTC)
+        with Session(engine) as database, database.begin():
+            for number in range(1, 111):
+                step_id = str(UUID(int=number + 10_000))
+                database.add(
+                    ComposerModelStepRow(
+                        id=step_id,
+                        draft_id=str(draft.id),
+                        owner_id=str(owner),
+                        actor_role="user",
+                        base_version=1,
+                        connection_id=str(connection_id),
+                        connection_generation=1,
+                        approved_endpoint=_ENDPOINT,
+                        model=_MODEL,
+                        payload_digest=_PAYLOAD,
+                        idempotency_key=f"history-{number}",
+                        state="completed",
+                        intent="question",
+                        created_at=now,
+                        updated_at=now,
+                        expires_at=now + timedelta(minutes=5),
+                    )
+                )
+                database.add(
+                    ComposerQuestionRow(
+                        id=str(UUID(int=number + 20_000)),
+                        draft_id=str(draft.id),
+                        model_step_id=step_id,
+                        base_version=1,
+                        state="pending",
+                        text=f"Question {number}?",
+                        answer_message_id=None,
+                        created_at=now,
+                        answered_at=None,
+                    )
+                )
+        oldest = steps.list_questions(owner, draft.id, limit=100)
+        newest = steps.list_questions(owner, draft.id, limit=100, order="desc")
+        older = steps.list_questions(
+            owner, draft.id, limit=100, offset=100, order="desc"
+        )
+        assert len(newest) == 100 and len(older) == 10
+        assert [item.id for item in newest + older] == [
+            item.id
+            for item in reversed(
+                steps.list_questions(owner, draft.id, limit=100)
+                + steps.list_questions(owner, draft.id, limit=100, offset=100)
+            )
+        ]
+        assert newest[0].text == "Question 110?"
+        assert oldest[0].text == "Question 1?"
+        with pytest.raises(ComposerNotFoundError):
+            steps.list_questions(other, draft.id, order="desc")
+        with pytest.raises(ValueError, match="order"):
+            steps.list_questions(owner, draft.id, order=cast(PageOrder, "invalid"))
+    finally:
+        engine.dispose()
+
+
+def test_question_answer_and_resume_survive_restart_and_preserve_human_precedence(
+    tmp_path: Path,
+) -> None:
+    engine, drafts, steps, owner, other, connection_id = _setup(tmp_path)
+    try:
+        draft = _draft(drafts, owner)
+        step, created = _question_step(steps, owner, draft.id, connection_id)
+        assert created and step.intent == "question"
+        question = steps.finish_model_step(
+            owner,
+            draft.id,
+            step.id,
+            proposed_value="Which audience should this document address?",
+            provenance=f"model-step:{step.id}",
+        )
+        assert question.state == "pending"
+        assert steps.get_model_step(owner, draft.id, step.id).question_id == question.id
+        assert steps.get_model_step(owner, draft.id, step.id).proposal_id is None
+        restarted = SqlComposerModelStepRepository(engine)
+        assert restarted.get_question(owner, draft.id, question.id) == question
+        with pytest.raises(ComposerNotFoundError):
+            restarted.get_question(other, draft.id, question.id)
+        with pytest.raises(ComposerConflictError, match="Question answer changed"):
+            _question_step(
+                restarted,
+                owner,
+                draft.id,
+                connection_id,
+                key="early-resume",
+                etag='"2"',
+                answered_question_id=question.id,
+            )
+        answered, etag = restarted.answer_question(
+            owner,
+            draft.id,
+            question.id,
+            content="New customers",
+            if_match='"2"',
+            idempotency_key="answer-1",
+        )
+        assert etag == '"3"'
+        assert answered.state == "answered"
+        assert answered.answer_content == "New customers"
+        assert answered.answer_message_id is not None
+        assert restarted.list_questions(owner, draft.id) == (answered,)
+        assert restarted.answer_question(
+            owner,
+            draft.id,
+            question.id,
+            content="New customers",
+            if_match='"2"',
+            idempotency_key="answer-1",
+        ) == (answered, '"3"')
+        with pytest.raises(ComposerConflictError, match="already answered"):
+            restarted.answer_question(
+                owner,
+                draft.id,
+                question.id,
+                content="Different answer",
+                if_match='"3"',
+                idempotency_key="answer-2",
+            )
+        resumed, created = _question_step(
+            restarted,
+            owner,
+            draft.id,
+            connection_id,
+            key="resume-1",
+            etag='"3"',
+            answered_question_id=question.id,
+        )
+        assert created and resumed.answered_question_id == question.id
+        assert _question_step(
+            restarted,
+            owner,
+            draft.id,
+            connection_id,
+            key="resume-1",
+            etag='"3"',
+            answered_question_id=question.id,
+        ) == (resumed, False)
+        with pytest.raises(ComposerConflictError, match="already resumed"):
+            _question_step(
+                restarted,
+                owner,
+                draft.id,
+                connection_id,
+                key="resume-2",
+                etag='"3"',
+                answered_question_id=question.id,
+            )
+        with Session(engine) as database, database.begin():
+            database.execute(
+                update(ComposerModelStepRow)
+                .where(ComposerModelStepRow.id == str(resumed.id))
+                .values(expires_at=datetime.now(UTC) - timedelta(seconds=1))
+            )
+        resumed, created = _question_step(
+            restarted,
+            owner,
+            draft.id,
+            connection_id,
+            key="resume-after-expiry",
+            etag='"3"',
+            answered_question_id=question.id,
+        )
+        assert created
+        drafts.save_draft(
+            owner, draft.id, title="Human edit", content="edited", if_match='"3"'
+        )
+        with pytest.raises(ComposerConflictError, match="draft changed"):
+            restarted.finish_model_step(
+                owner,
+                draft.id,
+                resumed.id,
+                proposed_value="Stale suggestion",
+                provenance=f"model-step:{resumed.id}",
+            )
+    finally:
+        engine.dispose()
+
+
+def test_question_answer_requires_current_version_and_is_serialized(
+    tmp_path: Path,
+) -> None:
+    engine, drafts, steps, owner, other, connection_id = _setup(tmp_path)
+    try:
+        draft = _draft(drafts, owner)
+        step, _ = _question_step(steps, owner, draft.id, connection_id)
+        question = steps.finish_model_step(
+            owner,
+            draft.id,
+            step.id,
+            proposed_value="What is the missing date?",
+            provenance=f"model-step:{step.id}",
+        )
+        with pytest.raises(ComposerNotFoundError):
+            steps.answer_question(
+                other,
+                draft.id,
+                question.id,
+                content="Tomorrow",
+                if_match='"2"',
+                idempotency_key="other",
+            )
+        with pytest.raises(ComposerConflictError, match="draft changed"):
+            steps.answer_question(
+                owner,
+                draft.id,
+                question.id,
+                content="Tomorrow",
+                if_match='"1"',
+                idempotency_key="stale",
+            )
+
+        def answer(key: str) -> str:
+            try:
+                steps.answer_question(
+                    owner,
+                    draft.id,
+                    question.id,
+                    content=key,
+                    if_match='"2"',
+                    idempotency_key=key,
+                )
+                return "answered"
+            except ComposerConflictError:
+                return "conflict"
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = tuple(pool.map(answer, ("first", "second")))
+        assert sorted(outcomes) == ["answered", "conflict"]
+        assert len(drafts.list_messages(owner, draft.id)) == 1
+    finally:
+        engine.dispose()
+
+
+def test_question_migration_preserves_existing_proposal_steps(tmp_path: Path) -> None:
+    engine, drafts, steps, owner, _other, connection_id = _setup(tmp_path)
+    try:
+        draft = _draft(drafts, owner)
+        old_step, _ = _start(steps, owner, draft.id, connection_id)
+        downgrade_database(engine, "20260923_22")
+        upgrade_database(engine)
+        restored = SqlComposerModelStepRepository(engine).get_model_step(
+            owner, draft.id, old_step.id
+        )
+        assert restored.intent == "proposal"
+        assert restored.question_id is None
+        assert restored.answered_question_id is None
+    finally:
+        engine.dispose()
+
+
+def test_question_publication_rechecks_connection_grant(tmp_path: Path) -> None:
+    engine, drafts, steps, owner, _other, connection_id = _setup(tmp_path)
+    try:
+        draft = _draft(drafts, owner)
+        step, _ = _question_step(steps, owner, draft.id, connection_id)
+        with Session(engine) as database, database.begin():
+            database.execute(
+                delete(ComposerConnectionGrantRow).where(
+                    ComposerConnectionGrantRow.connection_id == str(connection_id),
+                    ComposerConnectionGrantRow.user_id == str(owner),
+                )
+            )
+        with pytest.raises(ConnectionAuthorizationError):
+            steps.finish_model_step(
+                owner,
+                draft.id,
+                step.id,
+                proposed_value="What is the missing date?",
+                provenance=f"model-step:{step.id}",
+            )
+        assert steps.list_questions(owner, draft.id) == ()
+    finally:
+        engine.dispose()
 
 
 def test_start_is_durable_idempotent_globally_bounded_and_owner_scoped(
@@ -283,6 +602,70 @@ def test_commit_rechecks_live_authority_and_connection(
             )
         with Session(engine) as database:
             assert database.scalars(select(ComposerProposalRow)).all() == []
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("mutation", ["grant", "user_active", "user_role"])
+def test_paused_before_dispatch_revocation_sends_zero_provider_requests(
+    tmp_path: Path, mocker: MockerFixture, mutation: str
+) -> None:
+    engine, drafts, steps, owner, _other, connection_id = _setup(tmp_path)
+    try:
+        draft = _draft(drafts, owner)
+        step, _ = _start(steps, owner, draft.id, connection_id)
+        gateway = mocker.Mock()
+        service = ConnectionService(
+            mocker.Mock(), mocker.Mock(), gateway, mocker.Mock()
+        )
+        prepared, resume = Event(), Event()
+
+        def paused_prepare(*_args: object, **_kwargs: object):
+            prepared.set()
+            assert resume.wait(2)
+            return (
+                mocker.Mock(selected_model=_MODEL, endpoint=_ENDPOINT),
+                mocker.Mock(),
+                1,
+            )
+
+        mocker.patch.object(service, "_prepare", side_effect=paused_prepare)
+        actor = ConnectionActor(owner, is_admin=False, can_manage_personal=False)
+
+        def dispatch() -> None:
+            service.chat(
+                actor,
+                connection_id,
+                [{"role": "user", "content": "approved"}],
+                max_output_tokens=8,
+                before_dispatch=lambda: steps.authorize_before_dispatch(
+                    owner, draft.id, step.id
+                ),
+            )
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(dispatch)
+            assert prepared.wait(2)
+            with Session(engine) as database, database.begin():
+                if mutation == "grant":
+                    database.execute(delete(ComposerConnectionGrantRow))
+                elif mutation == "user_active":
+                    database.execute(
+                        update(UserRow)
+                        .where(UserRow.id == str(owner))
+                        .values(active=False)
+                    )
+                else:
+                    database.execute(
+                        update(UserRow)
+                        .where(UserRow.id == str(owner))
+                        .values(role="admin")
+                    )
+            resume.set()
+            with pytest.raises(ConnectionAuthorizationError):
+                future.result(timeout=2)
+        gateway.chat.assert_not_called()
+        assert steps.list_questions(owner, draft.id) == ()
     finally:
         engine.dispose()
 

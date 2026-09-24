@@ -751,3 +751,73 @@ test("an all-expired history produces an empty recent list", async () => {
   expect(controller.snapshot().recent).toEqual([]);
   controller.dispose();
 });
+
+test("late Revert restoration does not replace a new selected Office file", async () => {
+  const controller = await loadedController(
+    api({
+      json: vi
+        .fn()
+        .mockResolvedValueOnce(capabilities())
+        .mockResolvedValueOnce({ items: [], limit: 10, offset: 0, total: 0 }),
+    }),
+  );
+  const beforeRead = controller.inputVersion();
+  const chosen = new File(["fresh"], "new.pptx");
+  controller.setSource([chosen]);
+  expect(
+    controller.restoreInputs(
+      {
+        source: new File(["old"], "old.pptx"),
+        options: {
+          extraction: "marp",
+          include_images: true,
+          include_notes: false,
+        },
+      },
+      beforeRead,
+    ),
+  ).toBe(false);
+  expect(controller.snapshot().source).toBe(chosen);
+  expect(controller.snapshot().options?.extraction).toBe("anydoc");
+  controller.dispose();
+});
+
+test("new source selection fences an obsolete Composer upload response", async () => {
+  let complete!: (value: unknown) => void;
+  let signal: AbortSignal | undefined;
+  const multipartWithMetadata = vi.fn(
+    (
+      _path: string,
+      _form: FormData,
+      _schema: unknown,
+      request: { signal?: AbortSignal },
+    ) => {
+      signal = request.signal;
+      return new Promise((resolve) => {
+        complete = resolve;
+      });
+    },
+  );
+  const controller = await loadedController(
+    api({
+      json: vi
+        .fn()
+        .mockResolvedValueOnce(capabilities())
+        .mockResolvedValueOnce({ items: [], limit: 10, offset: 0, total: 0 }),
+      multipartWithMetadata:
+        multipartWithMetadata as unknown as ApiTransport["multipartWithMetadata"],
+    }),
+  );
+  controller.setSource([new File(["old"], "old.docx")]);
+  const pending = controller.createComposerDraft();
+  controller.setSource([new File(["new"], "new.docx")]);
+  complete({
+    data: { id: "obsolete" },
+    location: "/api/v1/composer/drafts/obsolete",
+    status: 201,
+  });
+  expect(await pending).toBeUndefined();
+  expect(signal?.aborted).toBe(true);
+  expect(controller.snapshot().source?.name).toBe("new.docx");
+  controller.dispose();
+});

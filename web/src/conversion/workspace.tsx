@@ -5,6 +5,7 @@ import {
   type DragEvent,
   type FormEvent,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -17,6 +18,11 @@ import {
   isCancellable,
   statusPresentation,
 } from "./controller";
+import {
+  ownerStorageEpoch,
+  readConversionInputs,
+  writeConversionInputs,
+} from "./persistence";
 
 export function saveDownload(
   download: { blob: Blob; filename: string },
@@ -38,6 +44,12 @@ export function ConversionWorkspace({
   presentation?: boolean;
 }) {
   const { controller: auth, state: authState } = useAuth();
+  const ownerId =
+    authState.phase === "authenticated" ? authState.user.id : null;
+  const storageEpoch = useMemo(
+    () => (ownerId ? ownerStorageEpoch(ownerId) : null),
+    [ownerId],
+  );
   const [controller] = useState(
     () =>
       supplied ??
@@ -55,14 +67,122 @@ export function ConversionWorkspace({
     controller.snapshot,
     controller.snapshot,
   );
+  const { source, output, selection, dialect, slideLevel, active } = state;
+  const activeJobId = active?.id;
   const [query, setQuery] = useState("");
   const [dragging, setDragging] = useState(false);
+  const [restored, setRestored] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [readError, setReadError] = useState(false);
+  const [reading, setReading] = useState(false);
+  const [readAttempt, setReadAttempt] = useState(0);
+  const [storageError, setStorageError] = useState(false);
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  const queryVersion = useRef(0);
+  const initialInputVersion = useRef(0);
+  const initialQueryVersion = useRef(0);
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    void controller.load();
-    return () => controller.dispose();
-  }, [controller]);
+    if (!ownerId) return;
+    let current = true;
+    void (async () => {
+      await controller.load();
+      if (!current) return;
+      initialInputVersion.current = controller.inputVersion();
+      initialQueryVersion.current = queryVersion.current;
+      setLoaded(true);
+    })();
+    return () => {
+      current = false;
+      controller.dispose();
+    };
+  }, [controller, ownerId]);
+
+  useEffect(() => {
+    if (!loaded || !ownerId) return;
+    let current = true;
+    void (async () => {
+      try {
+        const saved = await readConversionInputs(ownerId, presentation);
+        if (!current) return;
+        if (
+          saved &&
+          controller.restoreInputs(saved, initialInputVersion.current)
+        ) {
+          if (queryVersion.current === initialQueryVersion.current)
+            setQuery(saved.query);
+        }
+        setReadError(false);
+        setRestored(true);
+      } catch {
+        if (current) setReadError(true);
+      } finally {
+        if (current) setReading(false);
+      }
+    })();
+    return () => {
+      current = false;
+    };
+  }, [controller, loaded, ownerId, presentation, readAttempt]);
+
+  useEffect(() => {
+    if (!restored || !ownerId || storageEpoch === null) return;
+    saveQueue.current = saveQueue.current
+      .catch(() => undefined)
+      .then(() =>
+        writeConversionInputs(
+          ownerId,
+          presentation,
+          { source, output, selection, dialect, slideLevel, activeJobId },
+          query,
+          storageEpoch,
+        ),
+      )
+      .then(
+        () => setStorageError(false),
+        () => setStorageError(true),
+      );
+  }, [
+    restored,
+    ownerId,
+    storageEpoch,
+    presentation,
+    source,
+    output,
+    selection,
+    dialect,
+    slideLevel,
+    activeJobId,
+    query,
+  ]);
+
+  async function openComposer(create: () => Promise<string | undefined>) {
+    if (!ownerId) return;
+    if (!restored && state.source) return;
+    try {
+      await saveQueue.current;
+      if (restored && storageEpoch !== null) {
+        await writeConversionInputs(
+          ownerId,
+          presentation,
+          { source, output, selection, dialect, slideLevel, activeJobId },
+          query,
+          storageEpoch,
+        );
+        setStorageError(false);
+      }
+    } catch {
+      setStorageError(true);
+      if (state.source) return;
+    }
+    const id = await create();
+    if (id) {
+      const link = document.createElement("a");
+      link.href = `/composer?draft=${encodeURIComponent(id)}`;
+      link.click();
+    }
+  }
 
   useEffect(() => {
     if (state.phase !== "ready") return;
@@ -76,11 +196,35 @@ export function ConversionWorkspace({
       current={presentation ? "Presentations" : "Convert"}
       user={authState.user}
       pending={authState.pending}
-      onLogout={() => void auth.logout()}
+      onLogout={() => {
+        void auth.logout();
+      }}
     >
       <h1 className="text-3xl font-semibold">
         {presentation ? "Create a PowerPoint presentation" : "Convert Markdown"}
       </h1>
+      {readError && (
+        <Alert tone="danger">
+          Saved browser inputs could not be loaded. Your current selection is
+          still available. Try loading them again before opening Composer.
+          <button
+            disabled={reading}
+            onClick={() => {
+              setReading(true);
+              setReadAttempt((value) => value + 1);
+            }}
+            type="button"
+          >
+            {reading ? "Loading saved inputs…" : "Try loading saved inputs"}
+          </button>
+        </Alert>
+      )}
+      {storageError && state.source && (
+        <Alert tone="danger">
+          Your selected file could not be saved in this browser. Free browser
+          storage and choose the file again before opening Composer.
+        </Alert>
+      )}
       {state.phase === "loading" && (
         <p aria-live="polite">Loading conversion options…</p>
       )}
@@ -219,7 +363,10 @@ export function ConversionWorkspace({
                   <input
                     autoComplete="off"
                     className="rounded-control border border-muted px-3 py-2"
-                    onChange={(event) => setQuery(event.target.value)}
+                    onChange={(event) => {
+                      queryVersion.current += 1;
+                      setQuery(event.target.value);
+                    }}
                     type="search"
                     value={query}
                   />
@@ -255,6 +402,19 @@ export function ConversionWorkspace({
                   ? "Submitting conversion…"
                   : "Start conversion"}
               </button>
+              {state.source && (
+                <button
+                  disabled={state.composerPending || storageError || !restored}
+                  onClick={() =>
+                    void openComposer(() => controller.createComposerDraft())
+                  }
+                  type="button"
+                >
+                  {state.composerPending
+                    ? "Creating Composer draft…"
+                    : "Open selected source in Composer"}
+                </button>
+              )}
               {state.notice && <p aria-live="polite">{state.notice}</p>}
             </form>
           </section>
@@ -287,18 +447,38 @@ export function ConversionWorkspace({
                   </button>
                 )}
                 {state.active?.state === "succeeded" && (
-                  <button
-                    className="primary-button w-full"
-                    type="button"
-                    onClick={() =>
-                      void controller.download().then((download) => {
-                        if (!download) return;
-                        saveDownload(download);
-                      })
-                    }
-                  >
-                    Download result
-                  </button>
+                  <>
+                    <button
+                      className="primary-button w-full"
+                      type="button"
+                      onClick={() =>
+                        void controller.download().then((download) => {
+                          if (!download) return;
+                          saveDownload(download);
+                        })
+                      }
+                    >
+                      Download result
+                    </button>
+                    {["docx", "pdf", "pptx"].includes(state.active.output) && (
+                      <button
+                        disabled={
+                          state.composerPending ||
+                          ((storageError || !restored) && Boolean(state.source))
+                        }
+                        onClick={() =>
+                          void openComposer(() =>
+                            controller.handoffActiveResult(),
+                          )
+                        }
+                        type="button"
+                      >
+                        {state.composerPending
+                          ? "Creating Composer draft…"
+                          : "Open result in Composer"}
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
             </section>

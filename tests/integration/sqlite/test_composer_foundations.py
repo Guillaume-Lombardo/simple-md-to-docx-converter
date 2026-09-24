@@ -100,6 +100,35 @@ def _artifacts() -> tuple[ArtifactContent, ...]:
     )
 
 
+def test_reversion_source_kind_survives_storage_and_orphan_cleanup(
+    tmp_path: Path,
+) -> None:
+    engine, _objects, repository, owner, _other, _admin = _repo(tmp_path)
+    try:
+        source = b"# Reverse result\n"
+        job_id, result_id = uuid4(), uuid4()
+        digest = hashlib.sha256(source).hexdigest()
+        draft = repository.create_draft_with_source(
+            owner,
+            source,
+            "clean-reversion",
+            title="Reverse result",
+            content=source.decode(),
+            media_type="text/markdown",
+            source_kind="reversion_result",
+            origin_job_id=job_id,
+            origin_result_object_id=result_id,
+            origin_result_sha256=digest,
+        )
+        assert draft.source.kind == "reversion_result"
+        assert draft.source.origin_job_id == job_id
+        assert repository.get_draft(owner, draft.id).source == draft.source
+        assert repository.cleanup_orphan_sources(limit=10) == 0
+        assert repository.read_source(owner, draft.source.object_id) == source
+    finally:
+        engine.dispose()
+
+
 def test_scanned_source_draft_conversation_and_copy_forward_restore(
     tmp_path: Path,
 ) -> None:
@@ -161,12 +190,36 @@ def test_scanned_source_draft_conversation_and_copy_forward_restore(
             proposed_value="guess",
             provenance="model",
         )
+        repository.add_message(
+            owner,
+            draft.id,
+            role="user",
+            content="A human correction",
+            message_id=uuid4(),
+            if_match=repository.get_draft(owner, draft.id).etag,
+        )
+        with pytest.raises(ComposerConflictError):
+            repository.decide_proposal(
+                owner,
+                draft.id,
+                proposal.id,
+                if_match=repository.get_draft(owner, draft.id).etag,
+                state=ProposalState.ACCEPTED,
+                decided_value=None,
+            )
         fresh = repository.get_draft(owner, draft.id)
+        proposal = repository.create_proposal(
+            owner,
+            draft.id,
+            base_version=fresh.version,
+            proposed_value="guess again",
+            provenance="model",
+        )
         rejected = repository.decide_proposal(
             owner,
             draft.id,
             proposal.id,
-            if_match=fresh.etag,
+            if_match=repository.get_draft(owner, draft.id).etag,
             state=ProposalState.REJECTED,
             decided_value=None,
         )
@@ -806,12 +859,29 @@ def test_owner_history_lists_are_sql_bounded_and_stably_paged(tmp_path: Path) ->
             assert len(first) == 100 and len(second) == 10
             assert {item.id for item in first}.isdisjoint(item.id for item in second)
             assert first == method(owner, anchor.id, limit=100)
+            newest = method(owner, anchor.id, limit=100, order="desc")
+            older = method(owner, anchor.id, limit=100, offset=100, order="desc")
+            assert len(newest) == 100 and len(older) == 10
+            assert [item.id for item in newest + older] == [
+                item.id for item in reversed(first + second)
+            ]
+            assert newest == method(owner, anchor.id, limit=100, order="desc")
             with pytest.raises(ComposerNotFoundError):
                 method(other, anchor.id, limit=1, offset=100)
+            with pytest.raises(ComposerNotFoundError):
+                method(other, anchor.id, limit=1, order="desc")
+            with pytest.raises(ValueError, match="order"):
+                method(owner, anchor.id, order="invalid")
         assert [
             item.number
             for item in repository.list_revisions(owner, anchor.id, limit=3, offset=50)
         ] == [51, 52, 53]
+        assert [
+            item.number
+            for item in repository.list_revisions(
+                owner, anchor.id, limit=3, offset=50, order="desc"
+            )
+        ] == [60, 59, 58]
         for limit, offset in ((0, 0), (101, 0), (1, -1), (True, 0)):
             with pytest.raises(ValueError, match="page"):
                 repository.list_drafts(owner, limit=limit, offset=offset)

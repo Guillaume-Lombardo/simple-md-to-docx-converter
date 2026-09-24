@@ -1,4 +1,5 @@
 import type {
+  ComposerDraftResponse,
   ReversionCapabilitiesResponse,
   ReversionResponse,
 } from "../api/generated/types.gen";
@@ -8,8 +9,10 @@ import {
   vGetReversionApiV1ReversionsJobIdGetResponse,
   vGetReversionCapabilitiesApiV1ReversionsCapabilitiesGetResponse,
   vListReversionsApiV1ReversionsGetResponse,
+  vComposerDraftResponse,
 } from "../api/generated/valibot.gen";
-import { ApiError, ApiTransport } from "../api/transport";
+import { ApiError, ApiTransport, type JsonResult } from "../api/transport";
+import type { SavedReversionInputs } from "../conversion/persistence";
 
 const CAPABILITIES_SCHEMA_VERSION = 1;
 const POLL_START_MS = 1_000;
@@ -39,6 +42,7 @@ export type ReversionState = {
   active?: ReversionResponse;
   submitting: boolean;
   cancelling: boolean;
+  composerPending: boolean;
   error?: string;
   notice?: string;
 };
@@ -65,6 +69,9 @@ export class ReversionController {
   private pollFailures = 0;
   private idempotencyKey?: string;
   private submissionOptions?: ReversionSubmissionOptions;
+  private inputGeneration = 0;
+  private composerGeneration = 0;
+  private composerRequest?: AbortController;
 
   constructor(
     private readonly api: ApiTransport = new ApiTransport(),
@@ -148,6 +155,116 @@ export class ReversionController {
       error: undefined,
       notice: undefined,
     });
+  }
+
+  inputVersion(): number {
+    return this.inputGeneration;
+  }
+
+  restoreInputs(
+    inputs: SavedReversionInputs,
+    expectedVersion: number,
+  ): boolean {
+    if (
+      this.state.phase !== "ready" ||
+      this.inputGeneration !== expectedVersion
+    )
+      return false;
+    const savedOptions = inputs.options;
+    const validOptions =
+      savedOptions &&
+      !validateOptions(savedOptions, inputs.source, this.state.capabilities);
+    this.publish({
+      ...this.state,
+      source: inputs.source,
+      options: validOptions ? savedOptions : this.state.options,
+      ...(savedOptions && !validOptions
+        ? {
+            notice:
+              "Saved extraction settings are no longer available. Review the current options.",
+          }
+        : {}),
+    });
+    if (inputs.activeJobId) void this.openJob(inputs.activeJobId);
+    return true;
+  }
+
+  async createComposerDraft(): Promise<string | undefined> {
+    if (this.state.phase !== "ready" || this.state.composerPending) return;
+    const invalid = validateSource(
+      this.state.source,
+      this.state.extensions,
+      this.state.capabilities?.maximum_upload_bytes,
+    );
+    if (invalid) {
+      this.publish({ ...this.state, error: invalid });
+      return;
+    }
+    if (!/\.(docx|pptx|pdf)$/i.test(this.state.source!.name)) {
+      this.publish({
+        ...this.state,
+        error:
+          "Composer accepts selected DOCX, PPTX, or PDF sources. This file remains selected in Revert.",
+      });
+      return;
+    }
+    const form = new FormData();
+    form.append("source", this.state.source!);
+    return this.submitComposerDraft(() =>
+      this.api.multipartWithMetadata(
+        "/api/v1/composer/drafts",
+        form,
+        vComposerDraftResponse,
+        { csrf: true, signal: this.composerRequest?.signal },
+      ),
+    );
+  }
+
+  async handoffActiveResult(): Promise<string | undefined> {
+    const active = this.state.active;
+    if (!active || active.state !== "succeeded" || this.state.composerPending)
+      return;
+    return this.submitComposerDraft(() =>
+      this.api.jsonWithMetadata(
+        `/api/v1/composer/drafts/from-reversion/${active.id}`,
+        vComposerDraftResponse,
+        {
+          body: JSON.stringify({ title: null }),
+          csrf: true,
+          method: "POST",
+          signal: this.composerRequest?.signal,
+        },
+      ),
+    );
+  }
+
+  private async submitComposerDraft(
+    submit: () => Promise<JsonResult<ComposerDraftResponse>>,
+  ): Promise<string | undefined> {
+    this.composerRequest?.abort();
+    const request = new AbortController();
+    this.composerRequest = request;
+    const generation = ++this.composerGeneration;
+    this.publish({ ...this.state, composerPending: true, error: undefined });
+    try {
+      const result = await submit();
+      if (generation !== this.composerGeneration) return;
+      if (
+        result.status !== 201 ||
+        result.location !== `/api/v1/composer/drafts/${result.data.id}`
+      )
+        throw unexpected(result.status);
+      this.publish({ ...this.state, composerPending: false });
+      return result.data.id;
+    } catch (error) {
+      if (generation !== this.composerGeneration || isAbort(error)) return;
+      if (this.authoritativeExpiry(error)) return;
+      this.publish({
+        ...this.state,
+        composerPending: false,
+        error: errorMessage(error, "The Composer draft could not be created."),
+      });
+    }
   }
 
   setExtraction(extraction: ReversionSubmissionOptions["extraction"]): void {
@@ -245,6 +362,7 @@ export class ReversionController {
   }
 
   async openJob(jobId: string): Promise<void> {
+    this.inputGeneration += 1;
     this.activateJob(jobId);
     await this.poll(jobId, this.jobGeneration);
   }
@@ -286,13 +404,19 @@ export class ReversionController {
   async download(): Promise<{ blob: Blob; filename: string } | undefined> {
     const active = this.state.active;
     if (!active || active.state !== "succeeded") return undefined;
+    const generation = this.jobGeneration;
+    const stillSelected = () =>
+      generation === this.jobGeneration && this.state.active?.id === active.id;
     try {
       const response = await this.api.download(
         `/api/v1/reversions/${active.id}/result`,
       );
+      if (!stillSelected()) return undefined;
       const filename = validatedDownloadFilename(response);
-      return { blob: await response.blob(), filename };
+      const blob = await response.blob();
+      return stillSelected() ? { blob, filename } : undefined;
     } catch (error) {
+      if (!stillSelected() || isAbort(error)) return undefined;
       if (this.authoritativeExpiry(error)) return undefined;
       this.publish({
         ...this.state,
@@ -303,6 +427,8 @@ export class ReversionController {
   }
 
   dispose(): void {
+    this.composerGeneration += 1;
+    this.composerRequest?.abort();
     this.loadGeneration += 1;
     this.submissionGeneration += 1;
     this.jobGeneration += 1;
@@ -354,6 +480,7 @@ export class ReversionController {
   }
 
   private activateJob(jobId: string, initialDelay = POLL_START_MS): void {
+    this.invalidateComposer();
     this.jobGeneration += 1;
     this.jobRequest?.abort();
     this.cancellationRequest?.abort();
@@ -396,10 +523,18 @@ export class ReversionController {
   }
 
   private invalidateSubmission(): void {
+    this.inputGeneration += 1;
+    this.invalidateComposer();
     this.submissionGeneration += 1;
     this.submissionRequest?.abort();
     this.idempotencyKey = undefined;
     this.submissionOptions = undefined;
+  }
+
+  private invalidateComposer(): void {
+    this.composerGeneration += 1;
+    this.composerRequest?.abort();
+    this.state = { ...this.state, composerPending: false };
   }
 
   private setOption(option: Partial<ReversionSubmissionOptions>): void {
@@ -559,6 +694,7 @@ function initialState(): ReversionState {
     recent: [],
     submitting: false,
     cancelling: false,
+    composerPending: false,
   };
 }
 

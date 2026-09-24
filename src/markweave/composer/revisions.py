@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
@@ -11,11 +12,16 @@ _SOURCE_MEDIA_TYPES = frozenset(
     {
         "text/markdown",
         "application/pdf",
+        "application/zip",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     }
 )
-_ARTIFACT_MEDIA_TYPES = _SOURCE_MEDIA_TYPES | {"text/html", "text/plain"}
+_ARTIFACT_MEDIA_TYPES = _SOURCE_MEDIA_TYPES | {
+    "application/json",
+    "text/html",
+    "text/plain",
+}
 
 
 class ComposerNotFoundError(LookupError):
@@ -28,6 +34,35 @@ class ComposerConflictError(RuntimeError):
 
 class ComposerArtifactError(RuntimeError):
     """A revision artifact is missing, corrupt, or could not be published."""
+
+
+def direct_publish_lineage(
+    parent_revision_id: UUID | None,
+    parent_model_identity: str | None,
+    parent_render_options: str | None,
+) -> str:
+    """Name earlier model work without attributing human edits to that model."""
+
+    if parent_revision_id is None:
+        return "{}"
+    inherited = None
+    if parent_render_options is not None:
+        try:
+            options = json.loads(parent_render_options)
+            if isinstance(options, dict) and isinstance(
+                options.get("lineage_model_identity"), str
+            ):
+                inherited = options["lineage_model_identity"]
+        except ValueError, TypeError:
+            pass
+    return json.dumps(
+        {
+            "parent_revision_id": str(parent_revision_id),
+            "lineage_model_identity": parent_model_identity or inherited,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,7 +80,12 @@ class SourceReference:
     origin_result_sha256: str | None = None
 
     def __post_init__(self) -> None:
-        if self.kind not in {"upload", "conversion_result", "composer_revision"}:
+        if self.kind not in {
+            "upload",
+            "conversion_result",
+            "reversion_result",
+            "composer_revision",
+        }:
             raise ValueError("Unsupported Composer source kind")
         if len(self.sha256) != _SHA256_HEX_LENGTH or any(
             c not in "0123456789abcdef" for c in self.sha256
@@ -55,6 +95,11 @@ class SourceReference:
             raise ValueError("Source scan proof is required")
         if self.media_type not in _SOURCE_MEDIA_TYPES:
             raise ValueError("Unsupported Composer source media type")
+        if self.kind == "reversion_result" and self.media_type not in {
+            "text/markdown",
+            "application/zip",
+        }:
+            raise ValueError("Unsupported reverse result source media type")
         origin = (
             self.origin_job_id,
             self.origin_result_object_id,
@@ -64,8 +109,11 @@ class SourceReference:
             value is not None for value in origin
         ):
             raise ValueError("Source origin reference is incomplete")
-        if self.kind == "conversion_result" and self.origin_job_id is None:
-            raise ValueError("Conversion source origin is required")
+        if (
+            self.kind in {"conversion_result", "reversion_result"}
+            and self.origin_job_id is None
+        ):
+            raise ValueError("Result source origin is required")
         if self.kind == "upload" and self.origin_job_id is not None:
             raise ValueError("Upload source cannot claim a conversion origin")
         if (
@@ -84,7 +132,7 @@ class ArtifactContent:
     content: bytes
 
     def __post_init__(self) -> None:
-        if self.kind not in {"source", "download", "preview"}:
+        if self.kind not in {"source", "download", "preview", "traceability"}:
             raise ValueError("Unsupported Composer artifact kind")
         if self.media_type not in _ARTIFACT_MEDIA_TYPES:
             raise ValueError("Unsupported Composer artifact media type")

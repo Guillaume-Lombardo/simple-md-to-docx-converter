@@ -24,6 +24,7 @@ from markweave.persistence.composer import (
     ComposerModelStep,
     SqlComposerModelStepRepository,
 )
+from markweave.persistence.composer.questions import validated_question
 
 _CANCELLATION_POLL_SECONDS = 0.1
 
@@ -38,6 +39,8 @@ class ModelStepInput:
     content: str
     max_output_tokens: int
     payload_digest: str
+    intent: str = "proposal"
+    answered_question_id: UUID | None = None
 
 
 class ComposerStepRunner:
@@ -85,6 +88,8 @@ class ComposerStepRunner:
             payload_digest=input_.payload_digest,
             max_active=self._maximum_active,
             lease=self._lease,
+            intent=input_.intent,
+            answered_question_id=input_.answered_question_id,
         )
         if not created:
             if self._metrics is not None:
@@ -166,7 +171,7 @@ class ComposerStepRunner:
         for _step_id, (_step, _event, thread) in active:
             thread.join(timeout=max(0.0, deadline - monotonic()))
 
-    def _run(
+    def _run(  # noqa: PLR0912 - bounded transport and terminal state handling
         self,
         actor: ConnectionActor,
         step: ComposerModelStep,
@@ -198,8 +203,16 @@ class ComposerStepRunner:
                 [{"role": "user", "content": content}],
                 max_output_tokens=max_output_tokens,
                 cancel_event=cancel_event,
+                before_dispatch=lambda: self._repository.authorize_before_dispatch(
+                    actor.id, step.draft_id, step.id
+                ),
             )
             proposed_value = _completion_content(response)
+            if step.intent == "question":
+                try:
+                    proposed_value = validated_question(proposed_value)
+                except ValueError:
+                    raise EgressResponseError("Provider question is invalid") from None
             if cancel_event.is_set():
                 outcome = "cancelled"
                 return

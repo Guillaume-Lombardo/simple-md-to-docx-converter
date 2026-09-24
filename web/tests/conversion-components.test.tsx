@@ -5,8 +5,37 @@ import { AuthController } from "../src/auth/controller";
 import type { ApiTransport } from "../src/api/transport";
 import { ConversionController } from "../src/conversion/controller";
 import { ConversionWorkspace, saveDownload } from "../src/conversion/workspace";
+import {
+  readConversionInputs,
+  writeConversionInputs,
+  type SavedConversionInputs,
+} from "../src/conversion/persistence";
 
-afterEach(() => vi.restoreAllMocks());
+const push = vi.fn();
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
+
+function observeDocumentNavigation(): string[] {
+  const paths: string[] = [];
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+    this: HTMLAnchorElement,
+  ) {
+    paths.push(this.getAttribute("href") ?? "");
+  });
+  return paths;
+}
+vi.mock("../src/conversion/persistence", () => ({
+  ownerStorageEpoch: vi.fn().mockReturnValue(0),
+  resumeOwnerStorage: vi.fn(),
+  readConversionInputs: vi.fn().mockResolvedValue(undefined),
+  writeConversionInputs: vi.fn().mockResolvedValue(undefined),
+  clearConversionInputs: vi.fn().mockResolvedValue(undefined),
+}));
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.mocked(readConversionInputs).mockReset().mockResolvedValue(undefined);
+  vi.mocked(writeConversionInputs).mockReset().mockResolvedValue(undefined);
+});
 
 const user = {
   active: true,
@@ -365,4 +394,256 @@ test("unavailable options expose a bounded retry without private failure details
   expect(
     await screen.findByRole("heading", { name: "New conversion" }),
   ).toBeVisible();
+});
+
+test("selected Markdown opens an explicit scanned Composer draft without starting a conversion", async () => {
+  push.mockReset();
+  const navigations = observeDocumentNavigation();
+  const draftId = "00000000-0000-4000-8000-000000000301";
+  const draft = {
+    content: "# Draft",
+    created_at: "2026-09-23T08:00:00Z",
+    current_revision_id: null,
+    etag: '"1"',
+    id: draftId,
+    source_kind: "upload",
+    source_media_type: "text/markdown",
+    title: "source",
+    updated_at: "2026-09-23T08:00:00Z",
+    version: 1,
+  };
+  const multipartWithMetadata = vi.fn().mockResolvedValue({
+    data: draft,
+    location: `/api/v1/composer/drafts/${draftId}`,
+    status: 201,
+  });
+  renderWorkspace({
+    json: vi
+      .fn()
+      .mockResolvedValueOnce({
+        conversion_upload_max_bytes: 1_000_000,
+        resolved_template: null,
+        selection_source: "pandoc_default",
+        template_version_id: null,
+      })
+      .mockResolvedValueOnce({ items: [], limit: 10, offset: 0, total: 0 })
+      .mockResolvedValue({ items: [], limit: 20, offset: 0, total: 0 }),
+    multipartWithMetadata,
+  });
+  const input = await screen.findByLabelText(/Source file/);
+  fireEvent.change(input, {
+    target: { files: [new File(["# Draft"], "source.md")] },
+  });
+  await vi.waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "Open selected source in Composer" }),
+    ).toBeEnabled(),
+  );
+  let releaseSave!: () => void;
+  vi.mocked(writeConversionInputs).mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        releaseSave = resolve;
+      }),
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Open selected source in Composer" }),
+  );
+  await vi.waitFor(() => expect(releaseSave).toBeTypeOf("function"));
+  expect(multipartWithMetadata).not.toHaveBeenCalled();
+  expect(navigations).toEqual([]);
+  releaseSave();
+  await vi.waitFor(() =>
+    expect(navigations).toContain(`/composer?draft=${draftId}`),
+  );
+  expect(push).not.toHaveBeenCalled();
+  expect(multipartWithMetadata).toHaveBeenCalledWith(
+    "/api/v1/composer/drafts",
+    expect.any(FormData),
+    expect.anything(),
+    expect.objectContaining({ csrf: true }),
+  );
+  expect(
+    screen.queryByText("Your conversion is ready to download."),
+  ).toBeNull();
+});
+
+test("a selected ZIP and unsent output return after the workspace remounts", async () => {
+  let saved: SavedConversionInputs | undefined;
+  vi.mocked(readConversionInputs).mockImplementation(async () => saved);
+  vi.mocked(writeConversionInputs).mockImplementation(
+    async (_owner, _presentation, state, query) => {
+      saved = { ...state, query };
+    },
+  );
+  const json = () =>
+    vi
+      .fn()
+      .mockResolvedValueOnce({
+        conversion_upload_max_bytes: 1_000_000,
+        resolved_template: null,
+        selection_source: "pandoc_default",
+        template_version_id: null,
+      })
+      .mockResolvedValueOnce({ items: [], limit: 10, offset: 0, total: 0 })
+      .mockResolvedValue({ items: [], limit: 20, offset: 0, total: 0 });
+  const first = renderWorkspace({ json: json() });
+  const input = await screen.findByLabelText(/Source file/);
+  const source = new File(["PK assets"], "package.zip", {
+    type: "application/zip",
+  });
+  fireEvent.change(input, { target: { files: [source] } });
+  fireEvent.click(screen.getByRole("radio", { name: "PDF" }));
+  await vi.waitFor(() =>
+    expect(saved).toMatchObject({ source, output: "pdf" }),
+  );
+  first.unmount();
+
+  renderWorkspace({ json: json() });
+  expect(
+    await screen.findByText("Selected package.zip (9 bytes)."),
+  ).toBeVisible();
+  expect(screen.getByRole("radio", { name: "PDF" })).toBeChecked();
+});
+
+test("browser quota failure keeps the selected source visible and blocks navigation", async () => {
+  vi.mocked(writeConversionInputs).mockRejectedValue(
+    new DOMException("quota", "QuotaExceededError"),
+  );
+  renderWorkspace({
+    json: vi
+      .fn()
+      .mockResolvedValueOnce({
+        conversion_upload_max_bytes: 1_000_000,
+        resolved_template: null,
+        selection_source: "pandoc_default",
+        template_version_id: null,
+      })
+      .mockResolvedValueOnce({ items: [], limit: 10, offset: 0, total: 0 })
+      .mockResolvedValue({ items: [], limit: 20, offset: 0, total: 0 }),
+  });
+  const input = await screen.findByLabelText(/Source file/);
+  fireEvent.change(input, {
+    target: { files: [new File(["# retained"], "retained.md")] },
+  });
+  expect(
+    await screen.findByText("Selected retained.md (10 bytes)."),
+  ).toBeVisible();
+  expect(
+    await screen.findByText(/could not be saved in this browser/),
+  ).toBeVisible();
+  expect(
+    screen.getByRole("button", { name: "Open selected source in Composer" }),
+  ).toBeDisabled();
+});
+
+test("failed saved-input read never autosaves defaults and retries without replacing a new file", async () => {
+  let rejectRead!: (error: Error) => void;
+  let resolveRetry!: (value: SavedConversionInputs) => void;
+  vi.mocked(readConversionInputs)
+    .mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectRead = reject;
+        }),
+    )
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveRetry = resolve;
+        }),
+    );
+  const json = vi
+    .fn()
+    .mockResolvedValueOnce({
+      conversion_upload_max_bytes: 1_000_000,
+      resolved_template: null,
+      selection_source: "pandoc_default",
+      template_version_id: null,
+    })
+    .mockResolvedValueOnce({ items: [], limit: 10, offset: 0, total: 0 })
+    .mockResolvedValue({ items: [], limit: 20, offset: 0, total: 0 });
+  renderWorkspace({ json });
+  const input = await screen.findByLabelText(/Source file/);
+  await vi.waitFor(() => expect(readConversionInputs).toHaveBeenCalledOnce());
+  const chosen = new File(["# Current"], "current.md");
+  fireEvent.change(input, { target: { files: [chosen] } });
+  rejectRead(new Error("transient IndexedDB failure"));
+  expect(
+    await screen.findByText(/Saved browser inputs could not be loaded/),
+  ).toBeVisible();
+  expect(writeConversionInputs).not.toHaveBeenCalled();
+  expect(screen.getByText("Selected current.md (9 bytes).")).toBeVisible();
+  expect(
+    screen.getByRole("button", { name: "Open selected source in Composer" }),
+  ).toBeDisabled();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Try loading saved inputs" }),
+  );
+  expect(
+    screen.getByText(/Saved browser inputs could not be loaded/),
+  ).toBeVisible();
+  resolveRetry({
+    source: new File(["# Old"], "old.md"),
+    output: "pdf",
+    dialect: "auto",
+    slideLevel: 2,
+    query: "old query",
+  });
+  await vi.waitFor(() => expect(writeConversionInputs).toHaveBeenCalled());
+  expect(
+    screen.queryByText(/Saved browser inputs could not be loaded/),
+  ).toBeNull();
+  expect(screen.getByText("Selected current.md (9 bytes).")).toBeVisible();
+  expect(screen.getByRole("radio", { name: "DOCX" })).toBeChecked();
+  expect(vi.mocked(writeConversionInputs).mock.lastCall?.[2].source).toBe(
+    chosen,
+  );
+});
+
+test("a recent conversion opened during a deferred read wins over saved history", async () => {
+  let resolveRead!: (value: SavedConversionInputs) => void;
+  vi.mocked(readConversionInputs).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        resolveRead = resolve;
+      }),
+  );
+  const opened = { ...conversionJob, state: "succeeded" as const };
+  const json = vi
+    .fn()
+    .mockResolvedValueOnce({
+      conversion_upload_max_bytes: 1_000_000,
+      resolved_template: null,
+      selection_source: "pandoc_default",
+      template_version_id: null,
+    })
+    .mockResolvedValueOnce({ items: [opened], limit: 10, offset: 0, total: 1 })
+    .mockResolvedValueOnce(opened)
+    .mockResolvedValue({ items: [], limit: 20, offset: 0, total: 0 });
+  const { conversion } = renderWorkspace({ json });
+  const recent = await screen.findByRole("button", {
+    name: /report.md · succeeded/,
+  });
+  await vi.waitFor(() => expect(readConversionInputs).toHaveBeenCalledOnce());
+  fireEvent.click(recent);
+  await vi.waitFor(() =>
+    expect(conversion.snapshot().active?.id).toBe(opened.id),
+  );
+  resolveRead({
+    source: new File(["# Old"], "old.md"),
+    output: "pdf",
+    dialect: "auto",
+    slideLevel: 2,
+    query: "",
+    activeJobId: "00000000-0000-4000-8000-000000000999",
+  });
+  await vi.waitFor(() => expect(writeConversionInputs).toHaveBeenCalled());
+  expect(conversion.snapshot().active?.id).toBe(opened.id);
+  expect(conversion.snapshot().source).toBeUndefined();
+  expect(json).not.toHaveBeenCalledWith(
+    "/api/v1/conversions/00000000-0000-4000-8000-000000000999",
+    expect.anything(),
+    expect.anything(),
+  );
 });

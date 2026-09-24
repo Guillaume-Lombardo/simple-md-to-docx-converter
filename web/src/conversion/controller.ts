@@ -3,6 +3,7 @@ import type {
   PresentationPlanResponse,
   ConversionOptionsResponse,
   ConversionResponse,
+  ComposerDraftResponse,
   JobOutput,
   TemplateResponse,
 } from "../api/generated/types.gen";
@@ -14,8 +15,11 @@ import {
   vGetConversionOptionsApiV1ConversionOptionsGetResponse,
   vListConversionsApiV1ConversionsGetResponse,
   vListTemplatesApiV1TemplatesGetResponse,
+  vCreateDraftApiV1ComposerDraftsPostResponse,
+  vHandoffConversionApiV1ComposerDraftsFromConversionJobIdPostResponse,
 } from "../api/generated/valibot.gen";
-import { ApiError, ApiTransport } from "../api/transport";
+import { ApiError, ApiTransport, type JsonResult } from "../api/transport";
+import type { SavedConversionInputs } from "./persistence";
 
 const TERMINAL_STATES = new Set([
   "succeeded",
@@ -51,6 +55,7 @@ export type ConversionState = {
   active?: ConversionResponse;
   submitting: boolean;
   cancelling: boolean;
+  composerPending: boolean;
   error?: string;
   notice?: string;
 };
@@ -79,6 +84,9 @@ export class ConversionController {
   private pollTimer?: ReturnType<typeof setTimeout>;
   private pollDelay = POLL_START_MS;
   private idempotencyKey?: string;
+  private inputGeneration = 0;
+  private composerRequest?: AbortController;
+  private composerGeneration = 0;
 
   constructor(
     private readonly api: ApiTransport = new ApiTransport(),
@@ -170,6 +178,110 @@ export class ConversionController {
       error: undefined,
       notice: undefined,
     });
+  }
+
+  inputVersion(): number {
+    return this.inputGeneration;
+  }
+
+  restoreInputs(
+    inputs: SavedConversionInputs,
+    expectedVersion: number,
+  ): boolean {
+    if (
+      this.state.phase !== "ready" ||
+      this.inputGeneration !== expectedVersion
+    )
+      return false;
+    this.publish({
+      ...this.state,
+      source: inputs.source,
+      output: inputs.output,
+      selection: inputs.selection,
+      dialect: inputs.dialect,
+      slideLevel: inputs.slideLevel,
+    });
+    if (inputs.activeJobId) void this.openJob(inputs.activeJobId);
+    return true;
+  }
+
+  async createComposerDraft(): Promise<string | undefined> {
+    if (this.state.phase !== "ready" || this.state.composerPending) return;
+    const invalid = validateSource(this.state.source, this.state.maximumBytes);
+    if (invalid) {
+      this.publish({ ...this.state, error: invalid });
+      return;
+    }
+    const form = new FormData();
+    form.append("source", this.state.source!);
+    return this.submitComposerDraft(() =>
+      this.api.multipartWithMetadata(
+        "/api/v1/composer/drafts",
+        form,
+        vCreateDraftApiV1ComposerDraftsPostResponse,
+        { csrf: true, signal: this.composerRequest?.signal },
+      ),
+    );
+  }
+
+  async handoffActiveResult(): Promise<string | undefined> {
+    const active = this.state.active;
+    if (!active || active.state !== "succeeded" || this.state.composerPending)
+      return;
+    if (!["docx", "pdf", "pptx"].includes(active.output)) {
+      this.publish({
+        ...this.state,
+        error:
+          "Composer needs a single DOCX, PDF, or PPTX result. Choose a single-file output.",
+      });
+      return;
+    }
+    return this.submitComposerDraft(() =>
+      this.api.jsonWithMetadata(
+        `/api/v1/composer/drafts/from-conversion/${active.id}`,
+        vHandoffConversionApiV1ComposerDraftsFromConversionJobIdPostResponse,
+        {
+          body: JSON.stringify({ title: null }),
+          csrf: true,
+          method: "POST",
+          signal: this.composerRequest?.signal,
+        },
+      ),
+    );
+  }
+
+  private async submitComposerDraft(
+    submit: () => Promise<JsonResult<ComposerDraftResponse>>,
+  ): Promise<string | undefined> {
+    this.composerRequest?.abort();
+    const request = new AbortController();
+    this.composerRequest = request;
+    const generation = ++this.composerGeneration;
+    this.publish({ ...this.state, composerPending: true, error: undefined });
+    try {
+      const result = await submit();
+      if (generation !== this.composerGeneration) return;
+      const draft = result.data;
+      if (
+        result.status !== 201 ||
+        result.location !== `/api/v1/composer/drafts/${draft.id}`
+      )
+        throw new ApiError(
+          result.status,
+          "UNEXPECTED_RESPONSE",
+          "The service returned an unexpected response.",
+        );
+      this.publish({ ...this.state, composerPending: false });
+      return draft.id;
+    } catch (error) {
+      if (generation !== this.composerGeneration || isAbort(error)) return;
+      if (this.authoritativeExpiry(error)) return;
+      this.publish({
+        ...this.state,
+        composerPending: false,
+        error: errorMessage(error, "The Composer draft could not be created."),
+      });
+    }
   }
 
   setOutput(output: JobOutput): void {
@@ -395,6 +507,7 @@ export class ConversionController {
   }
 
   async openJob(jobId: string): Promise<void> {
+    this.inputGeneration += 1;
     this.activateJob(jobId);
     await this.poll(jobId, this.jobGeneration);
   }
@@ -454,6 +567,8 @@ export class ConversionController {
   }
 
   dispose(): void {
+    this.composerGeneration += 1;
+    this.composerRequest?.abort();
     this.loadGeneration += 1;
     this.searchGeneration += 1;
     this.submissionGeneration += 1;
@@ -506,6 +621,7 @@ export class ConversionController {
   }
 
   private activateJob(jobId: string, initialPollDelay = POLL_START_MS): void {
+    this.invalidateComposer();
     this.jobGeneration += 1;
     this.jobRequest?.abort();
     this.cancellationRequest?.abort();
@@ -547,12 +663,20 @@ export class ConversionController {
   }
 
   private invalidateSubmission(): void {
+    this.inputGeneration += 1;
+    this.invalidateComposer();
     this.planGeneration += 1;
     this.planRequest?.abort();
     this.state = { ...this.state, plan: undefined, planning: false };
     this.submissionGeneration += 1;
     this.submissionRequest?.abort();
     this.idempotencyKey = undefined;
+  }
+
+  private invalidateComposer(): void {
+    this.composerGeneration += 1;
+    this.composerRequest?.abort();
+    this.state = { ...this.state, composerPending: false };
   }
 
   private authoritativeExpiry(error: unknown): boolean {
@@ -622,6 +746,7 @@ function initialState(presentation = false): ConversionState {
     recent: [],
     submitting: false,
     cancelling: false,
+    composerPending: false,
   };
 }
 

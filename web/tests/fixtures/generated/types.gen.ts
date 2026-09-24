@@ -444,6 +444,102 @@ export type ComposerDraftUpdateRequest = {
 };
 
 /**
+ * ComposerGenerationCreateRequest
+ */
+export type ComposerGenerationCreateRequest = {
+    /**
+     * Output
+     */
+    output: 'docx' | 'pdf' | 'pptx';
+    presentation_dialect?: PresentationDialect | null;
+    /**
+     * Slide Level
+     */
+    slide_level?: number | null;
+    /**
+     * Template Id
+     */
+    template_id?: string | null;
+    /**
+     * Template Version Id
+     */
+    template_version_id?: string | null;
+};
+
+/**
+ * ComposerGenerationListResponse
+ */
+export type ComposerGenerationListResponse = {
+    /**
+     * Generations
+     */
+    generations: Array<ComposerGenerationResponse>;
+    /**
+     * Limit
+     */
+    limit: number;
+    /**
+     * Offset
+     */
+    offset: number;
+};
+
+/**
+ * ComposerGenerationResponse
+ */
+export type ComposerGenerationResponse = {
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Draft Id
+     */
+    draft_id: string;
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Job Id
+     */
+    job_id: string | null;
+    /**
+     * Output
+     */
+    output: 'docx' | 'pdf' | 'pptx';
+    presentation_dialect: PresentationDialect | null;
+    /**
+     * Publishable
+     */
+    publishable: boolean;
+    /**
+     * Result Revision Id
+     */
+    result_revision_id: string | null;
+    /**
+     * Slide Level
+     */
+    slide_level: number | null;
+    /**
+     * Source Revision Id
+     */
+    source_revision_id: string;
+    /**
+     * Status
+     */
+    status: string;
+    /**
+     * Template Id
+     */
+    template_id: string | null;
+    /**
+     * Template Version Id
+     */
+    template_version_id: string | null;
+};
+
+/**
  * ComposerHandoffRequest
  */
 export type ComposerHandoffRequest = {
@@ -514,6 +610,10 @@ export type ComposerMessageResponse = {
  */
 export type ComposerModelStepCreateRequest = {
     /**
+     * Answered Question Id
+     */
+    answered_question_id?: string | null;
+    /**
      * Approved Endpoint
      */
     approved_endpoint: string;
@@ -530,6 +630,10 @@ export type ComposerModelStepCreateRequest = {
      */
     content: string;
     /**
+     * Intent
+     */
+    intent?: 'proposal' | 'question';
+    /**
      * Max Output Tokens
      */
     max_output_tokens: number;
@@ -539,6 +643,10 @@ export type ComposerModelStepCreateRequest = {
  * ComposerModelStepResponse
  */
 export type ComposerModelStepResponse = {
+    /**
+     * Answered Question Id
+     */
+    answered_question_id: string | null;
     /**
      * Base Version
      */
@@ -564,6 +672,10 @@ export type ComposerModelStepResponse = {
      */
     id: string;
     /**
+     * Intent
+     */
+    intent: 'proposal' | 'question';
+    /**
      * Model Identity
      */
     model_identity: string;
@@ -571,6 +683,10 @@ export type ComposerModelStepResponse = {
      * Proposal Id
      */
     proposal_id: string | null;
+    /**
+     * Question Id
+     */
+    question_id: string | null;
     /**
      * Status
      */
@@ -659,6 +775,148 @@ export type ComposerProposalResponse = {
      * State
      */
     state: string;
+};
+
+/**
+ * ComposerQuestionAnswerRequest
+ */
+export type ComposerQuestionAnswerRequest = {
+    /**
+     * Content
+     */
+    content: string;
+};
+
+/**
+ * ComposerQuestionListResponse
+ */
+export type ComposerQuestionListResponse = {
+    /**
+     * Limit
+     */
+    limit: number;
+    /**
+     * Offset
+     */
+    offset: number;
+    /**
+     * Questions
+     */
+    questions: Array<ComposerQuestionResponse>;
+};
+
+/**
+ * ComposerQuestionResponse
+ */
+export type ComposerQuestionResponse = {
+    /**
+     * Answer Content
+     */
+    answer_content: string | null;
+    /**
+     * Answer Message Id
+     */
+    answer_message_id: string | null;
+    /**
+     * Answered At
+     */
+    answered_at: string | null;
+    /**
+     * Base Version
+     */
+    base_version: number;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Draft Id
+     */
+    draft_id: string;
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Model Step Id
+     */
+    model_step_id: string;
+    /**
+     * State
+     */
+    state: 'pending' | 'answered';
+    /**
+     * Text
+     */
+    text: string;
+};
+
+/**
+ * ComposerRevisionDiffChange
+ */
+export type ComposerRevisionDiffChange = {
+    /**
+     * After End
+     */
+    after_end: number;
+    /**
+     * After Start
+     */
+    after_start: number;
+    /**
+     * After Text
+     */
+    after_text: string;
+    /**
+     * Before End
+     */
+    before_end: number;
+    /**
+     * Before Start
+     */
+    before_start: number;
+    /**
+     * Before Text
+     */
+    before_text: string;
+    /**
+     * Kind
+     */
+    kind: string;
+};
+
+/**
+ * ComposerRevisionDiffResponse
+ */
+export type ComposerRevisionDiffResponse = {
+    /**
+     * Changes
+     */
+    changes: Array<ComposerRevisionDiffChange>;
+    /**
+     * From Revision Id
+     */
+    from_revision_id: string;
+    /**
+     * Metadata Changes
+     */
+    metadata_changes?: Array<string>;
+    /**
+     * Reason
+     */
+    reason: string | null;
+    /**
+     * Scope
+     */
+    scope?: 'artifact' | 'approved_markdown';
+    /**
+     * Status
+     */
+    status: string;
+    /**
+     * To Revision Id
+     */
+    to_revision_id: string;
 };
 
 /**
@@ -3081,6 +3339,66 @@ export type HandoffConversionApiV1ComposerDraftsFromConversionJobIdPostResponses
 
 export type HandoffConversionApiV1ComposerDraftsFromConversionJobIdPostResponse = HandoffConversionApiV1ComposerDraftsFromConversionJobIdPostResponses[keyof HandoffConversionApiV1ComposerDraftsFromConversionJobIdPostResponses];
 
+export type HandoffReversionApiV1ComposerDraftsFromReversionJobIdPostData = {
+    body: ComposerHandoffRequest;
+    headers?: {
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Job Id
+         */
+        job_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/from-reversion/{job_id}';
+};
+
+export type HandoffReversionApiV1ComposerDraftsFromReversionJobIdPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * The request conflicts with current state
+     */
+    409: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type HandoffReversionApiV1ComposerDraftsFromReversionJobIdPostError = HandoffReversionApiV1ComposerDraftsFromReversionJobIdPostErrors[keyof HandoffReversionApiV1ComposerDraftsFromReversionJobIdPostErrors];
+
+export type HandoffReversionApiV1ComposerDraftsFromReversionJobIdPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: ComposerDraftResponse;
+};
+
+export type HandoffReversionApiV1ComposerDraftsFromReversionJobIdPostResponse = HandoffReversionApiV1ComposerDraftsFromReversionJobIdPostResponses[keyof HandoffReversionApiV1ComposerDraftsFromReversionJobIdPostResponses];
+
 export type GetDraftApiV1ComposerDraftsDraftIdGetData = {
     body?: never;
     path: {
@@ -3187,6 +3505,231 @@ export type SaveDraftApiV1ComposerDraftsDraftIdPutResponses = {
 
 export type SaveDraftApiV1ComposerDraftsDraftIdPutResponse = SaveDraftApiV1ComposerDraftsDraftIdPutResponses[keyof SaveDraftApiV1ComposerDraftsDraftIdPutResponses];
 
+export type ListGenerationsApiV1ComposerDraftsDraftIdGenerationsGetData = {
+    body?: never;
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+    };
+    query?: {
+        /**
+         * Limit
+         */
+        limit?: number;
+        /**
+         * Offset
+         */
+        offset?: number;
+    };
+    url: '/api/v1/composer/drafts/{draft_id}/generations';
+};
+
+export type ListGenerationsApiV1ComposerDraftsDraftIdGenerationsGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type ListGenerationsApiV1ComposerDraftsDraftIdGenerationsGetError = ListGenerationsApiV1ComposerDraftsDraftIdGenerationsGetErrors[keyof ListGenerationsApiV1ComposerDraftsDraftIdGenerationsGetErrors];
+
+export type ListGenerationsApiV1ComposerDraftsDraftIdGenerationsGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ComposerGenerationListResponse;
+};
+
+export type ListGenerationsApiV1ComposerDraftsDraftIdGenerationsGetResponse = ListGenerationsApiV1ComposerDraftsDraftIdGenerationsGetResponses[keyof ListGenerationsApiV1ComposerDraftsDraftIdGenerationsGetResponses];
+
+export type CancelGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdDeleteData = {
+    body?: never;
+    headers?: {
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Generation Id
+         */
+        generation_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/generations/{generation_id}';
+};
+
+export type CancelGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdDeleteErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * The request conflicts with current state
+     */
+    409: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type CancelGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdDeleteError = CancelGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdDeleteErrors[keyof CancelGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdDeleteErrors];
+
+export type CancelGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdDeleteResponses = {
+    /**
+     * Successful Response
+     */
+    200: ComposerGenerationResponse;
+};
+
+export type CancelGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdDeleteResponse = CancelGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdDeleteResponses[keyof CancelGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdDeleteResponses];
+
+export type GetGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdGetData = {
+    body?: never;
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Generation Id
+         */
+        generation_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/generations/{generation_id}';
+};
+
+export type GetGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type GetGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdGetError = GetGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdGetErrors[keyof GetGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdGetErrors];
+
+export type GetGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ComposerGenerationResponse;
+};
+
+export type GetGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdGetResponse = GetGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdGetResponses[keyof GetGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdGetResponses];
+
+export type PublishGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdPublishPostData = {
+    body?: never;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * Idempotency-Key
+         */
+        'Idempotency-Key'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Generation Id
+         */
+        generation_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/generations/{generation_id}/publish';
+};
+
+export type PublishGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdPublishPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * The request conflicts with current state
+     */
+    409: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type PublishGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdPublishPostError = PublishGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdPublishPostErrors[keyof PublishGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdPublishPostErrors];
+
+export type PublishGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdPublishPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: ComposerRevisionResponse;
+};
+
+export type PublishGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdPublishPostResponse = PublishGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdPublishPostResponses[keyof PublishGenerationApiV1ComposerDraftsDraftIdGenerationsGenerationIdPublishPostResponses];
+
 export type ListMessagesApiV1ComposerDraftsDraftIdMessagesGetData = {
     body?: never;
     path: {
@@ -3204,6 +3747,10 @@ export type ListMessagesApiV1ComposerDraftsDraftIdMessagesGetData = {
          * Offset
          */
         offset?: number;
+        /**
+         * Order
+         */
+        order?: 'asc' | 'desc';
     };
     url: '/api/v1/composer/drafts/{draft_id}/messages';
 };
@@ -3497,6 +4044,10 @@ export type ListProposalsApiV1ComposerDraftsDraftIdProposalsGetData = {
          * Offset
          */
         offset?: number;
+        /**
+         * Order
+         */
+        order?: 'asc' | 'desc';
     };
     url: '/api/v1/composer/drafts/{draft_id}/proposals';
 };
@@ -3645,6 +4196,259 @@ export type DecideProposalApiV1ComposerDraftsDraftIdProposalsProposalIdDecisionP
 
 export type DecideProposalApiV1ComposerDraftsDraftIdProposalsProposalIdDecisionPostResponse = DecideProposalApiV1ComposerDraftsDraftIdProposalsProposalIdDecisionPostResponses[keyof DecideProposalApiV1ComposerDraftsDraftIdProposalsProposalIdDecisionPostResponses];
 
+export type PublishProposalApiV1ComposerDraftsDraftIdProposalsProposalIdPublishPostData = {
+    body?: never;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * Idempotency-Key
+         */
+        'Idempotency-Key'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Proposal Id
+         */
+        proposal_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/proposals/{proposal_id}/publish';
+};
+
+export type PublishProposalApiV1ComposerDraftsDraftIdProposalsProposalIdPublishPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type PublishProposalApiV1ComposerDraftsDraftIdProposalsProposalIdPublishPostError = PublishProposalApiV1ComposerDraftsDraftIdProposalsProposalIdPublishPostErrors[keyof PublishProposalApiV1ComposerDraftsDraftIdProposalsProposalIdPublishPostErrors];
+
+export type PublishProposalApiV1ComposerDraftsDraftIdProposalsProposalIdPublishPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: ComposerRevisionResponse;
+};
+
+export type PublishProposalApiV1ComposerDraftsDraftIdProposalsProposalIdPublishPostResponse = PublishProposalApiV1ComposerDraftsDraftIdProposalsProposalIdPublishPostResponses[keyof PublishProposalApiV1ComposerDraftsDraftIdProposalsProposalIdPublishPostResponses];
+
+export type ListQuestionsApiV1ComposerDraftsDraftIdQuestionsGetData = {
+    body?: never;
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+    };
+    query?: {
+        /**
+         * Limit
+         */
+        limit?: number;
+        /**
+         * Offset
+         */
+        offset?: number;
+        /**
+         * Order
+         */
+        order?: 'asc' | 'desc';
+    };
+    url: '/api/v1/composer/drafts/{draft_id}/questions';
+};
+
+export type ListQuestionsApiV1ComposerDraftsDraftIdQuestionsGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type ListQuestionsApiV1ComposerDraftsDraftIdQuestionsGetError = ListQuestionsApiV1ComposerDraftsDraftIdQuestionsGetErrors[keyof ListQuestionsApiV1ComposerDraftsDraftIdQuestionsGetErrors];
+
+export type ListQuestionsApiV1ComposerDraftsDraftIdQuestionsGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ComposerQuestionListResponse;
+};
+
+export type ListQuestionsApiV1ComposerDraftsDraftIdQuestionsGetResponse = ListQuestionsApiV1ComposerDraftsDraftIdQuestionsGetResponses[keyof ListQuestionsApiV1ComposerDraftsDraftIdQuestionsGetResponses];
+
+export type GetQuestionApiV1ComposerDraftsDraftIdQuestionsQuestionIdGetData = {
+    body?: never;
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Question Id
+         */
+        question_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/questions/{question_id}';
+};
+
+export type GetQuestionApiV1ComposerDraftsDraftIdQuestionsQuestionIdGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type GetQuestionApiV1ComposerDraftsDraftIdQuestionsQuestionIdGetError = GetQuestionApiV1ComposerDraftsDraftIdQuestionsQuestionIdGetErrors[keyof GetQuestionApiV1ComposerDraftsDraftIdQuestionsQuestionIdGetErrors];
+
+export type GetQuestionApiV1ComposerDraftsDraftIdQuestionsQuestionIdGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ComposerQuestionResponse;
+};
+
+export type GetQuestionApiV1ComposerDraftsDraftIdQuestionsQuestionIdGetResponse = GetQuestionApiV1ComposerDraftsDraftIdQuestionsQuestionIdGetResponses[keyof GetQuestionApiV1ComposerDraftsDraftIdQuestionsQuestionIdGetResponses];
+
+export type AnswerQuestionApiV1ComposerDraftsDraftIdQuestionsQuestionIdAnswerPostData = {
+    body: ComposerQuestionAnswerRequest;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * Idempotency-Key
+         */
+        'Idempotency-Key'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Question Id
+         */
+        question_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/questions/{question_id}/answer';
+};
+
+export type AnswerQuestionApiV1ComposerDraftsDraftIdQuestionsQuestionIdAnswerPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type AnswerQuestionApiV1ComposerDraftsDraftIdQuestionsQuestionIdAnswerPostError = AnswerQuestionApiV1ComposerDraftsDraftIdQuestionsQuestionIdAnswerPostErrors[keyof AnswerQuestionApiV1ComposerDraftsDraftIdQuestionsQuestionIdAnswerPostErrors];
+
+export type AnswerQuestionApiV1ComposerDraftsDraftIdQuestionsQuestionIdAnswerPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: ComposerQuestionResponse;
+};
+
+export type AnswerQuestionApiV1ComposerDraftsDraftIdQuestionsQuestionIdAnswerPostResponse = AnswerQuestionApiV1ComposerDraftsDraftIdQuestionsQuestionIdAnswerPostResponses[keyof AnswerQuestionApiV1ComposerDraftsDraftIdQuestionsQuestionIdAnswerPostResponses];
+
 export type ListRevisionsApiV1ComposerDraftsDraftIdRevisionsGetData = {
     body?: never;
     path: {
@@ -3662,6 +4466,10 @@ export type ListRevisionsApiV1ComposerDraftsDraftIdRevisionsGetData = {
          * Offset
          */
         offset?: number;
+        /**
+         * Order
+         */
+        order?: 'asc' | 'desc';
     };
     url: '/api/v1/composer/drafts/{draft_id}/revisions';
 };
@@ -3695,6 +4503,74 @@ export type ListRevisionsApiV1ComposerDraftsDraftIdRevisionsGetResponses = {
 };
 
 export type ListRevisionsApiV1ComposerDraftsDraftIdRevisionsGetResponse = ListRevisionsApiV1ComposerDraftsDraftIdRevisionsGetResponses[keyof ListRevisionsApiV1ComposerDraftsDraftIdRevisionsGetResponses];
+
+export type PublishDraftApiV1ComposerDraftsDraftIdRevisionsFromDraftPostData = {
+    body?: never;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * Idempotency-Key
+         */
+        'Idempotency-Key'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/revisions/from-draft';
+};
+
+export type PublishDraftApiV1ComposerDraftsDraftIdRevisionsFromDraftPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type PublishDraftApiV1ComposerDraftsDraftIdRevisionsFromDraftPostError = PublishDraftApiV1ComposerDraftsDraftIdRevisionsFromDraftPostErrors[keyof PublishDraftApiV1ComposerDraftsDraftIdRevisionsFromDraftPostErrors];
+
+export type PublishDraftApiV1ComposerDraftsDraftIdRevisionsFromDraftPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: ComposerRevisionResponse;
+};
+
+export type PublishDraftApiV1ComposerDraftsDraftIdRevisionsFromDraftPostResponse = PublishDraftApiV1ComposerDraftsDraftIdRevisionsFromDraftPostResponses[keyof PublishDraftApiV1ComposerDraftsDraftIdRevisionsFromDraftPostResponses];
 
 export type CaptureSourceApiV1ComposerDraftsDraftIdRevisionsFromSourcePostData = {
     body?: never;
@@ -3858,6 +4734,57 @@ export type ReadArtifactApiV1ComposerDraftsDraftIdRevisionsRevisionIdArtifactsKi
     200: unknown;
 };
 
+export type DiffRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdDiffGetData = {
+    body?: never;
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Revision Id
+         */
+        revision_id: string;
+    };
+    query: {
+        /**
+         * From Revision Id
+         */
+        from_revision_id: string;
+    };
+    url: '/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/diff';
+};
+
+export type DiffRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdDiffGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type DiffRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdDiffGetError = DiffRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdDiffGetErrors[keyof DiffRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdDiffGetErrors];
+
+export type DiffRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdDiffGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ComposerRevisionDiffResponse;
+};
+
+export type DiffRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdDiffGetResponse = DiffRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdDiffGetResponses[keyof DiffRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdDiffGetResponses];
+
 export type RestoreRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdRestorePostData = {
     body?: never;
     headers?: {
@@ -3929,6 +4856,82 @@ export type RestoreRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdRestoreP
 };
 
 export type RestoreRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdRestorePostResponse = RestoreRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdRestorePostResponses[keyof RestoreRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdRestorePostResponses];
+
+export type CreateGenerationApiV1ComposerDraftsDraftIdRevisionsSourceRevisionIdGenerationsPostData = {
+    body: ComposerGenerationCreateRequest;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * Idempotency-Key
+         */
+        'Idempotency-Key'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Source Revision Id
+         */
+        source_revision_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/revisions/{source_revision_id}/generations';
+};
+
+export type CreateGenerationApiV1ComposerDraftsDraftIdRevisionsSourceRevisionIdGenerationsPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * The request conflicts with current state
+     */
+    409: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type CreateGenerationApiV1ComposerDraftsDraftIdRevisionsSourceRevisionIdGenerationsPostError = CreateGenerationApiV1ComposerDraftsDraftIdRevisionsSourceRevisionIdGenerationsPostErrors[keyof CreateGenerationApiV1ComposerDraftsDraftIdRevisionsSourceRevisionIdGenerationsPostErrors];
+
+export type CreateGenerationApiV1ComposerDraftsDraftIdRevisionsSourceRevisionIdGenerationsPostResponses = {
+    /**
+     * Successful Response
+     */
+    202: ComposerGenerationResponse;
+};
+
+export type CreateGenerationApiV1ComposerDraftsDraftIdRevisionsSourceRevisionIdGenerationsPostResponse = CreateGenerationApiV1ComposerDraftsDraftIdRevisionsSourceRevisionIdGenerationsPostResponses[keyof CreateGenerationApiV1ComposerDraftsDraftIdRevisionsSourceRevisionIdGenerationsPostResponses];
 
 export type ListPersonalPermissionsApiV1ComposerPersonalPermissionsGetData = {
     body?: never;
