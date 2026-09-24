@@ -28,7 +28,7 @@ def test_approved_markdown_generates_exact_native_preview_and_download(
 ):
     settings = settings_for(tmp_path, pandoc="pandoc").model_copy(
         update={
-            "template_libreoffice_executable": "libreoffice",
+            "template_libreoffice_executable": "soffice",
             "composer_upload_max_bytes": 1_000_000,
             "composer_http_request_max_bytes": 1_100_000,
         }
