@@ -63,31 +63,42 @@ T89.
   consolidated deployment script was delivered. T89 remains **In Progress** until the matched
   docker-box deployment can be verified. Linear synchronization for
   T89 and T90 remains deferred under the owner's explicit temporary authorization.
-- 2026-09-23: The complete default Python suite recorded 5,160 passes and three failures. Two
-  stale contract fixtures have independently reviewed, targeted passing corrections; a Unix
-  broker BrokenPipe has not recurred in 30 isolated runs or the complete 20-test transport module,
-  but its original cause is unproven. Combined coverage from unchanged Python production sources
-  reaches 90.09% branches and 90.60% provisional changed executable lines; the official
-  commit-based changed-line check remains pending. The final web check passes formatting, lint,
-  types, generated bindings, structure, and behavior at 90.08% branch coverage (3,162/3,510).
-  Independent reviews cleared the backend, workspace, Admin, handoff, native preview, and narrow
-  E2E fixture corrections. The fresh generated and served native-preview child bytes match the
-  reviewed source build; real Office files, hostile inputs, long-document windowing, and in-bounds
-  grouped PPTX content passed the documented local browser probes. The 5,958,454-byte image-heavy
-  DOCX reached 195,858,421 bytes of sampled transient child heap, so broader device capacity
-  remains unqualified and is not advertised. The three exact candidate images build; the backend
-  image runs SQLite 3.34.1 and passed T90 upgrade, T89 downgrade, and re-upgrade. Final-image E2E
-  is still open:
-  three stale browser fixture expectations were corrected, then the real Composer test hit a
-  confirmed Chrome OOM because the E2E harness ran its browser inside the application's 768 MiB
-  cgroup. A separate bounded browser runner is being corrected without changing the application
-  image or limit; both standalone and distributed profile terminal results remain required.
+- 2026-09-24: Diagnostic checks and browser runs exposed stale fixtures, a broker shutdown bug,
+  a browser-runner memory collision, a soft-navigation CSP transition, and captured Markdown
+  submitted before approval. Their original failures remain in the delivery logs; focused fixes
+  were independently reviewed and superseded by the final candidate checks below.
 - 2026-09-23: The owner clarified that the existing docker-box endpoint is the test instance and
   authorized replacing it with a working, matched T90 candidate while preserving its current
   password, accounts, data, scanner, broker mTLS, and rollback set. This is a scoped test-instance
   deployment decision, not a general change to the public release contract. Candidate publication,
   independent deployment-plan review, and live verification remain pending; no remote deployment
   has been performed. The development VM was enlarged online to 150 GiB after a verified backup.
+- 2026-09-24: Candidate source `2b88914f8831222302cab3893073a1ce54a44fc7` has independently
+  reviewed backend, workspace, native-preview, broker-signal, CSP-navigation, generation-source,
+  and E2E harness/fixture changes. The final web check passed 626 tests, formatting, lint, types,
+  bindings, and structure, with 3,186/3,535 branches covered (90.12%). The default canonical
+  Python suite passed 5,178 tests with 59 engine-marked cases deselected on the same Python and
+  configuration bytes later committed in `2b88914`; branch coverage is
+  7,702/8,550 (90.08%) and the official changed-line check is 974/1,076 (90.52%). Ruff format,
+  Ruff lint, and `ty` passed. The host engine-inclusive `uv run pytest` completed with 5,188
+  passes and 49 failures, all in `tests/integration/document_engines/`: this development host
+  lacks the pinned Pandoc, LibreOffice, Mermaid/Chromium, font, and `/opt/toolchain` evidence
+  environment required by those tests. This is a failed local full-suite gate, not a pass or
+  an approved exception.
+- 2026-09-24: The matched final rootless images passed the complete unattended standalone and
+  distributed E2E profiles, including real Composer questions/proposals, human-approved
+  DOCX/PDF/PPTX generation, native previews, exact revision downloads, held-job cancellation,
+  authorization, scanner failure/recovery, migrations, and one-signal broker restart. The browser
+  runner has its own 2 GiB limit while the application retains 768 MiB. Reviewed native-preview
+  probes passed real Office content, hostile-input containment/no egress, bounded visible-unit
+  rendering, and in-bounds grouped PPTX content; DOCX pagination and floating geometry remain
+  approximate. A 5,958,454-byte media-heavy DOCX reached 195,858,421 bytes of sampled transient
+  child heap, so broader device capacity remains unqualified and is not advertised.
+- 2026-09-24: These results qualify the local test candidate, not a live deployment or completed
+  T90 acceptance. The owner-authorized docker-box test-instance cutover still requires matched
+  image transport, password/data-preserving operational preflight, live smoke, and rollback
+  verification. T89 and T90 remain **In Progress**. Linear synchronization remains deferred under
+  the owner's temporary authorization while OAuth is expired.
 
 ## Synchronization
 
