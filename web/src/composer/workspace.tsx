@@ -1092,6 +1092,8 @@ function ComposerWorkspaceInner({
           approvedContent = undefined;
         }
         if (
+          (active.operation === "publish_draft" ||
+            active.operation.startsWith("publish_proposal:")) &&
           approvedContent === current.content &&
           active.artifacts.some(
             (artifact) =>

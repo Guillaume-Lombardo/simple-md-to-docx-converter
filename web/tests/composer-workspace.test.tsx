@@ -144,6 +144,7 @@ function setup(
     preserveStorage?: boolean;
     proposalState?: "pending" | "accepted" | "edited";
     markdown?: boolean;
+    sourceSnapshot?: boolean;
     unapprovedMarkdownRevision?: boolean;
     semanticDiff?: boolean;
     restoreGeneration?: boolean;
@@ -168,6 +169,7 @@ function setup(
   const currentRevision = options.markdown
     ? {
         ...revision,
+        operation: options.sourceSnapshot ? "from_source" : "publish_draft",
         approved_values: options.unapprovedMarkdownRevision
           ? "{}"
           : '{"content":"# Original"}',
@@ -178,6 +180,21 @@ function setup(
         })),
       }
     : revision;
+  const approvedRevision = options.sourceSnapshot
+    ? {
+        ...currentRevision,
+        id: "00000000-0000-4000-8000-000000000202",
+        number: 2,
+        operation: "publish_draft",
+      }
+    : currentRevision;
+  const publishedDraft = {
+    ...currentDraft,
+    current_revision_id: approvedRevision.id,
+    version: currentDraft.version + 1,
+    etag: '"draft-3"',
+  };
+  let published = false;
   const generatedRevision = {
     ...currentRevision,
     id: "00000000-0000-4000-8000-000000000203",
@@ -222,7 +239,11 @@ function setup(
     draft: vi
       .fn()
       .mockImplementation(async (id: string) =>
-        id === otherDraft.id ? otherDraft : currentDraft,
+        id === otherDraft.id
+          ? otherDraft
+          : published && options.sourceSnapshot
+            ? publishedDraft
+            : currentDraft,
       ),
     messages: vi.fn().mockResolvedValue([]),
     proposals: vi
@@ -248,6 +269,8 @@ function setup(
     revision: vi
       .fn()
       .mockImplementation(async (_draftId: string, id: string) => {
+        if (options.sourceSnapshot && id === approvedRevision.id)
+          return approvedRevision;
         if (id !== generatedRevision.id) return currentRevision;
         generatedRevisionReads += 1;
         if (
@@ -267,7 +290,17 @@ function setup(
       selection_source: "pandoc_default",
     }),
     templates: vi.fn().mockResolvedValue([]),
-    startGeneration: vi.fn().mockResolvedValue({ data: queuedGeneration }),
+    startGeneration: vi
+      .fn()
+      .mockImplementation(async (_current: unknown, id: string) => {
+        if (options.sourceSnapshot && id === currentRevision.id)
+          throw new ApiError(
+            412,
+            "COMPOSER_CONFLICT",
+            "Unapproved source revision",
+          );
+        return { data: queuedGeneration };
+      }),
     generation: vi.fn().mockResolvedValue(
       options.recoveredPublication
         ? {
@@ -350,7 +383,10 @@ function setup(
     decide: vi.fn(),
     answerQuestion: vi.fn().mockResolvedValue({ data: question }),
     publishProposal: vi.fn(),
-    publishDraft: vi.fn().mockResolvedValue({ data: currentRevision }),
+    publishDraft: vi.fn().mockImplementation(async () => {
+      published = true;
+      return { data: approvedRevision };
+    }),
     captureSource: vi.fn().mockResolvedValue({ data: revision }),
     restore: vi.fn().mockResolvedValue({ data: revision }),
   };
@@ -804,6 +840,34 @@ test("Generate submits the current approved Markdown revision without a model ca
   expect(await screen.findByText(/Generation · DOCX · queued/)).toBeVisible();
 });
 
+test("Generate publishes a source snapshot before reserving an approved Markdown revision", async () => {
+  const api = setup({ markdown: true, sourceSnapshot: true });
+  await screen.findByRole("button", { name: "Generate DOCX" });
+  fireEvent.click(screen.getByRole("button", { name: "Generate DOCX" }));
+  await waitFor(() =>
+    expect(api.startGeneration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: draft.id,
+        current_revision_id: "00000000-0000-4000-8000-000000000202",
+        etag: '"draft-3"',
+      }),
+      "00000000-0000-4000-8000-000000000202",
+      expect.objectContaining({ output: "docx" }),
+      expect.any(String),
+    ),
+  );
+  expect(api.publishDraft).toHaveBeenCalledWith(
+    expect.objectContaining({ content: "# Original" }),
+    expect.any(String),
+  );
+  expect(api.publishDraft.mock.invocationCallOrder[0]).toBeLessThan(
+    api.startGeneration.mock.invocationCallOrder[0]!,
+  );
+  expect(api.startGeneration).toHaveBeenCalledOnce();
+  expect(screen.queryByText("Unapproved source revision")).toBeNull();
+  expect(await screen.findByText(/Generation · DOCX · queued/)).toBeVisible();
+});
+
 test("Generate publishes current content when the Markdown artifact lacks approval metadata", async () => {
   const api = setup({ markdown: true, unapprovedMarkdownRevision: true });
   await screen.findByRole("button", { name: "Generate DOCX" });
@@ -1193,7 +1257,7 @@ test("an exactly selected old revision stays in the selector after newest-page r
     screen.getByRole("combobox", { name: "Revision history" }),
   ).toHaveValue(revision.id);
   expect(
-    screen.getByRole("option", { name: "Revision 1 · capture_source" }),
+    screen.getByRole("option", { name: "Revision 1 · publish_draft" }),
   ).toBeInTheDocument();
   expect(
     screen.getByRole("button", { name: "Load older revisions" }),

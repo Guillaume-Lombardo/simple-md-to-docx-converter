@@ -100,7 +100,7 @@ const revision = {
   id: revisionId,
   draft_id: draftId,
   number: 1,
-  operation: "capture_source",
+  operation: "publish_draft",
   provenance: "human:source",
   source_sha256: "a".repeat(64),
   template_reference: null,
@@ -305,6 +305,7 @@ test.each(["accepted", "edited"] as const)(
     const published = {
       ...revision,
       id: generatedSourceId,
+      operation: `publish_proposal:${proposal.id}`,
       approved_values:
         state === "edited"
           ? '{"content":"# Human correction"}'
