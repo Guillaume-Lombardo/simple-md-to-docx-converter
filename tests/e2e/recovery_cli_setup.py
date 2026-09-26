@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 
 import boto3
 from sqlalchemy import insert, select
+from sqlalchemy import inspect as sqlalchemy_inspect
 from sqlalchemy.engine import URL
 
 from markweave.jobs.models import JobOutput, JobProcessResult, JobRequest, JobState
@@ -138,6 +139,123 @@ def _verify_cleaned_job(database_url: str | URL) -> None:
         engine.dispose()
 
 
+def _make_required_upload_missing(
+    database_url: str | URL, objects: ObjectStore, *, incomplete: bool
+) -> None:
+    engine = create_database_engine(database_url)
+    try:
+        repository = SqlJobRepository(engine, JobAdmissionPolicy(2, 2))
+        service = JobService(repository, objects, JobServicePolicy(10))
+        now = datetime.now(UTC)
+        if incomplete:
+            with engine.connect() as connection:
+                job_row = connection.execute(
+                    select(
+                        ConversionJobRow.id,
+                        ConversionJobRow.owner_id,
+                        ConversionJobRow.source_object_id,
+                    ).where(ConversionJobRow.state == JobState.QUEUED.value)
+                ).one()
+            job_id = UUID(job_row.id)
+            owner_id = UUID(job_row.owner_id)
+            source = ObjectKey(
+                ObjectScope.UPLOAD, owner_id, UUID(job_row.source_object_id)
+            )
+            if objects.exists(source):
+                raise RuntimeError("missing-upload fixture unexpectedly has source")
+            service.cancel(job_id, actor_id=owner_id, actor_is_admin=False, now=now)
+            claimed = repository.expire_terminal(
+                "incomplete-retention-proof",
+                now + timedelta(seconds=11),
+                now + timedelta(seconds=16),
+                1,
+            )
+            if len(claimed) != 1 or claimed[0].job_id != job_id:
+                raise RuntimeError("missing-upload fixture did not expire its job")
+            expected_state = JobState.EXPIRED.value
+        else:
+            with engine.connect() as connection:
+                owner = connection.scalar(select(UserRow.id))
+            if owner is None:
+                raise RuntimeError("missing-upload fixture has no owner")
+            owner_id = UUID(owner)
+            job, replayed = service.submit(
+                JobRequest(
+                    owner_id,
+                    b"# required upload proof",
+                    None,
+                    None,
+                    JobOutput.DOCX,
+                    (("markweave", "e2e"),),
+                    now,
+                ),
+                "required-upload-proof",
+            )
+            if replayed:
+                raise RuntimeError("missing-upload fixture replayed unexpectedly")
+            job_id = job.id
+            source = ObjectKey(ObjectScope.UPLOAD, owner_id, job.source_object_id)
+            if not objects.exists(source):
+                raise RuntimeError("missing-upload fixture did not write source")
+            objects.delete(source)
+            expected_state = JobState.QUEUED.value
+        with engine.connect() as connection:
+            state, ready, completed = connection.execute(
+                select(
+                    ConversionJobRow.state,
+                    ConversionJobRow.source_ready,
+                    ConversionJobRow.cleanup_completed,
+                ).where(ConversionJobRow.id == str(job_id))
+            ).one()
+        if (state, ready, completed) != (expected_state, True, False):
+            raise RuntimeError("missing-upload fixture metadata is invalid")
+        if objects.exists(source):
+            raise RuntimeError("missing-upload fixture still has source")
+    finally:
+        engine.dispose()
+
+
+def standalone_missing_upload(path: Path, *, incomplete: bool) -> None:
+    _make_required_upload_missing(
+        standalone_database_url(path),
+        FilesystemObjectStore(path),
+        incomplete=incomplete,
+    )
+
+
+def distributed_missing_upload(*, incomplete: bool) -> None:
+    client = _s3()
+    try:
+        _make_required_upload_missing(
+            os.environ["RECOVERY_DATABASE"],
+            S3ObjectStore(client, os.environ["RECOVERY_SOURCE_BUCKET"]),
+            incomplete=incomplete,
+        )
+    finally:
+        client.close()
+
+
+def verify_empty_target(path: Path | None = None) -> None:
+    if path is not None:
+        if path.exists() or path.is_symlink():
+            raise RuntimeError("rejected standalone restore published a target")
+        return
+    engine = create_database_engine(os.environ["RECOVERY_DATABASE"])
+    try:
+        with engine.connect() as connection:
+            if sqlalchemy_inspect(connection).get_table_names():
+                raise RuntimeError("rejected distributed restore populated database")
+    finally:
+        engine.dispose()
+    client = _s3()
+    try:
+        target = client.list_objects_v2(Bucket=os.environ["RECOVERY_MISSING_BUCKET"])
+        if _listed_object_count(target) != 0:
+            raise RuntimeError("rejected distributed restore populated bucket")
+    finally:
+        client.close()
+
+
 def standalone_initialize(path: Path) -> None:
     path.mkdir(mode=0o700)
     object_path = path / "objects" / "uploads" / str(uuid4()) / str(uuid4())
@@ -172,6 +290,7 @@ def distributed_initialize() -> None:
         os.environ["RECOVERY_SOURCE_BUCKET"],
         os.environ["RECOVERY_TARGET_BUCKET"],
         os.environ["RECOVERY_FAILED_BUCKET"],
+        os.environ["RECOVERY_MISSING_BUCKET"],
     ):
         client.create_bucket(Bucket=bucket)
     client.put_object(
@@ -226,6 +345,11 @@ def main() -> None:
             "distributed-cleanup-verify",
             "distributed-initialize",
             "distributed-verify",
+            "distributed-missing-active",
+            "distributed-missing-incomplete",
+            "standalone-missing-active",
+            "standalone-missing-incomplete",
+            "verify-empty-target",
             "tamper",
         ),
     )
@@ -241,6 +365,16 @@ def main() -> None:
         distributed_cleanup_verify()
     elif arguments.operation == "distributed-verify":
         distributed_verify()
+    elif arguments.operation == "distributed-missing-active":
+        distributed_missing_upload(incomplete=False)
+    elif arguments.operation == "distributed-missing-incomplete":
+        distributed_missing_upload(incomplete=True)
+    elif arguments.operation == "standalone-missing-active":
+        standalone_missing_upload(arguments.path, incomplete=False)
+    elif arguments.operation == "standalone-missing-incomplete":
+        standalone_missing_upload(arguments.path, incomplete=True)
+    elif arguments.operation == "verify-empty-target":
+        verify_empty_target(arguments.path)
     else:
         tamper(arguments.path)
 
