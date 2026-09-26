@@ -65,6 +65,19 @@ all user-management and conversion/Composer workflows.
   suite then passed, including the Administration keyboard and responsive-layout assertions and
   the corrected Composer scenario. The distributed profile, a confirmed expanded Administration
   screenshot, hosted checks, and main verification remain pending. T94 stays In Progress.
+- 2026-09-26: Complete unattended final rootless-image E2E passed in both profiles with the
+  matched backend/frontend/reverse image IDs recorded in the local validation receipt. Standalone
+  passed at `5586291` and distributed passed at clean head
+  `f999078f5ed3c68e9220118bb27fc76c601b2636`; the only later source delta is this ticket
+  progress, and application/test image inputs are byte-identical. Both full runs passed the
+  canonical Administration and corrected Composer-real browser journeys, plus remaining service
+  failure/recovery paths; scenario-only flags were unset. Authenticated final-byte screenshots
+  show Convert and collapsed/expanded Admin Users at 1440, 1280, 480, and 390 pixels, with no
+  horizontal overflow and lazy Users content visible before expanded capture. Independent
+  rendered/layout review approved. The earlier stale locator and initial screenshot-probe setup
+  or lazy-content races are retained as failed attempts, not counted as passing evidence.
+  Receipt and checksummed full logs are under `/home/g1lom/dev/scratch/t94-validation/`.
+  Hosted CI, publication, and verification on main remain pending; T94 stays In Progress.
 
 ## Synchronization
 
