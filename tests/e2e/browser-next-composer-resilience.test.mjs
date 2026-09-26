@@ -121,7 +121,10 @@ async function verifyHeldGenerationCancellation(page, profile) {
   await page.goto(`${baseURL}/composer?draft=${created.json.id}`, {
     waitUntil: "networkidle",
   });
-  const generate = page.getByRole("button", { name: "Generate DOCX" });
+  const generate = page.getByRole("button", {
+    name: "Generate DOCX",
+    exact: true,
+  });
   await generate.waitFor();
   const accepted = page.waitForResponse(
     (response) =>
