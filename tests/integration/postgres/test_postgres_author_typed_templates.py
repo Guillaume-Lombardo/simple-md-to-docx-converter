@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
+from pytest_mock import MockerFixture
 from sqlalchemy import select, text, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -31,12 +32,32 @@ from markweave.persistence.schema import (
 from markweave.persistence.sql import create_database_engine
 from markweave.storage import ObjectKey, ObjectScope
 from tests.integration.postgres.test_postgres_composer_foundations import _store
+from tests.integration.sqlite.test_composer_fill_plans import (
+    assert_regeneration_rechecks_frozen_author_grant,
+    prepare,
+)
 
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.requires_postgres,
     pytest.mark.requires_s3,
 ]
+
+
+@pytest.mark.parametrize("revoke_during_publication", [False, True])
+def test_postgresql_regeneration_rechecks_frozen_author_grant(
+    mocker: MockerFixture, revoke_during_publication: bool
+) -> None:
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
+    objects = _store()
+    try:
+        context = prepare(engine, objects)
+        assert_regeneration_rechecks_frozen_author_grant(
+            context, mocker, revoke_during_publication
+        )
+    finally:
+        objects.close()
+        engine.dispose()
 
 
 def test_postgresql_s3_author_grants_and_typed_versions_survive_restart() -> None:

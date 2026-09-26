@@ -11,6 +11,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
+from pytest_mock import MockerFixture
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
@@ -36,7 +37,7 @@ from markweave.persistence.schema import (
     UserRow,
 )
 from markweave.persistence.sql import create_database_engine
-from markweave.storage import FilesystemObjectStore, ObjectStore
+from markweave.storage import FilesystemObjectStore, ObjectKey, ObjectStore
 
 pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
 _DOCX_MEDIA = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -325,6 +326,47 @@ def test_revoked_reference_blocks_existing_plan(tmp_path: Path, revoked: str) ->
         )
 
 
+def test_plan_pages_count_only_authorized_rows(tmp_path: Path) -> None:
+    context = _sqlite(tmp_path)
+    older = []
+    for number in range(2):
+        draft = context.composer.get_draft(context.owner, context.draft_id)
+        older.append(
+            context.plans.create(
+                context.owner,
+                context.draft_id,
+                source_revision_id=context.source_revision_id,
+                template_version_id=context.template.active_version_id,
+                author_refs=(),
+                values={"finding": "independent"},
+                provenance={"finding": "human_edited"},
+                questions=(),
+                if_match=draft.etag,
+                idempotency_key=f"independent-plan-{number}",
+            )
+        )
+    for number in range(101):
+        newer = create_plan(context, key=f"shared-plan-{number}")
+    context.authors.revoke(
+        context.sharer,
+        context.author.id,
+        context.owner,
+        if_match=context.author.etag,
+    )
+    assert context.plans.list_visible(context.owner, context.draft_id, limit=1) == (
+        older[1],
+    )
+    assert context.plans.list_visible(
+        context.owner, context.draft_id, limit=1, offset=1
+    ) == (older[0],)
+    assert (
+        context.plans.list_visible(context.owner, context.draft_id, limit=1, offset=2)
+        == ()
+    )
+    with pytest.raises(ComposerConflictError, match="access changed"):
+        context.plans.get(context.owner, context.draft_id, newer.id)
+
+
 def test_inactive_user_and_changed_draft_block_plan_decision(tmp_path: Path) -> None:
     context = _sqlite(tmp_path)
     plan = create_plan(context)
@@ -441,6 +483,99 @@ def publish_filled_revision(context: Prepared, plan: FillPlan) -> UUID:
         ),
     )
     return revision.id
+
+
+@pytest.mark.parametrize("revoke_during_publication", [False, True])
+def test_regeneration_rechecks_frozen_author_grant(
+    tmp_path: Path, mocker: MockerFixture, revoke_during_publication: bool
+) -> None:
+    assert_regeneration_rechecks_frozen_author_grant(
+        _sqlite(tmp_path), mocker, revoke_during_publication
+    )
+
+
+def assert_regeneration_rechecks_frozen_author_grant(
+    context: Prepared, mocker: MockerFixture, revoke_during_publication: bool
+) -> None:
+    pending = create_plan(context)
+    plan = context.plans.decide(
+        context.owner,
+        context.draft_id,
+        pending.id,
+        if_match=pending.etag,
+        idempotency_key="approve",
+        values=pending.values,
+        provenance=pending.provenance,
+        questions=(),
+        approve=True,
+    )
+    parent_id = publish_filled_revision(context, plan)
+    parent = context.composer.get_revision(context.owner, context.draft_id, parent_id)
+    assert parent.snapshot.typed_fill_snapshot is not None
+    frozen = json.loads(parent.snapshot.typed_fill_snapshot)
+    frozen["parent_revision_id"] = str(parent_id)
+    frozen["actor_id"] = str(context.owner)
+
+    def revoke() -> None:
+        context.authors.revoke(
+            context.sharer,
+            context.author.id,
+            context.owner,
+            if_match=context.author.etag,
+        )
+
+    if revoke_during_publication:
+        original_put = context.objects.put
+        revoked = False
+
+        def revoke_on_put(key: ObjectKey, content: bytes) -> None:
+            nonlocal revoked
+            if not revoked:
+                revoke()
+                revoked = True
+            return original_put(key, content)
+
+        mocker.patch.object(context.objects, "put", side_effect=revoke_on_put)
+    else:
+        revoke()
+    draft = context.composer.get_draft(context.owner, context.draft_id)
+    with pytest.raises(ComposerConflictError, match="Author access changed"):
+        context.composer.publish_revision(
+            context.owner,
+            context.draft_id,
+            actor_id=context.owner,
+            if_match=draft.etag,
+            idempotency_key="regenerate-after-revoke",
+            snapshot=RevisionSnapshot(
+                parent.snapshot.source,
+                None,
+                "{}",
+                parent.snapshot.render_options,
+                None,
+                "human:frozen_regeneration",
+                "regenerate_fill",
+                typed_fill_snapshot=json.dumps(frozen),
+            ),
+            artifacts=(
+                ArtifactContent("download", _DOCX_MEDIA, b"filled-docx"),
+                ArtifactContent("preview", _DOCX_MEDIA, b"filled-docx"),
+            ),
+        )
+    assert context.composer.get_revision(context.owner, context.draft_id, parent_id)
+    assert (
+        context.composer.get_draft(context.owner, context.draft_id).current_revision_id
+        == parent_id
+    )
+    with Session(context.engine) as database:
+        assert database.scalars(
+            select(ComposerRevisionRow).where(
+                ComposerRevisionRow.draft_id == str(context.draft_id),
+                ComposerRevisionRow.publication_state == "published",
+            )
+        ).all() == [
+            database.get(ComposerRevisionRow, str(context.source_revision_id)),
+            database.get(ComposerRevisionRow, str(parent_id)),
+        ]
 
 
 def test_mark_published_rejects_unrelated_revision_and_recovers_exact_link(

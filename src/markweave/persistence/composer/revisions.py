@@ -267,6 +267,17 @@ class _SqlComposerRevisions:
             )
         except LookupError, RuntimeError:
             raise ComposerConflictError("Typed template access changed") from None
+        try:
+            for ref in author_refs:
+                SqlAuthorKnowledgeRepository.require_access(
+                    database,
+                    owner_id,
+                    UUID(ref["id"]),
+                    expected_version=int(ref["version"]),
+                    for_update=True,
+                )
+        except LookupError, RuntimeError, KeyError, ValueError, TypeError:
+            raise ComposerConflictError("Author access changed") from None
         if snapshot.operation == "regenerate_fill":
             try:
                 parent_id = UUID(data["parent_revision_id"])
@@ -332,17 +343,6 @@ class _SqlComposerRevisions:
             or json.loads(plan.questions_json)
         ):
             raise ComposerConflictError("Fill plan changed before publication")
-        try:
-            for ref in author_refs:
-                SqlAuthorKnowledgeRepository.require_access(
-                    database,
-                    owner_id,
-                    UUID(ref["id"]),
-                    expected_version=int(ref["version"]),
-                    for_update=True,
-                )
-        except LookupError, RuntimeError, KeyError, ValueError, TypeError:
-            raise ComposerConflictError("Author access changed") from None
 
     def publish_revision(  # noqa: PLR0913, PLR0912, PLR0915 - two-phase publication
         self,

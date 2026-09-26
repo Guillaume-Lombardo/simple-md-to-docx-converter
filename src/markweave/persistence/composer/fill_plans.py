@@ -32,6 +32,7 @@ from markweave.persistence.sql import serialize_sqlite_write
 _MAX_IDEMPOTENCY_KEY_LENGTH = 128
 _FIRST_VISIBLE_ASCII = 33
 _LAST_VISIBLE_ASCII = 126
+_LIST_SCAN_BATCH_SIZE = 100
 
 
 def _json(value: object) -> str:
@@ -306,7 +307,7 @@ class SqlFillPlanRepository:
         try:
             with Session(self._engine) as database:
                 owned_draft(database, owner_id, draft_id)
-                rows = database.scalars(
+                query = (
                     select(ComposerFillPlanRow)
                     .where(
                         ComposerFillPlanRow.owner_id == str(owner_id),
@@ -316,16 +317,27 @@ class SqlFillPlanRepository:
                         ComposerFillPlanRow.created_at.desc(),
                         ComposerFillPlanRow.id.desc(),
                     )
-                    .limit(limit)
-                    .offset(offset)
-                ).all()
-                visible = []
-                for row in rows:
-                    try:
-                        self.require_access(database, owner_id, row, lock=False)
-                    except ComposerConflictError:
-                        continue
-                    visible.append(_result(database, row))
+                )
+                visible: list[FillPlan] = []
+                scanned = 0
+                authorized = 0
+                while len(visible) < limit:
+                    rows = database.scalars(
+                        query.limit(_LIST_SCAN_BATCH_SIZE).offset(scanned)
+                    ).all()
+                    if not rows:
+                        break
+                    scanned += len(rows)
+                    for row in rows:
+                        try:
+                            self.require_access(database, owner_id, row, lock=False)
+                        except ComposerConflictError:
+                            continue
+                        authorized += 1
+                        if authorized > offset:
+                            visible.append(_result(database, row))
+                        if len(visible) == limit:
+                            break
                 return tuple(visible)
         except SQLAlchemyError:
             raise PersistenceError from None
