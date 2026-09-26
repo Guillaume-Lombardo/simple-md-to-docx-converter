@@ -25,6 +25,22 @@ const emptyField = (): FillField => ({
   required: true,
   constraints: {},
 });
+const editorIds = new WeakMap<object, number>();
+let nextEditorId = 0;
+
+function editorId(item: object): number {
+  let id = editorIds.get(item);
+  if (id === undefined) {
+    id = ++nextEditorId;
+    editorIds.set(item, id);
+  }
+  return id;
+}
+
+function keepEditorId<T extends object>(current: T, updated: T): T {
+  editorIds.set(updated, editorId(current));
+  return updated;
+}
 
 function failureMessage(reason: unknown, expire: () => void): string {
   if (reason instanceof ApiError) {
@@ -160,6 +176,15 @@ function SchemaEditor({
   schema: FillSchema;
   onChange: (schema: FillSchema) => void;
 }) {
+  function updateRepeat(index: number, updated: FillSchema["repeats"][number]) {
+    onChange({
+      ...schema,
+      repeats: schema.repeats.map((item, at) =>
+        at === index ? keepEditorId(item, updated) : item,
+      ),
+    });
+  }
+
   return (
     <div className="space-y-4">
       <div>
@@ -169,13 +194,13 @@ function SchemaEditor({
       {schema.fields.map((field, index) => (
         <FieldEditor
           field={field}
-          key={index}
+          key={editorId(field)}
           label={`Field ${index + 1}`}
           onChange={(value) =>
             onChange({
               ...schema,
               fields: schema.fields.map((item, at) =>
-                at === index ? value : item,
+                at === index ? keepEditorId(item, value) : item,
               ),
             })
           }
@@ -202,7 +227,7 @@ function SchemaEditor({
       {schema.repeats.map((repeat, repeatIndex) => (
         <fieldset
           className="space-y-3 rounded-control border border-muted p-3"
-          key={repeatIndex}
+          key={editorId(repeat)}
         >
           <legend>Repeat {repeatIndex + 1}</legend>
           <label className="grid gap-1">
@@ -211,13 +236,9 @@ function SchemaEditor({
               required
               value={repeat.name}
               onChange={(event) =>
-                onChange({
-                  ...schema,
-                  repeats: schema.repeats.map((item, at) =>
-                    at === repeatIndex
-                      ? { ...item, name: event.target.value }
-                      : item,
-                  ),
+                updateRepeat(repeatIndex, {
+                  ...repeat,
+                  name: event.target.value,
                 })
               }
             />
@@ -232,13 +253,9 @@ function SchemaEditor({
                   type="number"
                   value={repeat[key]}
                   onChange={(event) =>
-                    onChange({
-                      ...schema,
-                      repeats: schema.repeats.map((item, at) =>
-                        at === repeatIndex
-                          ? { ...item, [key]: Number(event.target.value) }
-                          : item,
-                      ),
+                    updateRepeat(repeatIndex, {
+                      ...repeat,
+                      [key]: Number(event.target.value),
                     })
                   }
                 />
@@ -248,35 +265,21 @@ function SchemaEditor({
           {repeat.fields.map((field, fieldIndex) => (
             <FieldEditor
               field={field}
-              key={fieldIndex}
+              key={editorId(field)}
               label={`Repeat ${repeatIndex + 1} field ${fieldIndex + 1}`}
               onChange={(value) =>
-                onChange({
-                  ...schema,
-                  repeats: schema.repeats.map((item, at) =>
-                    at === repeatIndex
-                      ? {
-                          ...item,
-                          fields: item.fields.map((child, childAt) =>
-                            childAt === fieldIndex ? value : child,
-                          ),
-                        }
-                      : item,
+                updateRepeat(repeatIndex, {
+                  ...repeat,
+                  fields: repeat.fields.map((child, childAt) =>
+                    childAt === fieldIndex ? keepEditorId(child, value) : child,
                   ),
                 })
               }
               onRemove={() =>
-                onChange({
-                  ...schema,
-                  repeats: schema.repeats.map((item, at) =>
-                    at === repeatIndex
-                      ? {
-                          ...item,
-                          fields: item.fields.filter(
-                            (_, childAt) => childAt !== fieldIndex,
-                          ),
-                        }
-                      : item,
+                updateRepeat(repeatIndex, {
+                  ...repeat,
+                  fields: repeat.fields.filter(
+                    (_, childAt) => childAt !== fieldIndex,
                   ),
                 })
               }
@@ -285,13 +288,9 @@ function SchemaEditor({
           <div className="flex gap-3">
             <button
               onClick={() =>
-                onChange({
-                  ...schema,
-                  repeats: schema.repeats.map((item, at) =>
-                    at === repeatIndex
-                      ? { ...item, fields: [...item.fields, emptyField()] }
-                      : item,
-                  ),
+                updateRepeat(repeatIndex, {
+                  ...repeat,
+                  fields: [...repeat.fields, emptyField()],
                 })
               }
               type="button"

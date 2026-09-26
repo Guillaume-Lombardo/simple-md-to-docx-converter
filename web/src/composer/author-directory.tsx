@@ -16,6 +16,8 @@ interface FieldRow {
   value: string | null;
   provenance: AuthorField["provenance"];
   sourceReference: string;
+  lastValue: string;
+  lastProvenance: AuthorField["provenance"];
 }
 
 const defaultApi = new AuthorDirectoryApi();
@@ -24,6 +26,8 @@ const blankField = (): FieldRow => ({
   value: "",
   provenance: "supplied",
   sourceReference: "",
+  lastValue: "",
+  lastProvenance: "supplied",
 });
 
 function rows(fields: Record<string, AuthorField>): FieldRow[] {
@@ -32,6 +36,9 @@ function rows(fields: Record<string, AuthorField>): FieldRow[] {
     value: field.value,
     provenance: field.provenance,
     sourceReference: field.source_reference ?? "",
+    lastValue: field.value ?? "",
+    lastProvenance:
+      field.provenance === "unresolved" ? "supplied" : field.provenance,
   }));
   return entries.length > 0 ? entries : [blankField()];
 }
@@ -126,9 +133,19 @@ export function AuthorDirectory({
     const result: Record<string, AuthorField> = {};
     for (const field of fields) {
       const key = field.key.trim();
-      if (!key && !field.value?.trim()) continue;
+      if (
+        !key &&
+        field.value === "" &&
+        field.provenance === "supplied" &&
+        !field.sourceReference.trim()
+      )
+        continue;
       if (!key || Object.hasOwn(result, key)) {
         setError("Each filled author field needs a unique name.");
+        return null;
+      }
+      if (field.value !== null && !field.value.trim()) {
+        setError("Enter a value or mark the author field unresolved.");
         return null;
       }
       result[key] = {
@@ -294,7 +311,13 @@ export function AuthorDirectory({
                 <textarea
                   value={field.value ?? ""}
                   onChange={(event) =>
-                    updateField(index, { value: event.target.value })
+                    updateField(index, {
+                      value: event.target.value,
+                      lastValue: event.target.value,
+                      ...(field.provenance === "unresolved"
+                        ? { provenance: field.lastProvenance }
+                        : {}),
+                    })
                   }
                 />
               </label>
@@ -303,7 +326,19 @@ export function AuthorDirectory({
                   checked={field.value === null}
                   onChange={(event) =>
                     updateField(index, {
-                      value: event.target.checked ? null : "",
+                      value: event.target.checked ? null : field.lastValue,
+                      provenance: event.target.checked
+                        ? "unresolved"
+                        : field.lastProvenance,
+                      ...(event.target.checked
+                        ? {
+                            lastValue: field.value ?? field.lastValue,
+                            lastProvenance:
+                              field.provenance === "unresolved"
+                                ? field.lastProvenance
+                                : field.provenance,
+                          }
+                        : {}),
                     })
                   }
                   type="checkbox"
@@ -314,12 +349,26 @@ export function AuthorDirectory({
                 Provenance
                 <select
                   value={field.provenance}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    const provenance = event.target
+                      .value as AuthorField["provenance"];
                     updateField(index, {
-                      provenance: event.target
-                        .value as AuthorField["provenance"],
-                    })
-                  }
+                      provenance,
+                      value:
+                        provenance === "unresolved"
+                          ? null
+                          : (field.value ?? field.lastValue),
+                      ...(provenance === "unresolved"
+                        ? {
+                            lastValue: field.value ?? field.lastValue,
+                            lastProvenance:
+                              field.provenance === "unresolved"
+                                ? field.lastProvenance
+                                : field.provenance,
+                          }
+                        : { lastProvenance: provenance }),
+                    });
+                  }}
                 >
                   <option value="supplied">Supplied fact</option>
                   <option value="cited">Cited source</option>

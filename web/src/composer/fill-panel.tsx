@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert } from "../../components/primitives";
 import { ApiError } from "../api/transport";
 import { AuthorDirectoryApi, type AuthorEntry } from "./author-directory-api";
@@ -21,6 +21,13 @@ const defaultAuthors = new AuthorDirectoryApi();
 
 function planKey(ownerId: string, draftId: string) {
   return `composer:fill-plan:${ownerId}:${draftId}`;
+}
+
+function planAuthorIds(plan: FillPlan): string[] {
+  return plan.author_refs.flatMap((ref) => {
+    if (typeof ref !== "object" || ref === null || !("id" in ref)) return [];
+    return typeof ref.id === "string" ? [ref.id] : [];
+  });
 }
 
 function selectedValue(value: unknown): string {
@@ -195,28 +202,36 @@ export function ComposerFillPanel({
   );
   const [plan, setPlan] = useState<FillPlan | null>(null);
   const [plans, setPlans] = useState<FillPlan[]>([]);
+  const [planOffset, setPlanOffset] = useState(0);
+  const [morePlans, setMorePlans] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [regenerateId, setRegenerateId] = useState("");
   const [dirty, setDirty] = useState(false);
+  const selectionId = useRef(0);
 
   const choosePlan = useCallback(
     async (chosen: FillPlan): Promise<void> => {
+      const requestId = ++selectionId.current;
       setPlan(chosen);
       setTemplateId(chosen.template_id);
+      setVersion(null);
+      setVersions([]);
       setValues(chosen.values);
       setProvenance(chosen.provenance);
+      setAuthorIds(planAuthorIds(chosen));
       setDirty(false);
       try {
-        setVersions(await templateApi.versions(chosen.template_id));
-        setVersion(
-          await templateApi.version(
-            chosen.template_id,
-            chosen.template_version_id,
-          ),
-        );
+        const [availableVersions, loadedVersion] = await Promise.all([
+          templateApi.versions(chosen.template_id),
+          templateApi.version(chosen.template_id, chosen.template_version_id),
+        ]);
+        if (requestId !== selectionId.current) return;
+        setVersions(availableVersions);
+        setVersion(loadedVersion);
       } catch (reason) {
+        if (requestId !== selectionId.current) return;
         setVersion(null);
         setError(errorMessage(reason, expire));
       }
@@ -240,6 +255,8 @@ export function ComposerFillPanel({
         setAuthorOffset(0);
         setMoreAuthors(availableAuthors.length === 100);
         setPlans(availablePlans);
+        setPlanOffset(0);
+        setMorePlans(availablePlans.length === 100);
         let saved: string | null = null;
         try {
           saved = sessionStorage.getItem(planKey(ownerId, draft.id));
@@ -255,7 +272,10 @@ export function ComposerFillPanel({
       .catch((reason: unknown) => {
         if (!controller.signal.aborted) setError(errorMessage(reason, expire));
       });
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      selectionId.current += 1;
+    };
   }, [authorApi, choosePlan, draft.id, expire, ownerId, templateApi]);
 
   async function loadMoreTemplates(): Promise<void> {
@@ -270,6 +290,25 @@ export function ComposerFillPanel({
       });
       setTemplateOffset(nextOffset);
       setMoreTemplates(page.length === 100);
+    } catch (reason) {
+      setError(errorMessage(reason, expire));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function loadMorePlans(): Promise<void> {
+    const nextOffset = planOffset + 100;
+    setBusy(true);
+    setError("");
+    try {
+      const page = await templateApi.plans(draft.id, nextOffset);
+      setPlans((previous) => {
+        const known = new Set(previous.map((item) => item.id));
+        return [...previous, ...page.filter((item) => !known.has(item.id))];
+      });
+      setPlanOffset(nextOffset);
+      setMorePlans(page.length === 100);
     } catch (reason) {
       setError(errorMessage(reason, expire));
     } finally {
@@ -297,6 +336,8 @@ export function ComposerFillPanel({
   }
 
   async function chooseTemplate(id: string): Promise<void> {
+    const requestId = ++selectionId.current;
+    if (plan) setAuthorIds([]);
     setTemplateId(id);
     setVersion(null);
     setVersions([]);
@@ -308,13 +349,16 @@ export function ComposerFillPanel({
     if (!chosen?.active_version_id) return;
     try {
       const availableVersions = await templateApi.versions(id);
+      if (requestId !== selectionId.current) return;
       setVersions(availableVersions);
       const loaded =
         availableVersions.find(
           (item) => item.id === chosen.active_version_id,
         ) ?? (await templateApi.version(id, chosen.active_version_id));
+      if (requestId !== selectionId.current) return;
       setVersion(loaded);
     } catch (reason) {
+      if (requestId !== selectionId.current) return;
       setError(errorMessage(reason, expire));
     }
   }
@@ -412,8 +456,10 @@ export function ComposerFillPanel({
           setPlan(current);
           setValues(current.values);
           setProvenance(current.provenance);
+          setAuthorIds(planAuthorIds(current));
         } catch {
           setPlan(null);
+          setAuthorIds([]);
         }
       }
     } finally {
@@ -437,6 +483,7 @@ export function ComposerFillPanel({
         },
       );
       setPlan(created);
+      setAuthorIds(planAuthorIds(created));
       setPlans((previous) => [created, ...previous]);
       setValues(created.values);
       setProvenance(created.provenance);
@@ -543,9 +590,11 @@ export function ComposerFillPanel({
               );
               if (chosen) void choosePlan(chosen);
               else {
+                selectionId.current += 1;
                 setPlan(null);
                 setValues({});
                 setProvenance({});
+                setAuthorIds([]);
                 setDirty(false);
               }
             }}
@@ -558,6 +607,15 @@ export function ComposerFillPanel({
             ))}
           </select>
         </label>
+      )}
+      {morePlans && (
+        <button
+          disabled={busy}
+          onClick={() => void loadMorePlans()}
+          type="button"
+        >
+          Load more saved fill plans
+        </button>
       )}
       <label className="grid gap-1">
         Typed filling template

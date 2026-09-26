@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { ApiError } from "../src/api/transport";
 import type { AuthorDirectoryApi } from "../src/composer/author-directory-api";
 import { AuthorDirectory } from "../src/composer/author-directory";
@@ -1989,4 +1995,217 @@ test("fill selectors can choose authorized templates and authors beyond the firs
       }),
     ),
   );
+});
+
+test("saved fill plans restore their authors and a new plan clears the previous selection", async () => {
+  const secondAuthor = { ...author, id: "author-2", name: "Bob" };
+  const first = {
+    ...plan,
+    id: "plan-first",
+    author_refs: [{ id: author.id, version: 1 }],
+  };
+  const second = {
+    ...plan,
+    id: "plan-second",
+    author_refs: [{ id: secondAuthor.id, version: 1 }],
+  };
+  const api = {
+    list: vi.fn().mockResolvedValue([template]),
+    plans: vi.fn().mockResolvedValue([first, second]),
+    versions: vi.fn().mockResolvedValue([active]),
+    version: vi.fn().mockResolvedValue(active),
+    createPlan: vi.fn().mockResolvedValue({
+      ...plan,
+      id: "plan-new",
+      state: "pending",
+      author_refs: [],
+    }),
+  };
+  render(
+    <ComposerFillPanel
+      authorApi={
+        {
+          list: vi.fn().mockResolvedValue([author, secondAuthor]),
+        } as unknown as AuthorDirectoryApi
+      }
+      draft={draft}
+      expire={vi.fn()}
+      onPublished={vi.fn()}
+      ownerId={owner.id}
+      revisions={[]}
+      sourceRevisionId="source-1"
+      templateApi={api as unknown as FillTemplateApi}
+    />,
+  );
+  expect(await screen.findByText(/Fill plan plan-first/)).toBeVisible();
+  expect(screen.getByRole("checkbox", { name: author.name })).toBeChecked();
+  expect(
+    screen.getByRole("checkbox", { name: secondAuthor.name }),
+  ).not.toBeChecked();
+  fireEvent.change(screen.getByLabelText("Saved fill plans"), {
+    target: { value: second.id },
+  });
+  expect(await screen.findByText(/Fill plan plan-second/)).toBeVisible();
+  expect(screen.getByRole("checkbox", { name: author.name })).not.toBeChecked();
+  expect(
+    screen.getByRole("checkbox", { name: secondAuthor.name }),
+  ).toBeChecked();
+  fireEvent.change(screen.getByLabelText("Saved fill plans"), {
+    target: { value: "" },
+  });
+  expect(screen.getByRole("checkbox", { name: author.name })).not.toBeChecked();
+  expect(
+    screen.getByRole("checkbox", { name: secondAuthor.name }),
+  ).not.toBeChecked();
+  await screen.findByText(/Exact template version/);
+  fireEvent.click(screen.getByRole("button", { name: "Save fill plan" }));
+  await waitFor(() => expect(api.createPlan).toHaveBeenCalledOnce());
+  expect(api.createPlan.mock.calls[0]![3].author_ids).toEqual([]);
+});
+
+test("older saved fill plans remain reachable after the first page", async () => {
+  const newest = Array.from({ length: 100 }, (_, index) => ({
+    ...plan,
+    id: `newer-${index}`,
+    state: "published" as const,
+  }));
+  const older = { ...plan, id: "older-pending", state: "pending" as const };
+  const api = {
+    list: vi.fn().mockResolvedValue([template]),
+    plans: vi
+      .fn()
+      .mockImplementation((_draftId: string, offset: number) =>
+        Promise.resolve(offset === 0 ? newest : [older]),
+      ),
+    versions: vi.fn().mockResolvedValue([active]),
+    version: vi.fn().mockResolvedValue(active),
+  };
+  render(
+    <ComposerFillPanel
+      authorApi={
+        { list: vi.fn().mockResolvedValue([]) } as unknown as AuthorDirectoryApi
+      }
+      draft={draft}
+      expire={vi.fn()}
+      onPublished={vi.fn()}
+      ownerId={owner.id}
+      revisions={[]}
+      sourceRevisionId="source-1"
+      templateApi={api as unknown as FillTemplateApi}
+    />,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Load more saved fill plans" }),
+  );
+  await waitFor(() => expect(api.plans).toHaveBeenCalledWith(draft.id, 100));
+  fireEvent.change(screen.getByLabelText("Saved fill plans"), {
+    target: { value: older.id },
+  });
+  expect(await screen.findByText(/Fill plan older-pending/)).toBeVisible();
+});
+
+test("late saved-plan versions cannot replace a newer selection or a new plan", async () => {
+  const firstVersion = {
+    ...active,
+    id: "version-first",
+    schema: {
+      fields: [
+        {
+          name: "first",
+          type: "text" as const,
+          required: true,
+          constraints: {},
+        },
+      ],
+      repeats: [],
+    },
+  };
+  const secondVersion = {
+    ...active,
+    id: "version-second",
+    schema: {
+      fields: [
+        {
+          name: "second",
+          type: "text" as const,
+          required: true,
+          constraints: {},
+        },
+      ],
+      repeats: [],
+    },
+  };
+  const first = {
+    ...plan,
+    id: "plan-first",
+    template_version_id: firstVersion.id,
+  };
+  const second = {
+    ...plan,
+    id: "plan-second",
+    template_version_id: secondVersion.id,
+  };
+  const pending: Array<{
+    resolve: (value: typeof firstVersion) => void;
+    reject: (reason: unknown) => void;
+  }> = [];
+  const api = {
+    list: vi.fn().mockResolvedValue([template]),
+    plans: vi.fn().mockResolvedValue([first, second]),
+    versions: vi.fn().mockResolvedValue([firstVersion, secondVersion]),
+    version: vi.fn().mockImplementation((_templateId, versionId) => {
+      if (versionId === secondVersion.id) return Promise.resolve(secondVersion);
+      return new Promise<typeof firstVersion>((resolve, reject) =>
+        pending.push({ resolve, reject }),
+      );
+    }),
+  };
+  render(
+    <ComposerFillPanel
+      authorApi={
+        { list: vi.fn().mockResolvedValue([]) } as unknown as AuthorDirectoryApi
+      }
+      draft={draft}
+      expire={vi.fn()}
+      onPublished={vi.fn()}
+      ownerId={owner.id}
+      revisions={[]}
+      sourceRevisionId="source-1"
+      templateApi={api as unknown as FillTemplateApi}
+    />,
+  );
+  expect(await screen.findByText(/Fill plan plan-first/)).toBeVisible();
+  await waitFor(() => expect(pending).toHaveLength(1));
+  fireEvent.change(screen.getByLabelText("Saved fill plans"), {
+    target: { value: second.id },
+  });
+  expect(await screen.findByLabelText("second")).toBeVisible();
+  await act(async () => pending[0]!.resolve(firstVersion));
+  expect(screen.getByLabelText("Saved fill plans")).toHaveValue(second.id);
+  expect(screen.getByLabelText("second")).toBeVisible();
+  expect(screen.queryByLabelText("first")).toBeNull();
+  fireEvent.change(screen.getByLabelText("Saved fill plans"), {
+    target: { value: first.id },
+  });
+  await waitFor(() => expect(pending).toHaveLength(2));
+  fireEvent.change(screen.getByLabelText("Saved fill plans"), {
+    target: { value: "" },
+  });
+  await act(async () => pending[1]!.resolve(firstVersion));
+  expect(screen.getByLabelText("Saved fill plans")).toHaveValue("");
+  expect(screen.queryByLabelText("first")).toBeNull();
+  expect(screen.getByRole("button", { name: "Save fill plan" })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("Saved fill plans"), {
+    target: { value: first.id },
+  });
+  await waitFor(() => expect(pending).toHaveLength(3));
+  fireEvent.change(screen.getByLabelText("Saved fill plans"), {
+    target: { value: second.id },
+  });
+  expect(await screen.findByLabelText("second")).toBeVisible();
+  await act(async () =>
+    pending[2]!.reject(new ApiError(403, "FORBIDDEN", "private detail")),
+  );
+  expect(screen.queryByText(/no longer available/)).toBeNull();
+  expect(screen.queryByText("private detail")).toBeNull();
 });

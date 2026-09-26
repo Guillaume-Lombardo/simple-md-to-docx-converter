@@ -178,6 +178,68 @@ test("revoked author access is displayed as safe stale state", async () => {
   expect(screen.queryByText("private detail")).toBeNull();
 });
 
+test("unknown author facts keep value and provenance coherent in both directions", async () => {
+  const current = { ...author, fields: { ...author.fields } };
+  const api = {
+    list: vi.fn().mockResolvedValue([current]),
+    get: vi
+      .fn()
+      .mockImplementation(() =>
+        Promise.resolve({ data: current, etag: '"author-2"' }),
+      ),
+    update: vi.fn().mockImplementation((_id, _etag, input) => {
+      current.fields = input.fields;
+      return Promise.resolve({ data: current, etag: '"author-3"' });
+    }),
+  };
+  render(
+    <AuthorDirectory
+      api={api as unknown as AuthorDirectoryApi}
+      expire={vi.fn()}
+      user={user}
+    />,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Alice Author (mine)" }),
+  );
+  await screen.findByDisplayValue("Original");
+  const unknown = screen.getByRole("checkbox", {
+    name: "Unknown or unresolved",
+  });
+  fireEvent.click(unknown);
+  expect(screen.getByLabelText("Provenance")).toHaveValue("unresolved");
+  fireEvent.click(unknown);
+  expect(screen.getByLabelText("Value")).toHaveValue("Original");
+  expect(screen.getByLabelText("Provenance")).toHaveValue("supplied");
+  fireEvent.click(unknown);
+  fireEvent.click(screen.getByRole("button", { name: "Save author" }));
+  await waitFor(() => expect(api.update).toHaveBeenCalledOnce());
+  await screen.findByRole("status");
+  expect(api.update.mock.calls[0]![2].fields.organization).toMatchObject({
+    value: null,
+    provenance: "unresolved",
+  });
+  fireEvent.click(unknown);
+  expect(screen.getByLabelText("Value")).toHaveValue("");
+  expect(screen.getByLabelText("Provenance")).toHaveValue("supplied");
+  fireEvent.click(screen.getByRole("button", { name: "Save author" }));
+  expect(api.update).toHaveBeenCalledOnce();
+  expect(
+    await screen.findByText(
+      "Enter a value or mark the author field unresolved.",
+    ),
+  ).toBeVisible();
+  fireEvent.change(screen.getByLabelText("Value"), {
+    target: { value: "Restored" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save author" }));
+  await waitFor(() => expect(api.update).toHaveBeenCalledTimes(2));
+  expect(api.update.mock.calls[1]![2].fields.organization).toMatchObject({
+    value: "Restored",
+    provenance: "supplied",
+  });
+});
+
 test("typed template authoring keeps named fields and repeat bounds in its multipart schema", async () => {
   const api = {
     list: vi.fn().mockResolvedValue([]),
@@ -242,6 +304,114 @@ test("typed template authoring keeps named fields and repeat bounds in its multi
       expect.any(File),
     ),
   );
+});
+
+test("removing an earlier typed field keeps the next field's visible JSON and saved schema", async () => {
+  const api = {
+    list: vi.fn().mockResolvedValue([]),
+    create: vi.fn().mockResolvedValue({ data: template }),
+    get: vi.fn().mockResolvedValue({ data: template }),
+    version: vi.fn().mockResolvedValue(version),
+    versions: vi.fn().mockResolvedValue([version]),
+  };
+  render(
+    <FillTemplatesWorkspace
+      api={api as unknown as FillTemplateApi}
+      expire={vi.fn()}
+      user={user}
+    />,
+  );
+  await waitFor(() => expect(api.list).toHaveBeenCalled());
+  fireEvent.change(screen.getByLabelText("Template name"), {
+    target: { value: "Structured report" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Add field" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add field" }));
+  const names = screen.getAllByLabelText("Field name");
+  fireEvent.change(names[0]!, { target: { value: "discarded" } });
+  fireEvent.change(names[1]!, { target: { value: "retained" } });
+  const constraints = screen.getAllByLabelText("Constraints (JSON object)");
+  fireEvent.change(constraints[0]!, { target: { value: '{"max_length":4}' } });
+  fireEvent.change(constraints[1]!, { target: { value: '{"max_length":12}' } });
+  const defaults = screen.getAllByLabelText(
+    "Explicit default (JSON value; blank means none)",
+  );
+  fireEvent.change(defaults[0]!, { target: { value: '"old"' } });
+  fireEvent.change(defaults[1]!, { target: { value: '"kept"' } });
+  fireEvent.change(constraints[1]!, { target: { value: '{"max_length":' } });
+  fireEvent.click(screen.getByRole("button", { name: "Remove field 1" }));
+  expect(screen.getByLabelText("Constraints (JSON object)")).toHaveValue(
+    '{"max_length":',
+  );
+  expect(screen.getByLabelText("Constraints (JSON object)")).toBeInvalid();
+  fireEvent.change(screen.getByLabelText("Constraints (JSON object)"), {
+    target: { value: '{"max_length":12}' },
+  });
+  expect(
+    screen.getByLabelText("Explicit default (JSON value; blank means none)"),
+  ).toHaveValue('"kept"');
+  fireEvent.click(
+    screen.getByRole("button", { name: "Add repeatable section" }),
+  );
+  fireEvent.change(screen.getByLabelText("Repeat name"), {
+    target: { value: "findings" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Add repeat field" }));
+  const repeatNames = screen.getAllByLabelText("Field name");
+  fireEvent.change(repeatNames[1]!, { target: { value: "discarded_child" } });
+  fireEvent.change(repeatNames[2]!, { target: { value: "retained_child" } });
+  const repeatConstraints = screen.getAllByLabelText(
+    "Constraints (JSON object)",
+  );
+  fireEvent.change(repeatConstraints[1]!, {
+    target: { value: '{"max_length":5}' },
+  });
+  fireEvent.change(repeatConstraints[2]!, {
+    target: { value: '{"max_length":20}' },
+  });
+  const repeatDefaults = screen.getAllByLabelText(
+    "Explicit default (JSON value; blank means none)",
+  );
+  fireEvent.change(repeatDefaults[1]!, { target: { value: '"before"' } });
+  fireEvent.change(repeatDefaults[2]!, { target: { value: '"after"' } });
+  fireEvent.click(
+    screen.getByRole("button", { name: "Remove repeat 1 field 1" }),
+  );
+  expect(screen.getAllByLabelText("Constraints (JSON object)")[1]).toHaveValue(
+    '{"max_length":20}',
+  );
+  expect(
+    screen.getAllByLabelText(
+      "Explicit default (JSON value; blank means none)",
+    )[1],
+  ).toHaveValue('"after"');
+  fireEvent.change(screen.getByLabelText("DOCX file"), {
+    target: { files: [new File(["DOCX"], "report.docx")] },
+  });
+  fireEvent.submit(
+    screen
+      .getByRole("button", { name: "Create typed template" })
+      .closest("form")!,
+  );
+  await waitFor(() => expect(api.create).toHaveBeenCalledOnce());
+  expect(api.create.mock.calls[0]![1].fields).toEqual([
+    {
+      name: "retained",
+      type: "text",
+      required: true,
+      constraints: { max_length: 12 },
+      default: "kept",
+    },
+  ]);
+  expect(api.create.mock.calls[0]![1].repeats[0].fields).toEqual([
+    {
+      name: "retained_child",
+      type: "text",
+      required: true,
+      constraints: { max_length: 20 },
+      default: "after",
+    },
+  ]);
 });
 
 test("fill plan asks missing facts, saves a manual answer, approves, publishes, and regenerates", async () => {
