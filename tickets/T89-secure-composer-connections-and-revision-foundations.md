@@ -154,3 +154,8 @@ Keep status, scope, acceptance criteria, dependencies, and progress aligned with
 The administrator setup correction was authorized while Linear access was unavailable on
 2026-09-23; synchronize this updated acceptance criterion and progress with G1L-588 when access
 returns. T89 remains In Progress until its remaining qualification and deployment criteria pass.
+
+- 2026-09-26: Linear access returned. G1L-588 retains the full acceptance description and now
+  records the verified main merges of T89 foundation PR #267, administrator setup PR #268, and
+  T90 PR #269. Status and priority remain In Progress and High. The matched docker-box test-instance
+  deployment and rollback evidence are still unverified, so no completion is claimed.

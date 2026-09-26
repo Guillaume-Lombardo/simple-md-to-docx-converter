@@ -40,6 +40,38 @@ T90.
 - 2026-09-24: Started implementation from verified T90 merge `57521ed62eb19558b945e1109934bcc6bb967ac8` on `feat/T91-author-templates`. T89 and T90 are merged prerequisites. Linear G1L-590 could not be fetched or updated because its connection expired; the user explicitly authorized proceeding and synchronization remains due when access returns. No T91 delivery is claimed yet.
 - 2026-09-24: Private author grants, scanned and versioned typed DOCX templates, reviewed fill plans, frozen publication/regeneration, and API/CLI/Admin/Composer flows are implemented in the local branch. Independent read-only review closed its permission, provenance, audit, and OOXML findings. Standalone and distributed final-image Composer E2E, web checks (684 tests; 90.03% branch coverage), real corpus-derived LibreOffice DOCX rendering, and the canonical default Python suite (5,349 passed; 60 engine-marked tests deselected; 90.14% application branch coverage; 94.75% changed application-line coverage) pass. Host document engines remain unavailable, so the engine-marked host suite is unverified. Publication, merge, qualified candidate deployment, verification on main, and deferred Linear synchronization remain due; no completion is claimed.
 
+- 2026-09-26: Independent follow-up review found that frozen regeneration needed to recheck author
+  grants before publication. The correction is committed at `90bc89b34b875465c0dcf0ffbf981156bea1fd26`;
+  focused verification passed 11 SQLite and two PostgreSQL tests. Separate browser corrections
+  passed 688 web tests with 90.10% branch coverage plus formatting, lint, generated bindings,
+  types, and structure checks; independent rereview and commit are pending. The canonical default
+  Python suite on the corrected backend stopped at a T91 HTTP test that expected regeneration
+  after an author version update; the new permission check returned a precondition failure.
+  Focused rerun reproduced that assertion, while 11 revision/retention tests passed independently.
+  The backend correction and a complete rerun remain pending. Exact final-head
+  coverage, hosted CI, both complete image profiles, and matched docker-box deployment/rollback
+  remain open. T91 remains In Progress.
+- 2026-09-26: The independently reviewed follow-up `de1f11af45be53cb093a59240d1bffaeac37612e`
+  preserves frozen approved regeneration after author content edits while checking current access;
+  the original HTTP regression now passes. Its focused verification passed 13 SQLite/HTTP and
+  three PostgreSQL tests, Ruff, and `ty`. Browser corrections are committed at
+  `e3e7aba1c9d0f15a51138d8776aa4e70cc3c5b76` and passed 689 web tests with 90.02% branch
+  coverage plus the full web check;
+  independent rereview passed. The canonical default Python suite is being rerun on this final
+  source. Both complete final-image profiles, hosted checks, verified main merge, and matched
+  docker-box deployment/rollback remain required. T91 remains In Progress.
+
 ## Synchronization
 
 Keep status, scope, acceptance criteria, dependencies, and progress aligned with G1L-590.
+
+- 2026-09-26: Linear access returned. G1L-590 now records In Progress and the committed local
+  candidate at `bc42c8b9c296198b2075cc7e9f8daa12039b1d5b`, with the original High priority,
+  T90 dependency, and full acceptance criteria intact. Repeated `uv sync --all-groups`, Ruff
+  format check and lint, and `ty` pass on that exact clean source. An independent review then
+  found a regeneration permission edge case; the correction and focused tests are recorded above.
+  The earlier Python, web, and final-image Composer results apply to the original candidate and
+  must be reconsidered after the correction. The retained local final-image artifacts show passing
+  Composer scenarios in standalone and distributed profiles; they do not establish a complete
+  unattended profile run at the final source head. Publication, hosted checks, main verification, and
+  matched docker-box deployment/rollback remain open; no completion is claimed.
