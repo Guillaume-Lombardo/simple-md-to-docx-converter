@@ -232,6 +232,7 @@ def _template() -> bytes:
 
 
 @pytest.mark.integration
+@pytest.mark.light_coverage
 def test_real_docx_repeat_and_non_target_preservation() -> None:
     assert TYPED_DOCX_FILL_ENGINE_VERSION == 1
     source = _safe_source()
@@ -300,6 +301,7 @@ def test_qualified_typed_docx_opens_and_renders_in_libreoffice(
 
 
 @pytest.mark.integration
+@pytest.mark.light_coverage
 @pytest.mark.parametrize(
     "mutation,code",
     [
@@ -346,6 +348,7 @@ def test_malformed_real_docx_fails_closed(mutation: str, code: str) -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.light_coverage
 def test_invalid_values_never_produce_docx() -> None:
     template = validate_template(_schema(), _template(), _limits())
     raw = _values()
@@ -357,6 +360,7 @@ def test_invalid_values_never_produce_docx() -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.light_coverage
 def test_repeat_limit_rejects_large_filled_document() -> None:
     template = validate_template(_schema(), _template(), _limits())
     raw = _values()
@@ -367,6 +371,7 @@ def test_repeat_limit_rejects_large_filled_document() -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.light_coverage
 @pytest.mark.parametrize(
     "case,code",
     [
@@ -476,6 +481,7 @@ def test_unsupported_control_shapes_are_rejected(  # noqa: PLR0912, PLR0915 - mu
 
 
 @pytest.mark.integration
+@pytest.mark.light_coverage
 @pytest.mark.parametrize(
     "case,code",
     [
@@ -544,6 +550,7 @@ def test_package_admission_rejects_unsafe_inputs(case: str, code: str) -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.light_coverage
 def test_package_admission_preserves_explicit_safe_zip_directory() -> None:
     source = _template()
     with_directory = _repack(source, {"word/media/": b""})
@@ -555,6 +562,7 @@ def test_package_admission_preserves_explicit_safe_zip_directory() -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.light_coverage
 def test_package_admission_rejects_non_bytes_even_when_zip_compatible() -> None:
     with pytest.raises(TypedTemplateError) as rejected:
         validate_template(_schema(), cast("bytes", bytearray(_template())), _limits())
@@ -562,6 +570,7 @@ def test_package_admission_rejects_non_bytes_even_when_zip_compatible() -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.light_coverage
 def test_fill_rechecks_values_and_template_identity() -> None:
     template = validate_template(_schema(), _template(), _limits())
     incomplete = validate_values(template, {"author.name": "Ada"})
@@ -595,6 +604,7 @@ def test_fill_rechecks_values_and_template_identity() -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.light_coverage
 def test_real_docx_inline_scalar_and_literal_repeat_run_preserve_structure() -> None:
     source = _template()
     root = fromstring(_parts(source)[_MAIN])
@@ -627,6 +637,7 @@ def test_real_docx_inline_scalar_and_literal_repeat_run_preserve_structure() -> 
 
 
 @pytest.mark.integration
+@pytest.mark.light_coverage
 def test_optional_field_renders_empty_and_preserves_spaces() -> None:
     schema = _schema()
     fields = schema["fields"]
@@ -650,6 +661,7 @@ def test_optional_field_renders_empty_and_preserves_spaces() -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.light_coverage
 def test_fill_rejects_document_growth_beyond_configured_member_limit() -> None:
     template_bytes = _template()
     source_xml_bytes = len(_parts(template_bytes)[_MAIN])
