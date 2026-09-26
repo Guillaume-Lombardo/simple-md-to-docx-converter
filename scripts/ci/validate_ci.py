@@ -77,7 +77,7 @@ RELEASE_FORBIDDEN_TRIGGERS = frozenset(
 )
 RELEASE_TRIGGER_CANDIDATES = frozenset({"push", "release"})
 MAX_RELEASE_TIMEOUT_MINUTES = 60
-LIGHT_SHARD_TIMEOUT_MINUTES = 25
+LIGHT_SHARD_TIMEOUT_MINUTES = 30
 PUBLISH_STEP_COUNT = 3
 PARTIAL_TAG_CHECK_COUNT = 2
 RELEASE_CONCURRENCY_GROUP = "release-${{ github.ref }}"
@@ -369,7 +369,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
             ): "${{ always() && matrix.domain == 'container' }}",
             ("mutation", "Retain mutation evidence"): "${{ always() }}",
         },
-        canonical_digest="b89ffafa32dfd2be0e39bd9b2930e5b528f90e4fc1ae8c40502f3247920446c4",
+        canonical_digest="983352967fa2cbdf19df29a85713195034177ee575ffcbbc5eb86b4f21d09045",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -839,7 +839,7 @@ def _validate_light_sharding(workflow: Mapping[str, Any]) -> list[str]:
     }:
         errors.append("light Python tests must run both complementary shards")
     if tests.get("timeout-minutes") != LIGHT_SHARD_TIMEOUT_MINUTES:
-        errors.append("light Python shards must use the reviewed 25-minute bound")
+        errors.append("light Python shards must use the reviewed 30-minute bound")
     if coverage.get("needs") != [
         "python-tests",
         "python-distributed-coverage",

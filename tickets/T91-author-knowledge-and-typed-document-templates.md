@@ -75,6 +75,13 @@ T90.
   invocation failed the repository-wide coverage threshold, which requires the full suite. Both
   complete final-image profiles, hosted checks, verified main merge, and matched docker-box
   deployment/rollback remain open. No complete profile pass is claimed yet.
+- 2026-09-26: Hosted CI run `36233804329` reached the 25-minute limit in both complementary
+  Python shards; one had passed 2,392 tests at 24:52 before coverage upload was canceled, and
+  the other had reached 99%. Increased only their reviewed limit to 30 minutes, updated the
+  canonical workflow digest, and added a validator regression that rejects 25 and accepts 30.
+  All 197 CI validation tests, the validator entry point, Ruff formatting/lint, and `ty` pass.
+  Hosted checks at the updated head, complete final-image profiles, main verification, and
+  matched docker-box deployment/rollback remain open. T91 stays In Progress.
 
 ## Synchronization
 
