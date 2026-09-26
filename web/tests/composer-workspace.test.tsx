@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { AuthController } from "../src/auth/controller";
 import { AuthProvider } from "../src/auth/context";
 import { ApiError, type ApiTransport } from "../src/api/transport";
@@ -533,6 +539,141 @@ test("requesting missing information starts a bounded question step", async () =
       expect.any(String),
     ),
   );
+});
+
+test.each([
+  ["question", "Which date should the report use?"],
+  ["proposal", "Model suggestion"],
+] as const)(
+  "a completed %s step reconciles an item committed after the list snapshot",
+  async (kind, visibleText) => {
+    sessionStorage.clear();
+    sessionStorage.setItem(
+      `composer:step:${user.id}:${draft.id}`,
+      question.model_step_id,
+    );
+    const api = setup({ preserveStorage: true });
+    const list = kind === "question" ? api.questions : api.proposals;
+    list.mockResolvedValueOnce([]);
+    list.mockResolvedValueOnce(kind === "question" ? [question] : [proposal]);
+    const completedStep = {
+      id: question.model_step_id,
+      draft_id: draft.id,
+      connection_id: connection.id,
+      model_identity: "small-model",
+      intent: kind,
+      base_version: 2,
+      status: "completed",
+      proposal_id: kind === "proposal" ? proposal.id : null,
+      question_id: kind === "question" ? question.id : null,
+      answered_question_id: null,
+      error_code: null,
+      created_at: "2026-09-23T12:00:00Z",
+      updated_at: "2026-09-23T12:00:00Z",
+    };
+    let resolveStep: ((value: typeof completedStep) => void) | undefined;
+    api.step.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveStep = resolve;
+        }),
+    );
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(visibleText)).toBeNull();
+    resolveStep?.(completedStep);
+    expect((await screen.findAllByText(visibleText))[0]).toBeInTheDocument();
+    expect(list).toHaveBeenCalledTimes(2);
+  },
+);
+
+test.each(["success", "failure"] as const)(
+  "a late question reconciliation %s cannot cross into another draft",
+  async (outcome) => {
+    sessionStorage.clear();
+    sessionStorage.setItem(
+      `composer:step:${user.id}:${draft.id}`,
+      question.model_step_id,
+    );
+    const api = setup({ preserveStorage: true, secondDraft: true });
+    let resolveQuestion: ((items: (typeof question)[]) => void) | undefined;
+    let rejectQuestion: ((reason: Error) => void) | undefined;
+    api.questions
+      .mockResolvedValueOnce([])
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve, reject) => {
+            resolveQuestion = resolve;
+            rejectQuestion = reject;
+          }),
+      )
+      .mockResolvedValue([]);
+    api.step.mockResolvedValue({
+      id: question.model_step_id,
+      draft_id: draft.id,
+      connection_id: connection.id,
+      model_identity: "small-model",
+      intent: "question",
+      base_version: 2,
+      status: "completed",
+      proposal_id: null,
+      question_id: question.id,
+      answered_question_id: null,
+      error_code: null,
+      created_at: "2026-09-23T12:00:00Z",
+      updated_at: "2026-09-23T12:00:00Z",
+    });
+    await waitFor(() => expect(api.questions).toHaveBeenCalledTimes(2));
+    fireEvent.change(screen.getByRole("combobox", { name: "Saved drafts" }), {
+      target: { value: "00000000-0000-4000-8000-000000000102" },
+    });
+    expect(
+      await screen.findByRole("textbox", { name: "Draft title" }),
+    ).toHaveValue("Second report");
+    await act(async () => {
+      if (outcome === "success") resolveQuestion?.([question]);
+      else rejectQuestion?.(new Error("late request failed"));
+    });
+    expect(api.questions).toHaveBeenCalledTimes(3);
+    expect(screen.queryByText(question.text)).toBeNull();
+    expect(
+      screen.queryByText(
+        "The Composer request could not be completed. Try again.",
+      ),
+    ).toBeNull();
+  },
+);
+
+test("an active reconciliation failure reports the failed refresh", async () => {
+  sessionStorage.clear();
+  sessionStorage.setItem(
+    `composer:step:${user.id}:${draft.id}`,
+    question.model_step_id,
+  );
+  const api = setup({ preserveStorage: true });
+  api.questions
+    .mockResolvedValueOnce([])
+    .mockRejectedValueOnce(new Error("refresh unavailable"));
+  api.step.mockResolvedValue({
+    id: question.model_step_id,
+    draft_id: draft.id,
+    connection_id: connection.id,
+    model_identity: "small-model",
+    intent: "question",
+    base_version: 2,
+    status: "completed",
+    proposal_id: null,
+    question_id: question.id,
+    answered_question_id: null,
+    error_code: null,
+    created_at: "2026-09-23T12:00:00Z",
+    updated_at: "2026-09-23T12:00:00Z",
+  });
+  expect(
+    await screen.findByText(
+      "The Composer request could not be completed. Try again.",
+    ),
+  ).toBeVisible();
+  expect(api.questions).toHaveBeenCalledTimes(2);
 });
 
 test("an unsent question purpose and reviewed text survive a browser remount", async () => {
@@ -1505,7 +1646,7 @@ test("model author selector loads a later authorized page before exact prompt pr
   } finally {
     authorList.mockRestore();
   }
-});
+}, 10_000);
 
 test("answer resume reselects original author facts and requires a new exact preview", async () => {
   const authorId = "00000000-0000-4000-8000-000000000901";

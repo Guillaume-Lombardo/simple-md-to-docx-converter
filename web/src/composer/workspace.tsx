@@ -526,9 +526,70 @@ function ComposerWorkspaceInner({
           if (savedStepId)
             void api
               .step(id, savedStepId)
-              .then((restored) => {
-                if (request === refreshCounter.current && currentOwner())
-                  setStep(restored);
+              .then(async (restored) => {
+                if (request !== refreshCounter.current || !currentOwner())
+                  return;
+                setStep(restored);
+                if (restored.status !== "completed") return;
+                try {
+                  if (
+                    restored.question_id &&
+                    !questions.some((item) => item.id === restored.question_id)
+                  ) {
+                    const latest = await api.questions(id);
+                    if (
+                      request !== refreshCounter.current ||
+                      selectedId.current !== id ||
+                      !currentOwner()
+                    )
+                      return;
+                    setView((previous) =>
+                      previous.draft?.id === id
+                        ? {
+                            ...previous,
+                            questions: appendUnique(latest, previous.questions),
+                          }
+                        : previous,
+                    );
+                    setPages((previous) => ({
+                      ...previous,
+                      questions: pageState(latest.length),
+                    }));
+                  }
+                  if (
+                    restored.proposal_id &&
+                    !proposals.some((item) => item.id === restored.proposal_id)
+                  ) {
+                    const latest = await api.proposals(id);
+                    if (
+                      request !== refreshCounter.current ||
+                      selectedId.current !== id ||
+                      !currentOwner()
+                    )
+                      return;
+                    setView((previous) =>
+                      previous.draft?.id === id
+                        ? {
+                            ...previous,
+                            proposals: appendUnique(latest, previous.proposals),
+                          }
+                        : previous,
+                    );
+                    setPages((previous) => ({
+                      ...previous,
+                      proposals: pageState(latest.length),
+                    }));
+                  }
+                } catch (failure) {
+                  if (
+                    request !== refreshCounter.current ||
+                    selectedId.current !== id ||
+                    !currentOwner()
+                  )
+                    return;
+                  if (!expireIfUnauthorized(failure))
+                    setError(safeError(failure));
+                }
               })
               .catch((failure) => {
                 if (expireIfUnauthorized(failure)) return;
