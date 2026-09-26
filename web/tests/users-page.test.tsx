@@ -34,7 +34,7 @@ vi.mock("../src/admin/session-policy", () => ({
 beforeEach(() => vi.clearAllMocks());
 
 test.each(["admin", "user"])(
-  "%s receives one Users tab and only administrators receive policy controls",
+  "%s retains direct Users access and only administrators receive policy controls",
   async (role) => {
     const json = vi.fn().mockResolvedValue({
       active: true,
@@ -55,10 +55,15 @@ test.each(["admin", "user"])(
     expect(screen.queryByText(/minutes of inactivity/)).toBeNull();
     expect(screen.queryByRole("link", { name: "Session policy" })).toBeNull();
     if (role === "admin") {
-      expect(screen.getByRole("link", { name: "Users" })).toHaveAttribute(
+      expect(screen.getByRole("link", { name: "Admin" })).toHaveAttribute(
         "aria-current",
         "page",
       );
+      expect(screen.getByRole("link", { name: "Admin" })).toHaveAttribute(
+        "href",
+        "/admin",
+      );
+      expect(screen.queryByRole("link", { name: "Users" })).toBeNull();
       const summary = screen.getByText("Session policy");
       expect(summary.tagName).toBe("SUMMARY");
       const details = summary.closest("details")!;

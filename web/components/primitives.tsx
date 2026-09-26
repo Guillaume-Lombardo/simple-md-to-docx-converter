@@ -44,7 +44,7 @@ export function AppShell({
       <header className="border-b bg-surface">
         <nav
           aria-label="Primary"
-          className="mx-auto flex max-w-5xl flex-wrap items-center gap-4 p-4"
+          className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 text-sm xl:flex-nowrap"
         >
           <span className="flex shrink-0 items-center gap-2">
             <Image
@@ -67,7 +67,7 @@ export function AppShell({
           </span>
           <div
             aria-label="Workspace"
-            className="flex shrink-0 items-center gap-2 rounded-control border border-muted p-1"
+            className="flex shrink-0 items-center gap-2 whitespace-nowrap"
             role="group"
           >
             <NavigationLink
@@ -76,7 +76,7 @@ export function AppShell({
                   ? "page"
                   : undefined
               }
-              className="rounded-control px-2 py-1 text-accent underline-offset-4 hover:underline"
+              className="px-1 text-accent underline-offset-4 hover:underline aria-[current=page]:font-semibold aria-[current=page]:underline aria-[current=page]:decoration-2"
               href="/convert"
             >
               Convert
@@ -87,20 +87,20 @@ export function AppShell({
             {user && !user.password_change_required ? (
               <a
                 aria-current={current === "Composer" ? "page" : undefined}
-                className="rounded-control px-2 py-1 text-accent underline-offset-4 hover:underline"
+                className="px-1 text-accent underline-offset-4 hover:underline aria-[current=page]:font-semibold aria-[current=page]:underline aria-[current=page]:decoration-2"
                 href="/composer"
               >
                 Composer
               </a>
             ) : (
-              <span aria-disabled="true" className="px-2 py-1 text-muted">
+              <span aria-disabled="true" className="text-muted">
                 Composer
               </span>
             )}
           </div>
           <NavigationLink
             aria-current={current === "Convert" ? "page" : undefined}
-            className="text-accent underline-offset-4 hover:underline"
+            className="whitespace-nowrap text-accent underline-offset-4 hover:underline"
             href="/convert"
           >
             2docx
@@ -108,7 +108,7 @@ export function AppShell({
           {user && !user.password_change_required ? (
             <NavigationLink
               aria-current={current === "Composer" ? "page" : undefined}
-              className="text-accent underline-offset-4 hover:underline"
+              className="whitespace-nowrap text-accent underline-offset-4 hover:underline"
               href="/composer/connections"
             >
               My connections
@@ -122,7 +122,7 @@ export function AppShell({
             <NavigationLink
               href="/presentations"
               aria-current={current === "Presentations" ? "page" : undefined}
-              className="text-accent underline-offset-4 hover:underline"
+              className="whitespace-nowrap text-accent underline-offset-4 hover:underline"
             >
               2pptx
             </NavigationLink>
@@ -135,7 +135,7 @@ export function AppShell({
             <NavigationLink
               aria-current={current === "Revert" ? "page" : undefined}
               aria-label="2md, Experimental"
-              className="flex items-center gap-2 text-accent underline-offset-4 hover:underline"
+              className="flex shrink-0 items-center gap-1 text-accent underline-offset-4 hover:underline"
               href="/revert"
             >
               2md
@@ -146,7 +146,7 @@ export function AppShell({
           ) : (
             <span
               aria-disabled="true"
-              className="flex items-center gap-2 text-muted"
+              className="flex shrink-0 items-center gap-1 text-muted"
             >
               2md
               <span className="experimental-stamp">Experimental</span>
@@ -155,7 +155,7 @@ export function AppShell({
           {user && !user.password_change_required ? (
             <NavigationLink
               aria-current={current === "Templates" ? "page" : undefined}
-              className="text-accent underline-offset-4 hover:underline"
+              className="whitespace-nowrap text-accent underline-offset-4 hover:underline"
               href="/templates"
             >
               templates
@@ -167,27 +167,27 @@ export function AppShell({
           )}
           {user?.role === "admin" && !user.password_change_required && (
             <NavigationLink
-              aria-current={current === "Admin" ? "page" : undefined}
-              className="text-accent underline-offset-4 hover:underline"
+              aria-current={
+                current === "Admin" || current === "Users" ? "page" : undefined
+              }
+              className="whitespace-nowrap text-accent underline-offset-4 hover:underline"
               href="/admin"
             >
               Admin
             </NavigationLink>
           )}
-          {user?.role === "admin" && !user.password_change_required && (
-            <NavigationLink
-              aria-current={current === "Users" ? "page" : undefined}
-              className="text-accent underline-offset-4 hover:underline"
-              href="/users"
-            >
-              Users
-            </NavigationLink>
-          )}
           {user && (
-            <div className="ml-auto flex flex-wrap items-center gap-3">
-              <span>
-                {user.username} (
-                {user.role === "admin" ? "Administrator" : "User"})
+            <div className="ml-auto flex shrink-0 items-center gap-2 whitespace-nowrap">
+              <span
+                aria-label={`${user.username} (${user.role === "admin" ? "Administrator" : "User"})`}
+                className="flex max-w-48 items-center gap-1"
+              >
+                <span className="min-w-0 truncate" title={user.username}>
+                  {user.username}
+                </span>
+                <span className="shrink-0">
+                  ({user.role === "admin" ? "Administrator" : "User"})
+                </span>
               </span>
               <button disabled={pending} onClick={onLogout} type="button">
                 Sign out

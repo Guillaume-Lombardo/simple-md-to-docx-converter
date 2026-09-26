@@ -163,14 +163,24 @@ async function createUser(adminPage, name) {
 async function configureAdminPolicy(page, profile, providerAddress) {
   await page.getByRole("link", { name: "Admin", exact: true }).click();
   await page.getByRole("heading", { name: "Administration" }).waitFor();
+  await page
+    .getByRole("main")
+    .locator("summary")
+    .filter({ hasText: /^Templates$/ })
+    .click();
   assert.equal(
     await page
       .getByRole("main")
-      .getByRole("link", { name: "Templates", exact: true })
+      .getByRole("link", { name: "Open templates", exact: true })
       .getAttribute("href"),
     "/templates",
   );
-  await page.getByRole("link", { name: "LLM settings" }).click();
+  await page
+    .getByRole("main")
+    .locator("summary")
+    .filter({ hasText: /^LLM settings$/ })
+    .click();
+  await page.getByRole("link", { name: "Open LLM settings" }).click();
   await page.getByRole("heading", { name: "LLM settings" }).waitFor();
   const initial = exactStatus(
     await api(page, "GET", "/api/v1/admin/composer-policy"),

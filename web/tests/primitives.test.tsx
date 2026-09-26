@@ -40,7 +40,7 @@ test("application shell exposes navigation and skip target", () => {
   expect(screen.getByRole("main")).toHaveAttribute("id", "main");
 });
 
-test("administrator shell shows identity, unified users navigation, and pending sign-out", () => {
+test("administrator shell keeps identity and sign-out in the compact primary row", () => {
   render(
     <AppShell
       current="Templates"
@@ -65,10 +65,7 @@ test("administrator shell shows identity, unified users navigation, and pending 
   expect(
     screen.getByRole("link", { name: "2md, Experimental" }),
   ).toHaveAttribute("href", "/revert");
-  expect(screen.getByRole("link", { name: "Users" })).toHaveAttribute(
-    "href",
-    "/users",
-  );
+  expect(screen.queryByRole("link", { name: "Users" })).toBeNull();
   expect(screen.getByRole("link", { name: "Admin" })).toHaveAttribute(
     "href",
     "/admin",
@@ -78,9 +75,59 @@ test("administrator shell shows identity, unified users navigation, and pending 
     "/composer/connections",
   );
   expect(screen.queryByRole("link", { name: "Session policy" })).toBeNull();
-  expect(screen.getByText("Admin (Administrator)")).toBeVisible();
+  expect(screen.getByLabelText("Admin (Administrator)")).toBeVisible();
+  expect(screen.getByText("(Administrator)")).toBeVisible();
+  const navigation = screen.getByRole("navigation", { name: "Primary" });
+  expect(navigation).toHaveClass("xl:flex-nowrap");
+  expect(navigation).toHaveClass("flex-wrap");
+  expect(navigation).toHaveClass("max-w-7xl");
+  const workspace = screen.getByRole("group", { name: "Workspace" });
+  expect(workspace).toHaveClass("whitespace-nowrap");
+  expect(screen.getByRole("link", { name: "Convert" })).toHaveClass(
+    "aria-[current=page]:decoration-2",
+  );
+  expect(screen.getByRole("link", { name: "Convert" })).not.toHaveAttribute(
+    "aria-current",
+  );
   expect(screen.queryByText(/minutes of inactivity/)).toBeNull();
   expect(screen.getByRole("button", { name: "Sign out" })).toBeDisabled();
+});
+
+test("workspace links preserve current state and renewal restrictions", () => {
+  const user = {
+    active: true,
+    effective_idle_minutes: 15,
+    id: "00000000-0000-4000-8000-000000000001",
+    password_change_required: false,
+    role: "user" as const,
+    username: "Alice",
+  };
+  const { rerender } = render(
+    <AppShell current="Composer" user={user}>
+      Work
+    </AppShell>,
+  );
+  expect(screen.getByRole("link", { name: "Composer" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+  expect(screen.getByRole("link", { name: "Composer" })).toHaveClass(
+    "aria-[current=page]:underline",
+  );
+  expect(screen.getByRole("link", { name: "Convert" })).not.toHaveAttribute(
+    "aria-current",
+  );
+  rerender(
+    <AppShell
+      current="Password"
+      user={{ ...user, password_change_required: true }}
+    >
+      Work
+    </AppShell>,
+  );
+  expect(screen.queryByRole("link", { name: "Composer" })).toBeNull();
+  expect(screen.getByText("Composer")).toHaveAttribute("aria-disabled", "true");
+  expect(screen.queryByRole("link", { name: "Admin" })).toBeNull();
 });
 
 test("form and status primitives retain accessible names", () => {
