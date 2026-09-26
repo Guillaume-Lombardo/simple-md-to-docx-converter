@@ -103,3 +103,9 @@ T89.
 ## Synchronization
 
 Keep status, scope, acceptance criteria, dependencies, and progress aligned with G1L-589.
+
+- 2026-09-26: Linear access returned. G1L-589 now records In Progress, the protected PR #269
+  merge to `57521ed62eb19558b945e1109934bcc6bb967ac8`, passing hosted CI run 35961177550,
+  and the remaining matched docker-box deployment, live smoke, and rollback gate. Its original
+  native-preview decision, acceptance criteria, High priority, and T89 dependency were preserved.
+  No completion is claimed.

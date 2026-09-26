@@ -41,6 +41,8 @@ class ModelStepInput:
     payload_digest: str
     intent: str = "proposal"
     answered_question_id: UUID | None = None
+    author_refs: tuple[tuple[UUID, int], ...] = ()
+    author_preview_digest: str | None = None
 
 
 class ComposerStepRunner:
@@ -90,6 +92,8 @@ class ComposerStepRunner:
             lease=self._lease,
             intent=input_.intent,
             answered_question_id=input_.answered_question_id,
+            author_refs=input_.author_refs,
+            author_preview_digest=input_.author_preview_digest,
         )
         if not created:
             if self._metrics is not None:

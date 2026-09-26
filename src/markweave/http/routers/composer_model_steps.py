@@ -9,7 +9,13 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, Query, Response
 
 from markweave.auth.models import Role, User
+from markweave.composer.author_knowledge import (
+    AuthorKnowledgeConflictError,
+    AuthorKnowledgeNotFoundError,
+)
+from markweave.composer.author_prompt import AuthorPromptSnapshot, compose_author_prompt
 from markweave.composer.connections import ConnectionActor
+from markweave.composer.revisions import ComposerConflictError
 from markweave.http.composer_errors import (
     ComposerPreconditionRequiredError,
     ComposerRequestError,
@@ -23,6 +29,11 @@ from markweave.http.composer_schemas import (
     ComposerQuestionResponse,
 )
 from markweave.http.composer_step_runner import ModelStepInput
+from markweave.http.composer_t91_schemas import (
+    AuthorPromptPreviewRequest,
+    AuthorPromptPreviewResponse,
+    AuthorReference,
+)
 from markweave.http.dependencies import HttpDependencies
 from markweave.http.errors import capacity_error_responses, error_responses
 from markweave.persistence.composer import ComposerModelStep
@@ -98,10 +109,92 @@ def _actor(dependencies: HttpDependencies, user: User) -> ConnectionActor:
     )
 
 
-def build_router(dependencies: HttpDependencies) -> APIRouter:
+def _preview_authors(  # noqa: PLR0913, PLR0917 - exact preview authorization inputs
+    dependencies: HttpDependencies,
+    user: User,
+    draft_id: UUID,
+    content: str,
+    author_ids: tuple[UUID, ...],
+    if_match: str,
+) -> tuple[str, str, tuple[tuple[UUID, int], ...]]:
+    store = dependencies.components.composer_store
+    authors = dependencies.components.composer_authors
+    if store is None or authors is None:
+        raise ComposerUnavailableError
+    draft = store.get_draft(user.id, draft_id)
+    if draft.etag != if_match:
+        raise ComposerConflictError("Composer draft changed")
+    if len(set(author_ids)) != len(author_ids):
+        raise ComposerRequestError("An author was selected more than once")
+    try:
+        records = tuple(authors.get(user.id, item) for item in author_ids)
+    except AuthorKnowledgeNotFoundError, AuthorKnowledgeConflictError:
+        raise ComposerConflictError("Author access changed") from None
+    snapshots = tuple(
+        AuthorPromptSnapshot(
+            id=record.id,
+            version=record.version,
+            name=record.name,
+            fields={name: asdict(field) for name, field in record.fields.items()},
+        )
+        for record in records
+    )
+    transmitted, digest = compose_author_prompt(content, snapshots)
+    return transmitted, digest, tuple((item.id, item.version) for item in snapshots)
+
+
+def build_router(dependencies: HttpDependencies) -> APIRouter:  # noqa: PLR0915
     """Expose explicit model-step transmission and owner-scoped cancellation."""
 
     router = APIRouter()
+
+    @router.post(
+        "/api/v1/composer/drafts/{draft_id}/model-steps/preview",
+        response_model=AuthorPromptPreviewResponse,
+        tags=["composer"],
+        responses=error_responses(401, 403, 404, 412, 422, 428, 503),
+    )
+    def preview_model_step(
+        draft_id: UUID,
+        payload: AuthorPromptPreviewRequest,
+        response: Response,
+        user: Annotated[User, Depends(dependencies.current_user)],
+        if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+    ) -> AuthorPromptPreviewResponse:
+        if if_match is None:
+            raise ComposerPreconditionRequiredError
+        connections = dependencies.components.composer_connections
+        if connections is None:
+            raise ComposerUnavailableError
+        record = connections.get_visible(
+            _actor(dependencies, user), payload.connection_id
+        )
+        if (
+            not record.enabled
+            or record.endpoint != payload.approved_endpoint
+            or record.selected_model != payload.approved_model
+            or payload.approved_model not in record.permitted_models
+        ):
+            raise ComposerConflictError("Connection changed before preview")
+        transmitted, digest, refs = _preview_authors(
+            dependencies,
+            user,
+            draft_id,
+            payload.content,
+            payload.author_ids,
+            if_match,
+        )
+        limit = dependencies.settings.composer_maximum_request_bytes
+        if limit is None or len(transmitted.encode("utf-8")) > limit:
+            raise ComposerRequestError("Model prompt exceeds the configured limit")
+        response.headers["Cache-Control"] = "private, no-store"
+        return AuthorPromptPreviewResponse(
+            transmitted_content=transmitted,
+            author_refs=tuple(
+                AuthorReference(id=ref[0], version=ref[1]) for ref in refs
+            ),
+            preview_digest=digest,
+        )
 
     @router.post(
         "/api/v1/composer/drafts/{draft_id}/model-steps",
@@ -127,6 +220,26 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:
             raise ComposerRequestError
         etag, key = _require_headers(if_match, idempotency_key)
         digest = _payload_digest(payload, request_limit)
+        author_refs = tuple((item.id, item.version) for item in payload.author_refs)
+        content = payload.content
+        if author_refs:
+            content, preview_digest, current_refs = _preview_authors(
+                dependencies,
+                user,
+                draft_id,
+                payload.content,
+                tuple(ref[0] for ref in author_refs),
+                etag,
+            )
+            if (
+                current_refs != author_refs
+                or payload.author_preview_digest != preview_digest
+            ):
+                raise ComposerConflictError("Author preview changed")
+        elif payload.author_preview_digest is not None:
+            raise ComposerRequestError("Author preview is invalid")
+        if len(content.encode("utf-8")) > request_limit:
+            raise ComposerRequestError("Model prompt exceeds the configured limit")
         response.headers["Cache-Control"] = "private, no-store"
         step = runner.start(
             _actor(dependencies, user),
@@ -137,11 +250,13 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:
                 idempotency_key=key,
                 approved_endpoint=payload.approved_endpoint,
                 approved_model=payload.approved_model,
-                content=payload.content,
+                content=content,
                 max_output_tokens=payload.max_output_tokens,
                 payload_digest=digest,
                 intent=payload.intent,
                 answered_question_id=payload.answered_question_id,
+                author_refs=author_refs,
+                author_preview_digest=payload.author_preview_digest,
             ),
         )
         return _response(step)

@@ -215,6 +215,25 @@ def test_committed_workflow_satisfies_local_security_policy() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("timeout_minutes, valid", [(25, False), (30, True)])
+def test_light_python_shard_timeout_is_reviewed_bound(
+    timeout_minutes: int, valid: bool
+) -> None:
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    original = "  python-tests:\n    name: CI / Python tests (${{ matrix.shard }})\n    runs-on: ubuntu-24.04\n    timeout-minutes: 30"
+    assert original in workflow
+    candidate = workflow.replace(
+        original,
+        original.replace("timeout-minutes: 30", f"timeout-minutes: {timeout_minutes}"),
+        1,
+    )
+    errors = validate_workflow_text(candidate)
+    assert (errors == []) is valid
+    if not valid:
+        assert "light Python shards must use the reviewed 30-minute bound" in errors
+
+
+@pytest.mark.unit
 def test_approved_complete_suite_schedule_and_parallelism_are_fixed() -> None:
     workflow = yaml.load(
         Path(".github/workflows/ci.yml").read_text(encoding="utf-8"),
@@ -2068,7 +2087,7 @@ def test_python_source_discovery_excludes_installed_package_managers(
     ("original", "replacement"),
     [
         ("shard: [0, 1]", "shard: [0]"),
-        ("timeout-minutes: 25", "timeout-minutes: 20"),
+        ("timeout-minutes: 30", "timeout-minutes: 25"),
         (
             "needs: [python-tests, python-distributed-coverage]",
             "needs: python-tests",

@@ -437,7 +437,7 @@ def test_browser_driver_has_its_own_bounded_cgroup_and_current_backend_network()
     assert '"$test_file" == /e2e/browser-next-composer-resilience.test.mjs' in browser
     assert browser.count("/run/composer-e2e-client.key:ro,z") == 1
     assert 'run_browser_test "$expiry_application_name"' in runner
-    assert runner.count('run_browser_test "$application_name"') == 32
+    assert runner.count('run_browser_test "$application_name"') == 34
     assert runner.count('run_browser_test "$expiry_application_name"') == 2
     assert runner.count("node --test") == 1
     assert "node --test /e2e/browser-" not in runner
@@ -648,8 +648,13 @@ def test_composer_browser_mounts_only_checksum_verified_small_corpus(
     real = browser.split(
         'if [[ "$test_file" == /e2e/browser-next-composer-real.test.mjs ]]; then', 1
     )[1].split("\n  elif", 1)[0]
+    typed = browser.split(
+        'elif [[ "$test_file" == /e2e/browser-next-composer-typed.test.mjs ]]; then', 1
+    )[1].split("\n  elif", 1)[0]
     assert '--volume "$composer_corpus_directory:/spikes/anydoc/corpus:ro,z"' in real
-    assert browser.count("/spikes/anydoc/corpus:ro,z") == 1
+    assert '--volume "$composer_corpus_directory:/spikes/anydoc/corpus:ro,z"' in typed
+    assert "/run/composer-e2e-client.key" not in typed
+    assert browser.count("/spikes/anydoc/corpus:ro,z") == 2
     assert "$repository/spikes/anydoc/corpus:/spikes/anydoc/corpus" not in browser
     shared = runner.split("application_volumes=(", 1)[1].split(
         "\napplication_mode=serve", 1

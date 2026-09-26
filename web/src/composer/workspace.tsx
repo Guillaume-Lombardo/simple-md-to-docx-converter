@@ -12,6 +12,8 @@ import { AppShell, Alert } from "../../components/primitives";
 import { ApiError } from "../api/transport";
 import { useAuth } from "../auth/context";
 import { type ComposerCapabilities, type ComposerConnection } from "./api";
+import { AuthorDirectoryApi, type AuthorEntry } from "./author-directory-api";
+import { ComposerFillPanel } from "./fill-panel";
 import {
   ComposerPreview,
   type ActivePreviewRevision,
@@ -30,7 +32,10 @@ import {
   type ComposerRevision,
   type ComposerRevisionSummary,
   type ComposerStep,
+  type ComposerPromptPreview,
 } from "./workspace-api";
+
+const authorDirectoryApi = new AuthorDirectoryApi();
 
 const settled = new Set(["completed", "failed", "cancelled"]);
 const generationSettled = new Set([
@@ -191,6 +196,17 @@ function ComposerWorkspaceInner({
   const [draftContent, setDraftContent] = useState("");
   const [draftTitle, setDraftTitle] = useState("");
   const [modelContent, setModelContent] = useState("");
+  const [availableAuthors, setAvailableAuthors] = useState<AuthorEntry[]>([]);
+  const [authorOffset, setAuthorOffset] = useState(0);
+  const [moreAuthors, setMoreAuthors] = useState(false);
+  const [authorLoading, setAuthorLoading] = useState(false);
+  const [modelAuthorIds, setModelAuthorIds] = useState<string[]>([]);
+  const [promptPreview, setPromptPreview] = useState<{
+    fingerprint: string;
+    result: ComposerPromptPreview;
+  } | null>(null);
+  const [previewPending, setPreviewPending] = useState(false);
+  const [previewError, setPreviewError] = useState("");
   const [stepIntent, setStepIntent] = useState<"proposal" | "question">(
     "proposal",
   );
@@ -241,6 +257,7 @@ function ComposerWorkspaceInner({
   const requestCounter = useRef(0);
   const busyRef = useRef(false);
   const selectedId = useRef<string | null>(null);
+  const authorDraftId = useRef<string | null>(null);
   const selectionCounter = useRef(0);
   const refreshCounter = useRef(0);
   const loadingMoreRef = useRef<PageKind | null>(null);
@@ -265,6 +282,7 @@ function ComposerWorkspaceInner({
       session.user.id === ownerId
     );
   }, [auth, ownerId]);
+  const expireSession = useCallback(() => auth.expire(), [auth]);
   const expireIfUnauthorized = useCallback(
     (failure: unknown): boolean => {
       if (!(failure instanceof ApiError) || failure.status !== 401)
@@ -286,6 +304,70 @@ function ComposerWorkspaceInner({
     chosen.status === "ready" &&
     modelChoices.includes(model),
   );
+  const promptFingerprint = JSON.stringify({
+    draft: view.draft?.id,
+    draftEtag: view.draft?.etag,
+    connectionId,
+    endpoint: chosen?.endpoint,
+    model,
+    content: modelContent.trim(),
+    tokens: requestedTokens,
+    authorIds: modelAuthorIds,
+  });
+  const currentPromptPreview =
+    promptPreview?.fingerprint === promptFingerprint
+      ? promptPreview.result
+      : null;
+  const resumeQuestion = view.questions.find(
+    (item) => item.id === resumeQuestionId,
+  );
+  const resumeAuthorsAvailable =
+    !resumeQuestionId ||
+    (resumeQuestion !== undefined &&
+      (resumeQuestion.source_author_ids ?? []).every(
+        (id) =>
+          modelAuthorIds.includes(id) &&
+          availableAuthors.some((author) => author.id === id),
+      ));
+  useEffect(() => {
+    const controller = new AbortController();
+    if (view.draft?.id)
+      void authorDirectoryApi
+        .list(0, controller.signal)
+        .then((items) => {
+          if (!controller.signal.aborted) {
+            setAvailableAuthors(items);
+            setMoreAuthors(items.length === 100);
+          }
+        })
+        .catch((failure: unknown) => {
+          if (controller.signal.aborted) return;
+          setAvailableAuthors([]);
+          if (!expireIfUnauthorized(failure))
+            setPreviewError("Authorized authors could not be loaded.");
+        });
+    return () => controller.abort();
+  }, [view.draft?.id, expireIfUnauthorized]);
+
+  async function loadMoreModelAuthors(): Promise<void> {
+    const nextOffset = authorOffset + 100;
+    setAuthorLoading(true);
+    setPreviewError("");
+    try {
+      const page = await authorDirectoryApi.list(nextOffset);
+      setAvailableAuthors((previous) => {
+        const known = new Set(previous.map((item) => item.id));
+        return [...previous, ...page.filter((item) => !known.has(item.id))];
+      });
+      setAuthorOffset(nextOffset);
+      setMoreAuthors(page.length === 100);
+    } catch (failure) {
+      if (!expireIfUnauthorized(failure))
+        setPreviewError("Authorized authors could not be loaded.");
+    } finally {
+      setAuthorLoading(false);
+    }
+  }
   const onActiveRevisionChange = useCallback(
     (
       active: {
@@ -365,6 +447,10 @@ function ComposerWorkspaceInner({
         );
         if (!id) {
           selectedId.current = null;
+          authorDraftId.current = null;
+          setAvailableAuthors([]);
+          setAuthorOffset(0);
+          setMoreAuthors(false);
           setView({ ...emptyView, drafts });
           setPages({
             drafts: pageState(drafts.length),
@@ -394,6 +480,12 @@ function ComposerWorkspaceInner({
         const revision = revisionId ? await api.revision(id, revisionId) : null;
         if (request !== refreshCounter.current || !currentOwner()) return;
         selectedId.current = id;
+        if (authorDraftId.current !== id) {
+          authorDraftId.current = id;
+          setAvailableAuthors([]);
+          setAuthorOffset(0);
+          setMoreAuthors(false);
+        }
         const visibleRevisions =
           revision && !revisions.some((item) => item.id === revision.id)
             ? [revision, ...revisions]
@@ -434,9 +526,70 @@ function ComposerWorkspaceInner({
           if (savedStepId)
             void api
               .step(id, savedStepId)
-              .then((restored) => {
-                if (request === refreshCounter.current && currentOwner())
-                  setStep(restored);
+              .then(async (restored) => {
+                if (request !== refreshCounter.current || !currentOwner())
+                  return;
+                setStep(restored);
+                if (restored.status !== "completed") return;
+                try {
+                  if (
+                    restored.question_id &&
+                    !questions.some((item) => item.id === restored.question_id)
+                  ) {
+                    const latest = await api.questions(id);
+                    if (
+                      request !== refreshCounter.current ||
+                      selectedId.current !== id ||
+                      !currentOwner()
+                    )
+                      return;
+                    setView((previous) =>
+                      previous.draft?.id === id
+                        ? {
+                            ...previous,
+                            questions: appendUnique(latest, previous.questions),
+                          }
+                        : previous,
+                    );
+                    setPages((previous) => ({
+                      ...previous,
+                      questions: pageState(latest.length),
+                    }));
+                  }
+                  if (
+                    restored.proposal_id &&
+                    !proposals.some((item) => item.id === restored.proposal_id)
+                  ) {
+                    const latest = await api.proposals(id);
+                    if (
+                      request !== refreshCounter.current ||
+                      selectedId.current !== id ||
+                      !currentOwner()
+                    )
+                      return;
+                    setView((previous) =>
+                      previous.draft?.id === id
+                        ? {
+                            ...previous,
+                            proposals: appendUnique(latest, previous.proposals),
+                          }
+                        : previous,
+                    );
+                    setPages((previous) => ({
+                      ...previous,
+                      proposals: pageState(latest.length),
+                    }));
+                  }
+                } catch (failure) {
+                  if (
+                    request !== refreshCounter.current ||
+                    selectedId.current !== id ||
+                    !currentOwner()
+                  )
+                    return;
+                  if (!expireIfUnauthorized(failure))
+                    setError(safeError(failure));
+                }
               })
               .catch((failure) => {
                 if (expireIfUnauthorized(failure)) return;
@@ -520,9 +673,15 @@ function ComposerWorkspaceInner({
         setModelContent(
           ownerId ? (readLocal(localKey("model", ownerId, id)) ?? "") : "",
         );
-        setResumeQuestionId(
-          ownerId ? (readLocal(`composer:resume:${ownerId}:${id}`) ?? "") : "",
+        const savedResumeQuestionId = ownerId
+          ? (readLocal(`composer:resume:${ownerId}:${id}`) ?? "")
+          : "";
+        setResumeQuestionId(savedResumeQuestionId);
+        setModelAuthorIds(
+          questions.find((item) => item.id === savedResumeQuestionId)
+            ?.source_author_ids ?? [],
         );
+        setPromptPreview(null);
         setStepIntent(
           ownerId && readLocal(localKey("intent", ownerId, id)) === "question"
             ? "question"
@@ -785,7 +944,6 @@ function ComposerWorkspaceInner({
     try {
       const result = await action(stillSelected);
       if (!stillSelected()) return;
-      setNotice(success);
       const publishedRevision =
         result &&
         typeof result === "object" &&
@@ -798,6 +956,7 @@ function ComposerWorkspaceInner({
           ? result.data.id
           : undefined;
       await load(id, publishedRevision);
+      if (stillSelected()) setNotice(success);
     } catch (failure) {
       if (expireIfUnauthorized(failure)) return;
       if (!stillSelected()) return;
@@ -979,6 +1138,8 @@ function ComposerWorkspaceInner({
     setModelContent(content);
     setStepIntent("proposal");
     setResumeQuestionId(question.id);
+    setModelAuthorIds(question.source_author_ids ?? []);
+    setPromptPreview(null);
     if (ownerId && view.draft) {
       remember(localKey("model", ownerId, view.draft.id), content);
       remember(localKey("intent", ownerId, view.draft.id), "proposal");
@@ -1263,9 +1424,17 @@ function ComposerWorkspaceInner({
             Prepare a document with reviewed suggestions and exact revisions.
           </p>
         </div>
-        <a className="text-accent underline" href="/composer/connections">
-          My connections
-        </a>
+        <nav aria-label="Composer tools" className="flex flex-wrap gap-3">
+          <a className="text-accent underline" href="/composer/authors">
+            Author directory
+          </a>
+          <a className="text-accent underline" href="/composer/fill-templates">
+            Typed filling templates
+          </a>
+          <a className="text-accent underline" href="/composer/connections">
+            My connections
+          </a>
+        </nav>
       </div>
       {loading && <p aria-live="polite">Loading Composer…</p>}
       {error && <Alert tone="danger">{error}</Alert>}
@@ -1654,16 +1823,128 @@ function ComposerWorkspaceInner({
                   }}
                 />
               </label>
+              <fieldset className="mt-3 space-y-2">
+                <legend>Author entries for this model step</legend>
+                <p className="text-sm">
+                  Only selected, currently authorized author facts may be added
+                  to the prompt. Preview their exact transmitted text before
+                  sending.
+                </p>
+                {availableAuthors.length === 0 ? (
+                  <p>No authorized author entries are available.</p>
+                ) : (
+                  availableAuthors.map((author) => (
+                    <label className="block" key={author.id}>
+                      <input
+                        checked={modelAuthorIds.includes(author.id)}
+                        onChange={(event) =>
+                          setModelAuthorIds((previous) =>
+                            event.target.checked
+                              ? [...previous, author.id]
+                              : previous.filter((id) => id !== author.id),
+                          )
+                        }
+                        type="checkbox"
+                      />{" "}
+                      {author.name}
+                    </label>
+                  ))
+                )}
+                {moreAuthors && (
+                  <button
+                    disabled={authorLoading || busy}
+                    onClick={() => void loadMoreModelAuthors()}
+                    type="button"
+                  >
+                    Load more model authors
+                  </button>
+                )}
+              </fieldset>
+              {resumeQuestionId && !resumeAuthorsAvailable && (
+                <Alert tone="danger">
+                  An author from the original question is no longer available or
+                  selected. Restore access and review a fresh prompt before
+                  resuming.
+                </Alert>
+              )}
+              {previewError && <Alert tone="danger">{previewError}</Alert>}
+              {(modelAuthorIds.length > 0 || Boolean(resumeQuestionId)) && (
+                <div className="mt-3 space-y-2">
+                  <button
+                    disabled={
+                      previewPending ||
+                      !resumeAuthorsAvailable ||
+                      !modelReady ||
+                      !modelContent.trim() ||
+                      !Number.isSafeInteger(Number(requestedTokens)) ||
+                      Number(requestedTokens) < 1 ||
+                      Number(requestedTokens) >
+                        (capabilities?.maximum_output_tokens ?? 0)
+                    }
+                    onClick={() => {
+                      const fingerprint = promptFingerprint;
+                      const selectedAtStart = selectionCounter.current;
+                      setPreviewPending(true);
+                      setPreviewError("");
+                      void api
+                        .previewStep(draft, {
+                          connection_id: chosen!.id,
+                          approved_endpoint: chosen!.endpoint,
+                          approved_model: model,
+                          content: modelContent.trim(),
+                          author_ids: modelAuthorIds,
+                          max_output_tokens: Number(requestedTokens),
+                        })
+                        .then((result) => {
+                          if (
+                            selectedId.current === draft.id &&
+                            selectionCounter.current === selectedAtStart
+                          )
+                            setPromptPreview({ fingerprint, result });
+                        })
+                        .catch((failure: unknown) => {
+                          if (expireIfUnauthorized(failure)) return;
+                          setPromptPreview(null);
+                          setPreviewError(
+                            failure instanceof ApiError &&
+                              [403, 404, 409, 412].includes(failure.status)
+                              ? "An author entry changed or access was revoked. Refresh the preview and selection."
+                              : safeError(failure),
+                          );
+                        })
+                        .finally(() => setPreviewPending(false));
+                    }}
+                    type="button"
+                  >
+                    Preview exact prompt
+                  </button>
+                  {currentPromptPreview ? (
+                    <div className="space-y-2">
+                      <p>Exact text selected for transmission:</p>
+                      <pre className="max-h-64 overflow-auto rounded-control border border-muted p-3 whitespace-pre-wrap">
+                        {currentPromptPreview.transmitted_content}
+                      </pre>
+                    </div>
+                  ) : (
+                    <p>
+                      Preview the current prompt before sending author facts.
+                    </p>
+                  )}
+                </div>
+              )}
               <button
                 type="button"
                 disabled={
                   busy ||
+                  !resumeAuthorsAvailable ||
                   !modelReady ||
                   !modelContent.trim() ||
                   !Number.isSafeInteger(Number(requestedTokens)) ||
                   Number(requestedTokens) < 1 ||
                   Number(requestedTokens) >
-                    (capabilities?.maximum_output_tokens ?? 0)
+                    (capabilities?.maximum_output_tokens ?? 0) ||
+                  ((modelAuthorIds.length > 0 || Boolean(resumeQuestionId)) &&
+                    !currentPromptPreview)
                 }
                 onClick={() =>
                   void mutate(async (stillSelected) => {
@@ -1676,6 +1957,13 @@ function ComposerWorkspaceInner({
                         content: modelContent.trim(),
                         max_output_tokens: Number(requestedTokens),
                         intent: stepIntent,
+                        ...(currentPromptPreview?.author_refs.length
+                          ? {
+                              author_refs: currentPromptPreview.author_refs,
+                              author_preview_digest:
+                                currentPromptPreview.preview_digest,
+                            }
+                          : {}),
                         ...(resumeQuestionId && stepIntent === "proposal"
                           ? { answered_question_id: resumeQuestionId }
                           : {}),
@@ -1970,6 +2258,20 @@ function ComposerWorkspaceInner({
             </section>
           </section>
           <section aria-label="Revision preview" className="min-w-0 space-y-4">
+            {ownerId && (
+              <ComposerFillPanel
+                draft={draft}
+                expire={expireSession}
+                key={draft.id}
+                onPublished={(revisionId) => {
+                  if (selectedId.current === draft.id)
+                    void load(draft.id, revisionId);
+                }}
+                ownerId={ownerId}
+                revisions={view.revisions}
+                sourceRevisionId={draft.current_revision_id}
+              />
+            )}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-xl font-semibold">Revision preview</h2>
               <button

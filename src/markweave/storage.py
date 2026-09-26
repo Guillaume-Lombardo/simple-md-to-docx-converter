@@ -23,6 +23,7 @@ class ObjectScope(StrEnum):
     TEMPLATE_VERSION = "template-versions"
     COMPOSER_ARTIFACT = "composer-artifacts"
     COMPOSER_SOURCE = "composer-sources"
+    TYPED_TEMPLATE = "typed-templates"
 
 
 @dataclass(frozen=True, slots=True)

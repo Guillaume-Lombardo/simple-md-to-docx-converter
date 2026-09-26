@@ -160,13 +160,54 @@ edit-shaped output fails the step with safe `provider_invalid`. The completed st
 durable pending question and releases its execution slot. `GET
 /api/v1/composer/drafts/{id}/questions` and `GET .../questions/{question_id}` read owner-scoped
 questions during provider outage, including stable question text, model-step ID, state, and the
-linked answer message ID and content after answering. `POST .../questions/{question_id}/answer`
+linked answer message ID and content after answering. `source_author_ids` identifies any author
+entries selected for the originating question. `POST .../questions/{question_id}/answer`
 accepts `{ "content": "..." }` with the current draft `If-Match` and an `Idempotency-Key`; it
 atomically appends one user message and changes the question from `pending` to `answered`,
 returning the new draft ETag. A stale answer or second different answer fails. The user may
 explicitly start a fresh bounded model step with `answered_question_id` at the exact answered
 draft version. This link is persisted on the new step; an already running or completed resume
 cannot be duplicated, and any later human draft edit prevents stale model output publication.
+If the originating question used author entries, the resumed step must include the same exact
+author IDs and versions in a freshly reviewed preview; revoked or changed entries block resume.
+
+`GET/POST /api/v1/composer/authors` lists visible private author entries and creates one for the
+signed-in owner. Each structured field has a value, provenance, and optional source reference;
+an unresolved field cannot masquerade as an approved value. `GET/PATCH .../authors/{id}` reads or
+changes an entry; the owner alone may update it. `PUT/DELETE .../authors/{id}/grants/{user_id}`
+grants or revokes access for an identified active user. Updates and grants require `If-Match`,
+and the content-free audit records the operation. An administrator has no implicit cross-owner
+access. `POST /api/v1/composer/drafts/{id}/model-steps/preview` accepts the draft `If-Match`,
+approved connection/model, exact base content, and selected author IDs. It returns the exact
+transmitted content, author IDs and versions, and a preview digest. Starting a model step with
+these references and digest requires them to remain unchanged. Authorization is rechecked at
+admission, immediately before outbound transmission, on resume, and before proposal or question
+publication. A revoked or changed entry fails closed; its content is not written to logs or
+audit records.
+
+`GET/POST /api/v1/composer/fill-templates` lists authorized private typed DOCX templates and
+creates one from multipart `name`, JSON `schema`, and DOCX `file`. This is a distinct namespace
+from Pandoc style references. The upload is bounded and malware-scanned before schema/OOXML
+parsing or storage. `GET .../fill-templates/{id}` reads its identity; `POST
+.../fill-templates/{id}/versions` creates an immutable replacement with `If-Match`; `GET
+.../versions` lists exact versions; `GET .../versions/{version_id}` reads the schema/digests;
+`GET .../versions/{version_id}/content` downloads its DOCX. Owner-only `PUT/DELETE
+.../fill-templates/{id}/grants/{user_id}` share or revoke access to a named user. Template
+access does not imply author-directory access. Unsupported content controls, unsafe packages,
+invalid schemas, and unsatisfied constraints fail before publication.
+
+`POST /api/v1/composer/drafts/{id}/fill-plans` binds the current source revision, exact typed
+template version, selected author versions, and proposed values under the draft `If-Match` and
+an `Idempotency-Key`. The plan is durable and carries field provenance and explicit missing or
+ambiguous questions. `GET .../fill-plans` and `GET .../fill-plans/{plan_id}` recover it across
+refreshes. `PATCH .../{plan_id}` sends reviewed values and provenance with its `If-Match` and
+an idempotency key; `POST .../{plan_id}/approve` requires every question resolved. Approval
+changes no document. `POST .../{plan_id}/publish` rechecks every grant and exact source/template
+reference, fills only the qualified Word content controls, and atomically creates a new immutable
+revision with matching DOCX preview/download artifacts. `POST
+.../revisions/{revision_id}/regenerations` uses the retained approved values, schema and template
+version with no provider request; it rejects a changed output digest. Both publications require
+the current `If-Match` and an idempotency key.
 
 `POST /api/v1/composer/drafts/{id}/revisions/from-source` captures the exact scanned source as
 download and preview artifacts. For ZIP packages, the download is the original ZIP and the

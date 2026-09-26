@@ -43,7 +43,18 @@ function AuthenticatedAdmin() {
               >
                 Templates
               </Link>
-              <p>Manage shared Word and presentation templates.</p>
+              <p>
+                Manage Pandoc style-reference Word and presentation templates.
+              </p>
+            </li>
+            <li className="rounded-control border border-muted p-4">
+              <Link
+                className="font-semibold text-accent underline"
+                href="/composer/fill-templates"
+              >
+                Typed filling templates
+              </Link>
+              <p>Manage DOCX fields and versions for Composer filling.</p>
             </li>
             <li className="rounded-control border border-muted p-4">
               <Link

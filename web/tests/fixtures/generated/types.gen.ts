@@ -81,6 +81,161 @@ export type AuditRecordResponse = {
 };
 
 /**
+ * AuthorFieldValue
+ */
+export type AuthorFieldValue = {
+    provenance: ValueProvenance;
+    /**
+     * Source Reference
+     */
+    source_reference?: string | null;
+    /**
+     * Value
+     */
+    value?: string | null;
+};
+
+/**
+ * AuthorListResponse
+ */
+export type AuthorListResponse = {
+    /**
+     * Authors
+     */
+    authors: Array<AuthorResponse>;
+    /**
+     * Limit
+     */
+    limit: number;
+    /**
+     * Offset
+     */
+    offset: number;
+};
+
+/**
+ * AuthorPromptPreviewRequest
+ */
+export type AuthorPromptPreviewRequest = {
+    /**
+     * Approved Endpoint
+     */
+    approved_endpoint: string;
+    /**
+     * Approved Model
+     */
+    approved_model: string;
+    /**
+     * Author Ids
+     */
+    author_ids: Array<string>;
+    /**
+     * Connection Id
+     */
+    connection_id: string;
+    /**
+     * Content
+     */
+    content: string;
+    /**
+     * Max Output Tokens
+     */
+    max_output_tokens: number;
+};
+
+/**
+ * AuthorPromptPreviewResponse
+ */
+export type AuthorPromptPreviewResponse = {
+    /**
+     * Author Refs
+     */
+    author_refs: Array<AuthorReference>;
+    /**
+     * Preview Digest
+     */
+    preview_digest: string;
+    /**
+     * Transmitted Content
+     */
+    transmitted_content: string;
+};
+
+/**
+ * AuthorReference
+ */
+export type AuthorReference = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Version
+     */
+    version: number;
+};
+
+/**
+ * AuthorResponse
+ */
+export type AuthorResponse = {
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Etag
+     */
+    etag: string;
+    /**
+     * Fields
+     */
+    fields: {
+        [key: string]: AuthorFieldValue;
+    };
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Owner Id
+     */
+    owner_id: string;
+    /**
+     * Shared With
+     */
+    shared_with: Array<string>;
+    /**
+     * Updated At
+     */
+    updated_at: string;
+    /**
+     * Version
+     */
+    version: number;
+};
+
+/**
+ * AuthorWriteRequest
+ */
+export type AuthorWriteRequest = {
+    /**
+     * Fields
+     */
+    fields: {
+        [key: string]: AuthorFieldValue;
+    };
+    /**
+     * Name
+     */
+    name: string;
+};
+
+/**
  * Body_create_conversion_api_v1_conversions_post
  */
 export type BodyCreateConversionApiV1ConversionsPost = {
@@ -142,6 +297,24 @@ export type BodyCreateReversionApiV1ReversionsPost = {
 };
 
 /**
+ * Body_create_template_api_v1_composer_fill_templates_post
+ */
+export type BodyCreateTemplateApiV1ComposerFillTemplatesPost = {
+    /**
+     * File
+     */
+    file: Blob | File;
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Schema
+     */
+    schema: string;
+};
+
+/**
  * Body_create_template_api_v1_templates_post
  */
 export type BodyCreateTemplateApiV1TemplatesPost = {
@@ -177,6 +350,20 @@ export type BodyPreviewPresentationApiV1PresentationPlanPost = {
      * Source
      */
     source: Blob | File;
+};
+
+/**
+ * Body_replace_template_api_v1_composer_fill_templates__template_id__versions_post
+ */
+export type BodyReplaceTemplateApiV1ComposerFillTemplatesTemplateIdVersionsPost = {
+    /**
+     * File
+     */
+    file: Blob | File;
+    /**
+     * Schema
+     */
+    schema: string;
 };
 
 /**
@@ -622,6 +809,14 @@ export type ComposerModelStepCreateRequest = {
      */
     approved_model: string;
     /**
+     * Author Preview Digest
+     */
+    author_preview_digest?: string | null;
+    /**
+     * Author Refs
+     */
+    author_refs?: Array<AuthorReference>;
+    /**
      * Connection Id
      */
     connection_id: string;
@@ -842,6 +1037,10 @@ export type ComposerQuestionResponse = {
      */
     model_step_id: string;
     /**
+     * Source Author Ids
+     */
+    source_author_ids?: Array<string>;
+    /**
      * State
      */
     state: 'pending' | 'answered';
@@ -993,6 +1192,10 @@ export type ComposerRevisionResponse = {
      * Template Reference
      */
     template_reference: string | null;
+    /**
+     * Typed Fill Snapshot
+     */
+    typed_fill_snapshot?: string | null;
 };
 
 /**
@@ -1388,6 +1591,176 @@ export type ErrorDetail = {
  */
 export type ErrorResponse = {
     error: ErrorDetail;
+};
+
+/**
+ * FillPlanCreateRequest
+ */
+export type FillPlanCreateRequest = {
+    /**
+     * Author Ids
+     */
+    author_ids?: Array<string>;
+    /**
+     * Source Revision Id
+     */
+    source_revision_id: string;
+    /**
+     * Template Id
+     */
+    template_id: string;
+    /**
+     * Template Version Id
+     */
+    template_version_id: string;
+    /**
+     * Values
+     */
+    values?: {
+        [key: string]: unknown;
+    };
+};
+
+/**
+ * FillPlanListResponse
+ */
+export type FillPlanListResponse = {
+    /**
+     * Limit
+     */
+    limit: number;
+    /**
+     * Offset
+     */
+    offset: number;
+    /**
+     * Plans
+     */
+    plans: Array<FillPlanResponse>;
+};
+
+/**
+ * FillPlanResponse
+ */
+export type FillPlanResponse = {
+    /**
+     * Author Refs
+     */
+    author_refs: Array<{
+        [key: string]: unknown;
+    }>;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Draft Id
+     */
+    draft_id: string;
+    /**
+     * Etag
+     */
+    etag: string;
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Provenance
+     */
+    provenance: {
+        [key: string]: FillValueProvenance;
+    };
+    /**
+     * Questions
+     */
+    questions: Array<FillQuestion>;
+    /**
+     * Result Revision Id
+     */
+    result_revision_id: string | null;
+    /**
+     * Source Revision Id
+     */
+    source_revision_id: string;
+    /**
+     * State
+     */
+    state: string;
+    /**
+     * Template Id
+     */
+    template_id: string;
+    /**
+     * Template Version Id
+     */
+    template_version_id: string;
+    /**
+     * Updated At
+     */
+    updated_at: string;
+    /**
+     * Values
+     */
+    values: {
+        [key: string]: unknown;
+    };
+    /**
+     * Version
+     */
+    version: number;
+};
+
+/**
+ * FillPlanUpdateRequest
+ */
+export type FillPlanUpdateRequest = {
+    /**
+     * Provenance
+     */
+    provenance: {
+        [key: string]: FillValueProvenance;
+    };
+    /**
+     * Values
+     */
+    values: {
+        [key: string]: unknown;
+    };
+};
+
+/**
+ * FillProvenanceKind
+ */
+export type FillProvenanceKind = 'supplied' | 'cited' | 'model_suggested' | 'human_approved' | 'human_edited' | 'unresolved' | 'template_default';
+
+/**
+ * FillQuestion
+ */
+export type FillQuestion = {
+    /**
+     * Path
+     */
+    path: string;
+    /**
+     * Reason
+     */
+    reason: string;
+    /**
+     * Text
+     */
+    text: string;
+};
+
+/**
+ * FillValueProvenance
+ */
+export type FillValueProvenance = {
+    kind: FillProvenanceKind;
+    /**
+     * Source Reference
+     */
+    source_reference?: string | null;
 };
 
 /**
@@ -2139,6 +2512,128 @@ export type TemplateVersionResponse = {
 };
 
 /**
+ * TypedTemplateListResponse
+ */
+export type TypedTemplateListResponse = {
+    /**
+     * Limit
+     */
+    limit: number;
+    /**
+     * Offset
+     */
+    offset: number;
+    /**
+     * Templates
+     */
+    templates: Array<TypedTemplateResponse>;
+};
+
+/**
+ * TypedTemplateResponse
+ */
+export type TypedTemplateResponse = {
+    /**
+     * Active Version Id
+     */
+    active_version_id: string;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Etag
+     */
+    etag: string;
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Owner Id
+     */
+    owner_id: string;
+    /**
+     * Shared With
+     */
+    shared_with: Array<string>;
+    /**
+     * Updated At
+     */
+    updated_at: string;
+    /**
+     * Version
+     */
+    version: number;
+};
+
+/**
+ * TypedTemplateVersionListResponse
+ */
+export type TypedTemplateVersionListResponse = {
+    /**
+     * Limit
+     */
+    limit: number;
+    /**
+     * Offset
+     */
+    offset: number;
+    /**
+     * Versions
+     */
+    versions: Array<TypedTemplateVersionResponse>;
+};
+
+/**
+ * TypedTemplateVersionResponse
+ */
+export type TypedTemplateVersionResponse = {
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Docx Sha256
+     */
+    docx_sha256: string;
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Number
+     */
+    number: number;
+    /**
+     * Schema
+     */
+    schema: {
+        [key: string]: unknown;
+    };
+    /**
+     * Schema Sha256
+     */
+    schema_sha256: string;
+    /**
+     * Schema Version
+     */
+    schema_version: number;
+    /**
+     * Size
+     */
+    size: number;
+    /**
+     * Template Id
+     */
+    template_id: string;
+};
+
+/**
  * UserCreateRequest
  *
  * Administrator local-account creation request.
@@ -2216,6 +2711,11 @@ export type ValidationError = {
      */
     type: string;
 };
+
+/**
+ * ValueProvenance
+ */
+export type ValueProvenance = 'supplied' | 'cited' | 'model_suggested' | 'human_approved' | 'human_edited' | 'unresolved';
 
 /**
  * CredentialWriteRequest
@@ -2723,6 +3223,345 @@ export type ListAuditRecordsApiV1AuditGetResponses = {
 };
 
 export type ListAuditRecordsApiV1AuditGetResponse = ListAuditRecordsApiV1AuditGetResponses[keyof ListAuditRecordsApiV1AuditGetResponses];
+
+export type ListAuthorsApiV1ComposerAuthorsGetData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Limit
+         */
+        limit?: number;
+        /**
+         * Offset
+         */
+        offset?: number;
+    };
+    url: '/api/v1/composer/authors';
+};
+
+export type ListAuthorsApiV1ComposerAuthorsGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type ListAuthorsApiV1ComposerAuthorsGetError = ListAuthorsApiV1ComposerAuthorsGetErrors[keyof ListAuthorsApiV1ComposerAuthorsGetErrors];
+
+export type ListAuthorsApiV1ComposerAuthorsGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: AuthorListResponse;
+};
+
+export type ListAuthorsApiV1ComposerAuthorsGetResponse = ListAuthorsApiV1ComposerAuthorsGetResponses[keyof ListAuthorsApiV1ComposerAuthorsGetResponses];
+
+export type CreateAuthorApiV1ComposerAuthorsPostData = {
+    body: AuthorWriteRequest;
+    headers?: {
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/composer/authors';
+};
+
+export type CreateAuthorApiV1ComposerAuthorsPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type CreateAuthorApiV1ComposerAuthorsPostError = CreateAuthorApiV1ComposerAuthorsPostErrors[keyof CreateAuthorApiV1ComposerAuthorsPostErrors];
+
+export type CreateAuthorApiV1ComposerAuthorsPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: AuthorResponse;
+};
+
+export type CreateAuthorApiV1ComposerAuthorsPostResponse = CreateAuthorApiV1ComposerAuthorsPostResponses[keyof CreateAuthorApiV1ComposerAuthorsPostResponses];
+
+export type GetAuthorApiV1ComposerAuthorsAuthorIdGetData = {
+    body?: never;
+    path: {
+        /**
+         * Author Id
+         */
+        author_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/authors/{author_id}';
+};
+
+export type GetAuthorApiV1ComposerAuthorsAuthorIdGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type GetAuthorApiV1ComposerAuthorsAuthorIdGetError = GetAuthorApiV1ComposerAuthorsAuthorIdGetErrors[keyof GetAuthorApiV1ComposerAuthorsAuthorIdGetErrors];
+
+export type GetAuthorApiV1ComposerAuthorsAuthorIdGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: AuthorResponse;
+};
+
+export type GetAuthorApiV1ComposerAuthorsAuthorIdGetResponse = GetAuthorApiV1ComposerAuthorsAuthorIdGetResponses[keyof GetAuthorApiV1ComposerAuthorsAuthorIdGetResponses];
+
+export type UpdateAuthorApiV1ComposerAuthorsAuthorIdPatchData = {
+    body: AuthorWriteRequest;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Author Id
+         */
+        author_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/authors/{author_id}';
+};
+
+export type UpdateAuthorApiV1ComposerAuthorsAuthorIdPatchErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type UpdateAuthorApiV1ComposerAuthorsAuthorIdPatchError = UpdateAuthorApiV1ComposerAuthorsAuthorIdPatchErrors[keyof UpdateAuthorApiV1ComposerAuthorsAuthorIdPatchErrors];
+
+export type UpdateAuthorApiV1ComposerAuthorsAuthorIdPatchResponses = {
+    /**
+     * Successful Response
+     */
+    200: AuthorResponse;
+};
+
+export type UpdateAuthorApiV1ComposerAuthorsAuthorIdPatchResponse = UpdateAuthorApiV1ComposerAuthorsAuthorIdPatchResponses[keyof UpdateAuthorApiV1ComposerAuthorsAuthorIdPatchResponses];
+
+export type RevokeAuthorApiV1ComposerAuthorsAuthorIdGrantsUserIdDeleteData = {
+    body?: never;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Author Id
+         */
+        author_id: string;
+        /**
+         * User Id
+         */
+        user_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/authors/{author_id}/grants/{user_id}';
+};
+
+export type RevokeAuthorApiV1ComposerAuthorsAuthorIdGrantsUserIdDeleteErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type RevokeAuthorApiV1ComposerAuthorsAuthorIdGrantsUserIdDeleteError = RevokeAuthorApiV1ComposerAuthorsAuthorIdGrantsUserIdDeleteErrors[keyof RevokeAuthorApiV1ComposerAuthorsAuthorIdGrantsUserIdDeleteErrors];
+
+export type RevokeAuthorApiV1ComposerAuthorsAuthorIdGrantsUserIdDeleteResponses = {
+    /**
+     * Successful Response
+     */
+    200: AuthorResponse;
+};
+
+export type RevokeAuthorApiV1ComposerAuthorsAuthorIdGrantsUserIdDeleteResponse = RevokeAuthorApiV1ComposerAuthorsAuthorIdGrantsUserIdDeleteResponses[keyof RevokeAuthorApiV1ComposerAuthorsAuthorIdGrantsUserIdDeleteResponses];
+
+export type GrantAuthorApiV1ComposerAuthorsAuthorIdGrantsUserIdPutData = {
+    body?: never;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Author Id
+         */
+        author_id: string;
+        /**
+         * User Id
+         */
+        user_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/authors/{author_id}/grants/{user_id}';
+};
+
+export type GrantAuthorApiV1ComposerAuthorsAuthorIdGrantsUserIdPutErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type GrantAuthorApiV1ComposerAuthorsAuthorIdGrantsUserIdPutError = GrantAuthorApiV1ComposerAuthorsAuthorIdGrantsUserIdPutErrors[keyof GrantAuthorApiV1ComposerAuthorsAuthorIdGrantsUserIdPutErrors];
+
+export type GrantAuthorApiV1ComposerAuthorsAuthorIdGrantsUserIdPutResponses = {
+    /**
+     * Successful Response
+     */
+    200: AuthorResponse;
+};
+
+export type GrantAuthorApiV1ComposerAuthorsAuthorIdGrantsUserIdPutResponse = GrantAuthorApiV1ComposerAuthorsAuthorIdGrantsUserIdPutResponses[keyof GrantAuthorApiV1ComposerAuthorsAuthorIdGrantsUserIdPutResponses];
 
 export type CapabilitiesApiV1ComposerCapabilitiesGetData = {
     body?: never;
@@ -3505,6 +4344,391 @@ export type SaveDraftApiV1ComposerDraftsDraftIdPutResponses = {
 
 export type SaveDraftApiV1ComposerDraftsDraftIdPutResponse = SaveDraftApiV1ComposerDraftsDraftIdPutResponses[keyof SaveDraftApiV1ComposerDraftsDraftIdPutResponses];
 
+export type ListPlansApiV1ComposerDraftsDraftIdFillPlansGetData = {
+    body?: never;
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+    };
+    query?: {
+        /**
+         * Limit
+         */
+        limit?: number;
+        /**
+         * Offset
+         */
+        offset?: number;
+    };
+    url: '/api/v1/composer/drafts/{draft_id}/fill-plans';
+};
+
+export type ListPlansApiV1ComposerDraftsDraftIdFillPlansGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type ListPlansApiV1ComposerDraftsDraftIdFillPlansGetError = ListPlansApiV1ComposerDraftsDraftIdFillPlansGetErrors[keyof ListPlansApiV1ComposerDraftsDraftIdFillPlansGetErrors];
+
+export type ListPlansApiV1ComposerDraftsDraftIdFillPlansGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: FillPlanListResponse;
+};
+
+export type ListPlansApiV1ComposerDraftsDraftIdFillPlansGetResponse = ListPlansApiV1ComposerDraftsDraftIdFillPlansGetResponses[keyof ListPlansApiV1ComposerDraftsDraftIdFillPlansGetResponses];
+
+export type CreatePlanApiV1ComposerDraftsDraftIdFillPlansPostData = {
+    body: FillPlanCreateRequest;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * Idempotency-Key
+         */
+        'Idempotency-Key'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/fill-plans';
+};
+
+export type CreatePlanApiV1ComposerDraftsDraftIdFillPlansPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type CreatePlanApiV1ComposerDraftsDraftIdFillPlansPostError = CreatePlanApiV1ComposerDraftsDraftIdFillPlansPostErrors[keyof CreatePlanApiV1ComposerDraftsDraftIdFillPlansPostErrors];
+
+export type CreatePlanApiV1ComposerDraftsDraftIdFillPlansPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: FillPlanResponse;
+};
+
+export type CreatePlanApiV1ComposerDraftsDraftIdFillPlansPostResponse = CreatePlanApiV1ComposerDraftsDraftIdFillPlansPostResponses[keyof CreatePlanApiV1ComposerDraftsDraftIdFillPlansPostResponses];
+
+export type GetPlanApiV1ComposerDraftsDraftIdFillPlansPlanIdGetData = {
+    body?: never;
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/fill-plans/{plan_id}';
+};
+
+export type GetPlanApiV1ComposerDraftsDraftIdFillPlansPlanIdGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type GetPlanApiV1ComposerDraftsDraftIdFillPlansPlanIdGetError = GetPlanApiV1ComposerDraftsDraftIdFillPlansPlanIdGetErrors[keyof GetPlanApiV1ComposerDraftsDraftIdFillPlansPlanIdGetErrors];
+
+export type GetPlanApiV1ComposerDraftsDraftIdFillPlansPlanIdGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: FillPlanResponse;
+};
+
+export type GetPlanApiV1ComposerDraftsDraftIdFillPlansPlanIdGetResponse = GetPlanApiV1ComposerDraftsDraftIdFillPlansPlanIdGetResponses[keyof GetPlanApiV1ComposerDraftsDraftIdFillPlansPlanIdGetResponses];
+
+export type UpdatePlanApiV1ComposerDraftsDraftIdFillPlansPlanIdPatchData = {
+    body: FillPlanUpdateRequest;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * Idempotency-Key
+         */
+        'Idempotency-Key'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/fill-plans/{plan_id}';
+};
+
+export type UpdatePlanApiV1ComposerDraftsDraftIdFillPlansPlanIdPatchErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type UpdatePlanApiV1ComposerDraftsDraftIdFillPlansPlanIdPatchError = UpdatePlanApiV1ComposerDraftsDraftIdFillPlansPlanIdPatchErrors[keyof UpdatePlanApiV1ComposerDraftsDraftIdFillPlansPlanIdPatchErrors];
+
+export type UpdatePlanApiV1ComposerDraftsDraftIdFillPlansPlanIdPatchResponses = {
+    /**
+     * Successful Response
+     */
+    200: FillPlanResponse;
+};
+
+export type UpdatePlanApiV1ComposerDraftsDraftIdFillPlansPlanIdPatchResponse = UpdatePlanApiV1ComposerDraftsDraftIdFillPlansPlanIdPatchResponses[keyof UpdatePlanApiV1ComposerDraftsDraftIdFillPlansPlanIdPatchResponses];
+
+export type ApprovePlanApiV1ComposerDraftsDraftIdFillPlansPlanIdApprovePostData = {
+    body?: never;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * Idempotency-Key
+         */
+        'Idempotency-Key'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/fill-plans/{plan_id}/approve';
+};
+
+export type ApprovePlanApiV1ComposerDraftsDraftIdFillPlansPlanIdApprovePostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type ApprovePlanApiV1ComposerDraftsDraftIdFillPlansPlanIdApprovePostError = ApprovePlanApiV1ComposerDraftsDraftIdFillPlansPlanIdApprovePostErrors[keyof ApprovePlanApiV1ComposerDraftsDraftIdFillPlansPlanIdApprovePostErrors];
+
+export type ApprovePlanApiV1ComposerDraftsDraftIdFillPlansPlanIdApprovePostResponses = {
+    /**
+     * Successful Response
+     */
+    200: FillPlanResponse;
+};
+
+export type ApprovePlanApiV1ComposerDraftsDraftIdFillPlansPlanIdApprovePostResponse = ApprovePlanApiV1ComposerDraftsDraftIdFillPlansPlanIdApprovePostResponses[keyof ApprovePlanApiV1ComposerDraftsDraftIdFillPlansPlanIdApprovePostResponses];
+
+export type PublishPlanApiV1ComposerDraftsDraftIdFillPlansPlanIdPublishPostData = {
+    body?: never;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * Idempotency-Key
+         */
+        'Idempotency-Key'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Plan Id
+         */
+        plan_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/fill-plans/{plan_id}/publish';
+};
+
+export type PublishPlanApiV1ComposerDraftsDraftIdFillPlansPlanIdPublishPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type PublishPlanApiV1ComposerDraftsDraftIdFillPlansPlanIdPublishPostError = PublishPlanApiV1ComposerDraftsDraftIdFillPlansPlanIdPublishPostErrors[keyof PublishPlanApiV1ComposerDraftsDraftIdFillPlansPlanIdPublishPostErrors];
+
+export type PublishPlanApiV1ComposerDraftsDraftIdFillPlansPlanIdPublishPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: ComposerRevisionResponse;
+};
+
+export type PublishPlanApiV1ComposerDraftsDraftIdFillPlansPlanIdPublishPostResponse = PublishPlanApiV1ComposerDraftsDraftIdFillPlansPlanIdPublishPostResponses[keyof PublishPlanApiV1ComposerDraftsDraftIdFillPlansPlanIdPublishPostResponses];
+
 export type ListGenerationsApiV1ComposerDraftsDraftIdGenerationsGetData = {
     body?: never;
     path: {
@@ -3920,6 +5144,66 @@ export type StartModelStepApiV1ComposerDraftsDraftIdModelStepsPostResponses = {
 };
 
 export type StartModelStepApiV1ComposerDraftsDraftIdModelStepsPostResponse = StartModelStepApiV1ComposerDraftsDraftIdModelStepsPostResponses[keyof StartModelStepApiV1ComposerDraftsDraftIdModelStepsPostResponses];
+
+export type PreviewModelStepApiV1ComposerDraftsDraftIdModelStepsPreviewPostData = {
+    body: AuthorPromptPreviewRequest;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+    };
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/model-steps/preview';
+};
+
+export type PreviewModelStepApiV1ComposerDraftsDraftIdModelStepsPreviewPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type PreviewModelStepApiV1ComposerDraftsDraftIdModelStepsPreviewPostError = PreviewModelStepApiV1ComposerDraftsDraftIdModelStepsPreviewPostErrors[keyof PreviewModelStepApiV1ComposerDraftsDraftIdModelStepsPreviewPostErrors];
+
+export type PreviewModelStepApiV1ComposerDraftsDraftIdModelStepsPreviewPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: AuthorPromptPreviewResponse;
+};
+
+export type PreviewModelStepApiV1ComposerDraftsDraftIdModelStepsPreviewPostResponse = PreviewModelStepApiV1ComposerDraftsDraftIdModelStepsPreviewPostResponses[keyof PreviewModelStepApiV1ComposerDraftsDraftIdModelStepsPreviewPostResponses];
 
 export type CancelModelStepApiV1ComposerDraftsDraftIdModelStepsStepIdDeleteData = {
     body?: never;
@@ -4785,6 +6069,78 @@ export type DiffRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdDiffGetResp
 
 export type DiffRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdDiffGetResponse = DiffRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdDiffGetResponses[keyof DiffRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdDiffGetResponses];
 
+export type RegenerateApiV1ComposerDraftsDraftIdRevisionsRevisionIdRegenerationsPostData = {
+    body?: never;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * Idempotency-Key
+         */
+        'Idempotency-Key'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Revision Id
+         */
+        revision_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/regenerations';
+};
+
+export type RegenerateApiV1ComposerDraftsDraftIdRevisionsRevisionIdRegenerationsPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type RegenerateApiV1ComposerDraftsDraftIdRevisionsRevisionIdRegenerationsPostError = RegenerateApiV1ComposerDraftsDraftIdRevisionsRevisionIdRegenerationsPostErrors[keyof RegenerateApiV1ComposerDraftsDraftIdRevisionsRevisionIdRegenerationsPostErrors];
+
+export type RegenerateApiV1ComposerDraftsDraftIdRevisionsRevisionIdRegenerationsPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: ComposerRevisionResponse;
+};
+
+export type RegenerateApiV1ComposerDraftsDraftIdRevisionsRevisionIdRegenerationsPostResponse = RegenerateApiV1ComposerDraftsDraftIdRevisionsRevisionIdRegenerationsPostResponses[keyof RegenerateApiV1ComposerDraftsDraftIdRevisionsRevisionIdRegenerationsPostResponses];
+
 export type RestoreRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdRestorePostData = {
     body?: never;
     headers?: {
@@ -4932,6 +6288,486 @@ export type CreateGenerationApiV1ComposerDraftsDraftIdRevisionsSourceRevisionIdG
 };
 
 export type CreateGenerationApiV1ComposerDraftsDraftIdRevisionsSourceRevisionIdGenerationsPostResponse = CreateGenerationApiV1ComposerDraftsDraftIdRevisionsSourceRevisionIdGenerationsPostResponses[keyof CreateGenerationApiV1ComposerDraftsDraftIdRevisionsSourceRevisionIdGenerationsPostResponses];
+
+export type ListTemplatesApiV1ComposerFillTemplatesGetData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Limit
+         */
+        limit?: number;
+        /**
+         * Offset
+         */
+        offset?: number;
+    };
+    url: '/api/v1/composer/fill-templates';
+};
+
+export type ListTemplatesApiV1ComposerFillTemplatesGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type ListTemplatesApiV1ComposerFillTemplatesGetError = ListTemplatesApiV1ComposerFillTemplatesGetErrors[keyof ListTemplatesApiV1ComposerFillTemplatesGetErrors];
+
+export type ListTemplatesApiV1ComposerFillTemplatesGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: TypedTemplateListResponse;
+};
+
+export type ListTemplatesApiV1ComposerFillTemplatesGetResponse = ListTemplatesApiV1ComposerFillTemplatesGetResponses[keyof ListTemplatesApiV1ComposerFillTemplatesGetResponses];
+
+export type CreateTemplateApiV1ComposerFillTemplatesPostData = {
+    body: BodyCreateTemplateApiV1ComposerFillTemplatesPost;
+    headers?: {
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/composer/fill-templates';
+};
+
+export type CreateTemplateApiV1ComposerFillTemplatesPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type CreateTemplateApiV1ComposerFillTemplatesPostError = CreateTemplateApiV1ComposerFillTemplatesPostErrors[keyof CreateTemplateApiV1ComposerFillTemplatesPostErrors];
+
+export type CreateTemplateApiV1ComposerFillTemplatesPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: TypedTemplateResponse;
+};
+
+export type CreateTemplateApiV1ComposerFillTemplatesPostResponse = CreateTemplateApiV1ComposerFillTemplatesPostResponses[keyof CreateTemplateApiV1ComposerFillTemplatesPostResponses];
+
+export type GetTemplateApiV1ComposerFillTemplatesTemplateIdGetData = {
+    body?: never;
+    path: {
+        /**
+         * Template Id
+         */
+        template_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/fill-templates/{template_id}';
+};
+
+export type GetTemplateApiV1ComposerFillTemplatesTemplateIdGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type GetTemplateApiV1ComposerFillTemplatesTemplateIdGetError = GetTemplateApiV1ComposerFillTemplatesTemplateIdGetErrors[keyof GetTemplateApiV1ComposerFillTemplatesTemplateIdGetErrors];
+
+export type GetTemplateApiV1ComposerFillTemplatesTemplateIdGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: TypedTemplateResponse;
+};
+
+export type GetTemplateApiV1ComposerFillTemplatesTemplateIdGetResponse = GetTemplateApiV1ComposerFillTemplatesTemplateIdGetResponses[keyof GetTemplateApiV1ComposerFillTemplatesTemplateIdGetResponses];
+
+export type RevokeTemplateApiV1ComposerFillTemplatesTemplateIdGrantsUserIdDeleteData = {
+    body?: never;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Template Id
+         */
+        template_id: string;
+        /**
+         * User Id
+         */
+        user_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/fill-templates/{template_id}/grants/{user_id}';
+};
+
+export type RevokeTemplateApiV1ComposerFillTemplatesTemplateIdGrantsUserIdDeleteErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type RevokeTemplateApiV1ComposerFillTemplatesTemplateIdGrantsUserIdDeleteError = RevokeTemplateApiV1ComposerFillTemplatesTemplateIdGrantsUserIdDeleteErrors[keyof RevokeTemplateApiV1ComposerFillTemplatesTemplateIdGrantsUserIdDeleteErrors];
+
+export type RevokeTemplateApiV1ComposerFillTemplatesTemplateIdGrantsUserIdDeleteResponses = {
+    /**
+     * Successful Response
+     */
+    200: TypedTemplateResponse;
+};
+
+export type RevokeTemplateApiV1ComposerFillTemplatesTemplateIdGrantsUserIdDeleteResponse = RevokeTemplateApiV1ComposerFillTemplatesTemplateIdGrantsUserIdDeleteResponses[keyof RevokeTemplateApiV1ComposerFillTemplatesTemplateIdGrantsUserIdDeleteResponses];
+
+export type GrantTemplateApiV1ComposerFillTemplatesTemplateIdGrantsUserIdPutData = {
+    body?: never;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Template Id
+         */
+        template_id: string;
+        /**
+         * User Id
+         */
+        user_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/fill-templates/{template_id}/grants/{user_id}';
+};
+
+export type GrantTemplateApiV1ComposerFillTemplatesTemplateIdGrantsUserIdPutErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type GrantTemplateApiV1ComposerFillTemplatesTemplateIdGrantsUserIdPutError = GrantTemplateApiV1ComposerFillTemplatesTemplateIdGrantsUserIdPutErrors[keyof GrantTemplateApiV1ComposerFillTemplatesTemplateIdGrantsUserIdPutErrors];
+
+export type GrantTemplateApiV1ComposerFillTemplatesTemplateIdGrantsUserIdPutResponses = {
+    /**
+     * Successful Response
+     */
+    200: TypedTemplateResponse;
+};
+
+export type GrantTemplateApiV1ComposerFillTemplatesTemplateIdGrantsUserIdPutResponse = GrantTemplateApiV1ComposerFillTemplatesTemplateIdGrantsUserIdPutResponses[keyof GrantTemplateApiV1ComposerFillTemplatesTemplateIdGrantsUserIdPutResponses];
+
+export type ListVersionsApiV1ComposerFillTemplatesTemplateIdVersionsGetData = {
+    body?: never;
+    path: {
+        /**
+         * Template Id
+         */
+        template_id: string;
+    };
+    query?: {
+        /**
+         * Limit
+         */
+        limit?: number;
+        /**
+         * Offset
+         */
+        offset?: number;
+    };
+    url: '/api/v1/composer/fill-templates/{template_id}/versions';
+};
+
+export type ListVersionsApiV1ComposerFillTemplatesTemplateIdVersionsGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type ListVersionsApiV1ComposerFillTemplatesTemplateIdVersionsGetError = ListVersionsApiV1ComposerFillTemplatesTemplateIdVersionsGetErrors[keyof ListVersionsApiV1ComposerFillTemplatesTemplateIdVersionsGetErrors];
+
+export type ListVersionsApiV1ComposerFillTemplatesTemplateIdVersionsGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: TypedTemplateVersionListResponse;
+};
+
+export type ListVersionsApiV1ComposerFillTemplatesTemplateIdVersionsGetResponse = ListVersionsApiV1ComposerFillTemplatesTemplateIdVersionsGetResponses[keyof ListVersionsApiV1ComposerFillTemplatesTemplateIdVersionsGetResponses];
+
+export type ReplaceTemplateApiV1ComposerFillTemplatesTemplateIdVersionsPostData = {
+    body: BodyReplaceTemplateApiV1ComposerFillTemplatesTemplateIdVersionsPost;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Template Id
+         */
+        template_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/fill-templates/{template_id}/versions';
+};
+
+export type ReplaceTemplateApiV1ComposerFillTemplatesTemplateIdVersionsPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type ReplaceTemplateApiV1ComposerFillTemplatesTemplateIdVersionsPostError = ReplaceTemplateApiV1ComposerFillTemplatesTemplateIdVersionsPostErrors[keyof ReplaceTemplateApiV1ComposerFillTemplatesTemplateIdVersionsPostErrors];
+
+export type ReplaceTemplateApiV1ComposerFillTemplatesTemplateIdVersionsPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: TypedTemplateResponse;
+};
+
+export type ReplaceTemplateApiV1ComposerFillTemplatesTemplateIdVersionsPostResponse = ReplaceTemplateApiV1ComposerFillTemplatesTemplateIdVersionsPostResponses[keyof ReplaceTemplateApiV1ComposerFillTemplatesTemplateIdVersionsPostResponses];
+
+export type GetVersionApiV1ComposerFillTemplatesTemplateIdVersionsVersionIdGetData = {
+    body?: never;
+    path: {
+        /**
+         * Template Id
+         */
+        template_id: string;
+        /**
+         * Version Id
+         */
+        version_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/fill-templates/{template_id}/versions/{version_id}';
+};
+
+export type GetVersionApiV1ComposerFillTemplatesTemplateIdVersionsVersionIdGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type GetVersionApiV1ComposerFillTemplatesTemplateIdVersionsVersionIdGetError = GetVersionApiV1ComposerFillTemplatesTemplateIdVersionsVersionIdGetErrors[keyof GetVersionApiV1ComposerFillTemplatesTemplateIdVersionsVersionIdGetErrors];
+
+export type GetVersionApiV1ComposerFillTemplatesTemplateIdVersionsVersionIdGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: TypedTemplateVersionResponse;
+};
+
+export type GetVersionApiV1ComposerFillTemplatesTemplateIdVersionsVersionIdGetResponse = GetVersionApiV1ComposerFillTemplatesTemplateIdVersionsVersionIdGetResponses[keyof GetVersionApiV1ComposerFillTemplatesTemplateIdVersionsVersionIdGetResponses];
+
+export type DownloadVersionApiV1ComposerFillTemplatesTemplateIdVersionsVersionIdContentGetData = {
+    body?: never;
+    path: {
+        /**
+         * Template Id
+         */
+        template_id: string;
+        /**
+         * Version Id
+         */
+        version_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/fill-templates/{template_id}/versions/{version_id}/content';
+};
+
+export type DownloadVersionApiV1ComposerFillTemplatesTemplateIdVersionsVersionIdContentGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type DownloadVersionApiV1ComposerFillTemplatesTemplateIdVersionsVersionIdContentGetError = DownloadVersionApiV1ComposerFillTemplatesTemplateIdVersionsVersionIdContentGetErrors[keyof DownloadVersionApiV1ComposerFillTemplatesTemplateIdVersionsVersionIdContentGetErrors];
+
+export type DownloadVersionApiV1ComposerFillTemplatesTemplateIdVersionsVersionIdContentGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: unknown;
+};
 
 export type ListPersonalPermissionsApiV1ComposerPersonalPermissionsGetData = {
     body?: never;

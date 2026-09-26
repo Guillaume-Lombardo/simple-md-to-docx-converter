@@ -1,7 +1,7 @@
 # Template and account administration interface
 
 The **Administration** navigation entry opens `/admin` for administrators. Its setup hub links to
-**LLM settings**, **Templates**, and **Users**. Templates at `/templates` remain visible to every
+**LLM settings**, **Templates**, **Typed fill templates**, and **Users**. Style references at `/templates` remain visible to every
 authenticated user, including non-administrators. Existing `/composer/connections` remains the
 personal-connection route for users with that permission.
 
@@ -25,8 +25,11 @@ presence after submission. Revocation, rotation, provider outages and disabled p
 remove existing owner drafts or exports. Production deployments display the immutable operator
 destination ceiling and permit the administrator to disable or re-enable model access within it.
 
-Current **Templates** are Pandoc DOCX/PPTX style references. Structured typed filling templates
-are a separate planned capability and do not appear in this setup flow.
+**Templates** are Pandoc DOCX/PPTX style references. **Typed fill templates** opens the separate
+private Word field-filling directory. It does not change a Pandoc style reference or confer
+access to private author entries. An administrator can manage only their own typed templates or
+ones explicitly shared with them; their role alone does not permit access to another user's
+private content. Non-administrator owners use the same typed-template page from Composer.
 
 The authenticated Next.js interface is available at `/templates`. Unauthenticated requests are
 sent to `/login` by the frontend after the FastAPI session authority rejects the session. Dynamic
@@ -63,6 +66,17 @@ A stale page therefore receives the stable precondition error instead of overwri
 change. Archive and permanent deletion require explicit browser confirmation. All permission
 checks are repeated in the service after authentication; hiding owner controls from other users is
 only a presentation aid.
+
+## Typed fill templates
+
+Upload a DOCX containing supported named content controls together with its field schema.
+The form creates an immutable first version; replacing it creates another exact version.
+The server scans uploads before parsing and validates the complete OOXML package, schema,
+controls, and resource bounds. Owners can list versions and grant or revoke a named user's
+access. Every replacement and grant uses `If-Match` so a concurrent update cannot be silently
+overwritten. Only the owner may change content or grants, even when an administrator has a
+read grant. A template grant does not grant access to any author entry. See the
+[Composer guide](composer.md#fill-a-typed-word-template) for review and publication.
 
 ## Administrator users tab
 

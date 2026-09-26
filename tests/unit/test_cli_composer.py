@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 from types import SimpleNamespace
@@ -21,6 +22,11 @@ DRAFT_ID = "00000000-0000-4000-8000-000000000303"
 PROPOSAL_ID = "00000000-0000-4000-8000-000000000404"
 REVISION_ID = "00000000-0000-4000-8000-000000000505"
 STEP_ID = "00000000-0000-4000-8000-000000000606"
+AUTHOR_ID = "00000000-0000-4000-8000-000000000707"
+QUESTION_ID = "00000000-0000-4000-8000-000000000b0b"
+TEMPLATE_ID = "00000000-0000-4000-8000-000000000808"
+VERSION_ID = "00000000-0000-4000-8000-000000000909"
+PLAN_ID = "00000000-0000-4000-8000-000000000a0a"
 
 
 def _connection(**overrides: object) -> dict[str, object]:
@@ -1111,6 +1117,334 @@ def test_model_step_start_binds_exact_visible_connection_and_private_text(
         "content": content,
         "max_output_tokens": 32,
     }
+
+
+def test_model_step_selected_author_uses_exact_preview_and_frozen_refs(
+    remote, tmp_path, capsys
+) -> None:
+    _profile, _constructor, client = remote
+    content = "Summarize the approved findings."
+    transmitted = (
+        content
+        + "\n\nSelected author records (reviewed data; preserve provenance):\n"
+        + '[{"fields":{},"id":"'
+        + AUTHOR_ID
+        + '","name":"Ada","version":3}]'
+    )
+    digest = hashlib.sha256(transmitted.encode()).hexdigest()
+    source = tmp_path / "approved.txt"
+    source.write_text(content, encoding="utf-8")
+    source.chmod(0o600)
+    client.request.side_effect = (
+        ConversionHttpResponse(200, _connection()),
+        ConversionHttpResponse(
+            200,
+            {"maximum_model_request_bytes": 4096, "maximum_output_tokens": 64},
+        ),
+        ConversionHttpResponse(
+            200,
+            {
+                "transmitted_content": transmitted,
+                "author_refs": [{"id": AUTHOR_ID, "version": 3}],
+                "preview_digest": digest,
+            },
+        ),
+        ConversionHttpResponse(202, _model_step()),
+    )
+    assert (
+        main(
+            (
+                "--json",
+                "--non-interactive",
+                "composer",
+                "model-steps",
+                "start",
+                DRAFT_ID,
+                CONNECTION_ID,
+                "--content-file",
+                str(source),
+                "--author",
+                AUTHOR_ID,
+                "--max-output-tokens",
+                "32",
+                "--etag",
+                '"draft-2"',
+                "--idempotency-key",
+                "selected-1",
+                "--force",
+            )
+        )
+        == 0
+    )
+    output = capsys.readouterr()
+    assert transmitted not in output.out + output.err
+    _connection_call, _capabilities_call, preview, start = client.request.call_args_list
+    assert preview.args == (
+        "POST",
+        f"/api/v1/composer/drafts/{DRAFT_ID}/model-steps/preview",
+    )
+    assert preview.kwargs["headers"]["If-Match"] == '"draft-2"'
+    assert json.loads(preview.kwargs["body"]) == {
+        "connection_id": CONNECTION_ID,
+        "approved_endpoint": "https://llm.example/v1",
+        "approved_model": "small-model",
+        "content": content,
+        "max_output_tokens": 32,
+        "author_ids": [AUTHOR_ID],
+    }
+    assert json.loads(start.kwargs["body"]) == {
+        "connection_id": CONNECTION_ID,
+        "approved_endpoint": "https://llm.example/v1",
+        "approved_model": "small-model",
+        "content": content,
+        "max_output_tokens": 32,
+        "author_refs": [{"id": AUTHOR_ID, "version": 3}],
+        "author_preview_digest": digest,
+    }
+
+
+def test_model_step_rejects_changed_author_preview_before_start(
+    remote, tmp_path, capsys
+) -> None:
+    _profile, _constructor, client = remote
+    source = tmp_path / "approved.txt"
+    source.write_text("Approved content", encoding="utf-8")
+    source.chmod(0o600)
+    unapproved = (
+        "Approved content\n\nSelected author records "
+        "(reviewed data; preserve provenance):\nsecret stale author payload"
+    )
+    client.request.side_effect = (
+        ConversionHttpResponse(200, _connection()),
+        ConversionHttpResponse(
+            200,
+            {"maximum_model_request_bytes": 4096, "maximum_output_tokens": 64},
+        ),
+        ConversionHttpResponse(
+            200,
+            {
+                "transmitted_content": unapproved,
+                "author_refs": [{"id": AUTHOR_ID, "version": 3}],
+                "preview_digest": "0" * 64,
+            },
+        ),
+    )
+    command = (
+        "--non-interactive",
+        "composer",
+        "model-steps",
+        "start",
+        DRAFT_ID,
+        CONNECTION_ID,
+        "--content-file",
+        str(source),
+        "--author",
+        AUTHOR_ID,
+        "--max-output-tokens",
+        "32",
+        "--etag",
+        '"draft-2"',
+        "--idempotency-key",
+        "selected-2",
+        "--force",
+    )
+    assert main(command) == 1
+    assert client.request.call_count == 3
+    assert "secret stale author payload" not in capsys.readouterr().err
+
+    client.reset_mock()
+    client.request.side_effect = (
+        ConversionHttpResponse(200, _connection()),
+        ConversionHttpResponse(
+            200,
+            {"maximum_model_request_bytes": 4096, "maximum_output_tokens": 64},
+        ),
+    )
+    assert main((*command, "--author", AUTHOR_ID)) == 1
+    assert client.request.call_count == 2
+    assert "selected more than once" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "changed",
+    (
+        {"transmitted_content": None},
+        {"author_refs": [{"id": USER_ID, "version": 3}]},
+        {"author_refs": [{"id": AUTHOR_ID, "version": True}]},
+    ),
+)
+def test_model_step_rejects_malformed_author_preview_before_start(
+    remote, tmp_path, capsys, changed: dict[str, object]
+) -> None:
+    _profile, _constructor, client = remote
+    content = "Approved content"
+    transmitted = (
+        content
+        + "\n\nSelected author records (reviewed data; preserve provenance):\n"
+        + '[{"fields":{},"id":"'
+        + AUTHOR_ID
+        + '","name":"Ada","version":3}]'
+    )
+    source = tmp_path / "approved.txt"
+    source.write_text(content, encoding="utf-8")
+    source.chmod(0o600)
+    preview = {
+        "transmitted_content": transmitted,
+        "author_refs": [{"id": AUTHOR_ID, "version": 3}],
+        "preview_digest": hashlib.sha256(transmitted.encode()).hexdigest(),
+        **changed,
+    }
+    client.request.side_effect = (
+        ConversionHttpResponse(200, _connection()),
+        ConversionHttpResponse(
+            200,
+            {"maximum_model_request_bytes": 4096, "maximum_output_tokens": 64},
+        ),
+        ConversionHttpResponse(200, preview),
+    )
+    assert (
+        main(
+            (
+                "--non-interactive",
+                "composer",
+                "model-steps",
+                "start",
+                DRAFT_ID,
+                CONNECTION_ID,
+                "--content-file",
+                str(source),
+                "--author",
+                AUTHOR_ID,
+                "--max-output-tokens",
+                "16",
+                "--etag",
+                '"draft-2"',
+                "--idempotency-key",
+                "bad-preview",
+                "--force",
+            )
+        )
+        == 1
+    )
+    assert client.request.call_count == 3
+    assert transmitted not in capsys.readouterr().err
+
+
+def test_model_step_selected_author_displays_exact_transmitted_prompt(
+    remote, tmp_path, mocker, capsys
+) -> None:
+    _profile, _constructor, client = remote
+    content = "Review this result."
+    transmitted = (
+        content
+        + "\n\nSelected author records (reviewed data; preserve provenance):\n"
+        + '[{"fields":{},"id":"'
+        + AUTHOR_ID
+        + '","name":"Ada","version":3}]'
+    )
+    source = tmp_path / "approved.txt"
+    source.write_text(content, encoding="utf-8")
+    source.chmod(0o600)
+    mocker.patch.object(composer.sys.stdin, "isatty", return_value=True)
+    mocker.patch.object(composer.sys.stderr, "isatty", return_value=True)
+    mocker.patch.object(composer.sys.stdin, "readline", return_value="no\n")
+    client.request.side_effect = (
+        ConversionHttpResponse(200, _connection()),
+        ConversionHttpResponse(
+            200,
+            {"maximum_model_request_bytes": 4096, "maximum_output_tokens": 64},
+        ),
+        ConversionHttpResponse(
+            200,
+            {
+                "transmitted_content": transmitted,
+                "author_refs": [{"id": AUTHOR_ID, "version": 3}],
+                "preview_digest": hashlib.sha256(transmitted.encode()).hexdigest(),
+            },
+        ),
+    )
+    assert (
+        main(
+            (
+                "composer",
+                "model-steps",
+                "start",
+                DRAFT_ID,
+                CONNECTION_ID,
+                "--content-file",
+                str(source),
+                "--author",
+                AUTHOR_ID,
+                "--max-output-tokens",
+                "16",
+                "--etag",
+                '"draft-2"',
+                "--idempotency-key",
+                "preview-2",
+            )
+        )
+        == 1
+    )
+    output = capsys.readouterr()
+    assert f"--- BEGIN TEXT ---\n{transmitted}\n--- END TEXT ---" in output.err
+    assert client.request.call_count == 3
+
+
+def test_model_step_answered_question_resume_binds_identity(
+    remote, tmp_path, capsys
+) -> None:
+    _profile, _constructor, client = remote
+    source = tmp_path / "approved.txt"
+    source.write_text("Answer: yes", encoding="utf-8")
+    source.chmod(0o600)
+    client.request.side_effect = (
+        ConversionHttpResponse(200, _connection()),
+        ConversionHttpResponse(
+            200,
+            {"maximum_model_request_bytes": 4096, "maximum_output_tokens": 64},
+        ),
+        ConversionHttpResponse(
+            202,
+            _model_step(answered_question_id=QUESTION_ID, intent="question"),
+        ),
+    )
+    assert (
+        main(
+            (
+                "--json",
+                "--non-interactive",
+                "composer",
+                "model-steps",
+                "start",
+                DRAFT_ID,
+                CONNECTION_ID,
+                "--content-file",
+                str(source),
+                "--max-output-tokens",
+                "16",
+                "--answered-question-id",
+                QUESTION_ID,
+                "--intent",
+                "question",
+                "--etag",
+                '"draft-2"',
+                "--idempotency-key",
+                "resume-1",
+                "--force",
+            )
+        )
+        == 0
+    )
+    assert (
+        json.loads(capsys.readouterr().out)["model_step"]["answered_question_id"]
+        == QUESTION_ID
+    )
+    assert (
+        json.loads(client.request.call_args_list[2].kwargs["body"])[
+            "answered_question_id"
+        ]
+        == QUESTION_ID
+    )
 
 
 def test_model_step_requires_explicit_approval_and_service_limits(
@@ -2228,3 +2562,431 @@ def test_multipart_rejects_injection_and_regenerates_colliding_boundary(mocker) 
     )
     assert content_type.endswith("boundary=markweave-second")
     assert b"markweave-first" in body
+
+
+def _private_json_file(tmp_path, name: str, value: dict[str, object]):
+    path = tmp_path / name
+    path.write_text(json.dumps(value), encoding="utf-8")
+    path.chmod(0o600)
+    return path
+
+
+def test_author_cli_crud_and_named_grants_use_exact_http(
+    remote, tmp_path, capsys
+) -> None:
+    _profile, _constructor, client = remote
+    fields = _private_json_file(
+        tmp_path,
+        "author.json",
+        {"email": {"value": "ada@example.org", "provenance": "supplied"}},
+    )
+    record = {"id": AUTHOR_ID, "name": "Ada", "version": 1, "etag": '"a-1"'}
+    client.request.side_effect = (
+        ConversionHttpResponse(200, {"authors": [record], "limit": 50, "offset": 0}),
+        ConversionHttpResponse(200, record),
+        ConversionHttpResponse(200, {"maximum_model_request_bytes": 4096}),
+        ConversionHttpResponse(200, {"maximum_model_request_bytes": 4096}),
+        ConversionHttpResponse(201, record),
+        ConversionHttpResponse(200, {"maximum_model_request_bytes": 4096}),
+        ConversionHttpResponse(200, {"maximum_model_request_bytes": 4096}),
+        ConversionHttpResponse(200, record),
+        ConversionHttpResponse(200, record),
+        ConversionHttpResponse(200, record),
+    )
+    assert main(("composer", "authors", "list")) == 0
+    assert main(("composer", "authors", "show", AUTHOR_ID)) == 0
+    assert (
+        main(
+            (
+                "composer",
+                "authors",
+                "create",
+                "--name",
+                "Ada",
+                "--fields-file",
+                str(fields),
+            )
+        )
+        == 0
+    )
+    assert (
+        main(
+            (
+                "composer",
+                "authors",
+                "update",
+                AUTHOR_ID,
+                "--name",
+                "Ada",
+                "--fields-file",
+                str(fields),
+                "--etag",
+                '"a-1"',
+            )
+        )
+        == 0
+    )
+    assert (
+        main(("composer", "authors", "grant", AUTHOR_ID, USER_ID, "--etag", '"a-2"'))
+        == 0
+    )
+    assert (
+        main(("composer", "authors", "revoke", AUTHOR_ID, USER_ID, "--etag", '"a-3"'))
+        == 0
+    )
+    calls = client.request.call_args_list
+    assert calls[0].args == ("GET", "/api/v1/composer/authors?offset=0&limit=50")
+    assert calls[1].args == ("GET", f"/api/v1/composer/authors/{AUTHOR_ID}")
+    assert calls[4].args == ("POST", "/api/v1/composer/authors")
+    assert calls[4].kwargs["csrf"] is True
+    assert json.loads(calls[4].kwargs["body"]) == {
+        "name": "Ada",
+        "fields": {"email": {"value": "ada@example.org", "provenance": "supplied"}},
+    }
+    assert calls[7].args == ("PATCH", f"/api/v1/composer/authors/{AUTHOR_ID}")
+    assert calls[7].kwargs["headers"]["If-Match"] == '"a-1"'
+    assert calls[8].args == (
+        "PUT",
+        f"/api/v1/composer/authors/{AUTHOR_ID}/grants/{USER_ID}",
+    )
+    assert calls[9].args == (
+        "DELETE",
+        f"/api/v1/composer/authors/{AUTHOR_ID}/grants/{USER_ID}",
+    )
+    assert "ada@example.org" not in capsys.readouterr().out
+
+
+def test_typed_template_cli_upload_versions_grants_and_download(
+    remote, tmp_path
+) -> None:
+    _profile, _constructor, client = remote
+    docx = tmp_path / "sample.docx"
+    docx.write_bytes(b"PK\x03\x04example")
+    schema = _private_json_file(tmp_path, "schema.json", {"fields": [], "repeats": []})
+    record = {"id": TEMPLATE_ID, "name": "Report", "version": 1}
+    version = {"id": VERSION_ID, "number": 1, "schema_version": 1}
+    client.request.side_effect = (
+        ConversionHttpResponse(200, {"templates": [record], "limit": 50, "offset": 0}),
+        ConversionHttpResponse(200, record),
+        ConversionHttpResponse(200, {"template_max_archive_bytes": 4096}),
+        ConversionHttpResponse(200, {"maximum_model_request_bytes": 4096}),
+        ConversionHttpResponse(201, record),
+        ConversionHttpResponse(200, {"template_max_archive_bytes": 4096}),
+        ConversionHttpResponse(200, {"maximum_model_request_bytes": 4096}),
+        ConversionHttpResponse(201, record),
+        ConversionHttpResponse(200, {"versions": [version], "limit": 50, "offset": 0}),
+        ConversionHttpResponse(200, version),
+        ConversionHttpResponse(200, record),
+        ConversionHttpResponse(200, record),
+    )
+    client.download.return_value = ConversionHttpResponse(200, bytes_written=8)
+    assert main(("composer", "fill-templates", "list")) == 0
+    assert main(("composer", "fill-templates", "show", TEMPLATE_ID)) == 0
+    assert (
+        main(
+            (
+                "composer",
+                "fill-templates",
+                "create",
+                str(docx),
+                "--name",
+                "Report",
+                "--schema-file",
+                str(schema),
+            )
+        )
+        == 0
+    )
+    assert (
+        main(
+            (
+                "composer",
+                "fill-templates",
+                "replace",
+                TEMPLATE_ID,
+                str(docx),
+                "--schema-file",
+                str(schema),
+                "--etag",
+                '"t-1"',
+            )
+        )
+        == 0
+    )
+    assert main(("composer", "fill-templates", "versions", TEMPLATE_ID)) == 0
+    assert main(("composer", "fill-templates", "version", TEMPLATE_ID, VERSION_ID)) == 0
+    assert (
+        main(
+            (
+                "composer",
+                "fill-templates",
+                "grant",
+                TEMPLATE_ID,
+                USER_ID,
+                "--etag",
+                '"t-2"',
+            )
+        )
+        == 0
+    )
+    assert (
+        main(
+            (
+                "composer",
+                "fill-templates",
+                "revoke",
+                TEMPLATE_ID,
+                USER_ID,
+                "--etag",
+                '"t-3"',
+            )
+        )
+        == 0
+    )
+    assert (
+        main(
+            (
+                "composer",
+                "fill-templates",
+                "download",
+                TEMPLATE_ID,
+                VERSION_ID,
+                "--output",
+                str(tmp_path / "saved.docx"),
+            )
+        )
+        == 0
+    )
+    calls = client.request.call_args_list
+    assert calls[4].args == ("POST", "/api/v1/composer/fill-templates")
+    assert calls[4].kwargs["csrf"] is True
+    assert b'filename="template.docx"' in calls[4].kwargs["body"]
+    assert b'name="schema"' in calls[4].kwargs["body"]
+    assert b"PK\x03\x04example" in calls[4].kwargs["body"]
+    assert str(tmp_path).encode() not in calls[4].kwargs["body"]
+    assert calls[7].args == (
+        "POST",
+        f"/api/v1/composer/fill-templates/{TEMPLATE_ID}/versions",
+    )
+    assert calls[7].kwargs["headers"]["If-Match"] == '"t-1"'
+    assert calls[10].args == (
+        "PUT",
+        f"/api/v1/composer/fill-templates/{TEMPLATE_ID}/grants/{USER_ID}",
+    )
+    assert calls[11].args == (
+        "DELETE",
+        f"/api/v1/composer/fill-templates/{TEMPLATE_ID}/grants/{USER_ID}",
+    )
+    validator = client.download.call_args.kwargs["validate_headers"]
+    validator(
+        {"x-content-type-options": "nosniff", "content-type": composer._DOCX_MEDIA}
+    )
+    with pytest.raises(composer.CliError):
+        validator({"content-type": "text/html"})
+
+
+def test_fill_plan_cli_review_publish_and_regenerate_use_preconditions(
+    remote, tmp_path
+) -> None:
+    _profile, _constructor, client = remote
+    values = _private_json_file(tmp_path, "values.json", {"author.name": "Ada"})
+    provenance = _private_json_file(
+        tmp_path, "provenance.json", {"author.name": {"kind": "human_edited"}}
+    )
+    plan = {"id": PLAN_ID, "state": "pending", "version": 1}
+    revision = {"id": REVISION_ID, "number": 3, "operation": "fill_template"}
+    client.request.side_effect = (
+        ConversionHttpResponse(200, {"plans": [plan], "limit": 50, "offset": 0}),
+        ConversionHttpResponse(200, plan),
+        ConversionHttpResponse(200, {"maximum_model_request_bytes": 4096}),
+        ConversionHttpResponse(200, {"maximum_model_request_bytes": 4096}),
+        ConversionHttpResponse(201, plan),
+        ConversionHttpResponse(200, {"maximum_model_request_bytes": 4096}),
+        ConversionHttpResponse(200, {"maximum_model_request_bytes": 4096}),
+        ConversionHttpResponse(200, {"maximum_model_request_bytes": 4096}),
+        ConversionHttpResponse(200, plan),
+        ConversionHttpResponse(200, plan),
+        ConversionHttpResponse(201, revision),
+        ConversionHttpResponse(201, revision),
+    )
+    assert main(("composer", "fill-plans", "list", DRAFT_ID)) == 0
+    assert main(("composer", "fill-plans", "show", DRAFT_ID, PLAN_ID)) == 0
+    base = ("--etag", '"draft-1"', "--idempotency-key", "plan-1")
+    assert (
+        main(
+            (
+                "composer",
+                "fill-plans",
+                "create",
+                DRAFT_ID,
+                "--source-revision",
+                REVISION_ID,
+                "--template",
+                TEMPLATE_ID,
+                "--template-version",
+                VERSION_ID,
+                "--author",
+                AUTHOR_ID,
+                "--values-file",
+                str(values),
+                *base,
+            )
+        )
+        == 0
+    )
+    assert (
+        main(
+            (
+                "composer",
+                "fill-plans",
+                "update",
+                DRAFT_ID,
+                PLAN_ID,
+                "--values-file",
+                str(values),
+                "--provenance-file",
+                str(provenance),
+                "--etag",
+                '"plan-1"',
+                "--idempotency-key",
+                "update-1",
+            )
+        )
+        == 0
+    )
+    assert (
+        main(
+            (
+                "composer",
+                "fill-plans",
+                "approve",
+                DRAFT_ID,
+                PLAN_ID,
+                "--etag",
+                '"plan-2"',
+                "--idempotency-key",
+                "approve-1",
+            )
+        )
+        == 0
+    )
+    assert (
+        main(
+            (
+                "composer",
+                "fill-plans",
+                "publish",
+                DRAFT_ID,
+                PLAN_ID,
+                "--etag",
+                '"plan-3"',
+                "--idempotency-key",
+                "publish-1",
+            )
+        )
+        == 0
+    )
+    assert (
+        main(
+            (
+                "composer",
+                "fill-plans",
+                "regenerate",
+                DRAFT_ID,
+                REVISION_ID,
+                "--etag",
+                '"draft-4"',
+                "--idempotency-key",
+                "regen-1",
+            )
+        )
+        == 0
+    )
+    calls = client.request.call_args_list
+    assert calls[4].args == ("POST", f"/api/v1/composer/drafts/{DRAFT_ID}/fill-plans")
+    assert json.loads(calls[4].kwargs["body"])["author_ids"] == [AUTHOR_ID]
+    assert calls[4].kwargs["headers"] == {
+        "Content-Type": "application/json",
+        "If-Match": '"draft-1"',
+        "Idempotency-Key": "plan-1",
+    }
+    assert calls[8].args == (
+        "PATCH",
+        f"/api/v1/composer/drafts/{DRAFT_ID}/fill-plans/{PLAN_ID}",
+    )
+    assert (
+        json.loads(calls[8].kwargs["body"])["provenance"]["author.name"]["kind"]
+        == "human_edited"
+    )
+    assert calls[10].args[1].endswith(f"/fill-plans/{PLAN_ID}/publish")
+    assert calls[11].args[1].endswith(f"/revisions/{REVISION_ID}/regenerations")
+
+
+def test_t91_private_json_is_checked_before_mutation(remote, tmp_path, capsys) -> None:
+    _profile, _constructor, client = remote
+    fields = tmp_path / "fields.json"
+    fields.write_text('{"email": {"value": "private"}}', encoding="utf-8")
+    fields.chmod(0o644)
+    client.request.return_value = ConversionHttpResponse(
+        200, {"maximum_model_request_bytes": 4096}
+    )
+    assert (
+        main(
+            (
+                "composer",
+                "authors",
+                "create",
+                "--name",
+                "Ada",
+                "--fields-file",
+                str(fields),
+            )
+        )
+        == 1
+    )
+    assert client.request.call_count == 1
+    assert "private" not in capsys.readouterr().err
+    fields.chmod(0o600)
+    fields.write_text("not json", encoding="utf-8")
+    client.reset_mock()
+    client.request.return_value = ConversionHttpResponse(
+        200, {"maximum_model_request_bytes": 4096}
+    )
+    assert (
+        main(
+            (
+                "composer",
+                "authors",
+                "create",
+                "--name",
+                "Ada",
+                "--fields-file",
+                str(fields),
+            )
+        )
+        == 1
+    )
+    assert client.request.call_count == 1
+    assert "not json" not in capsys.readouterr().err
+    for malformed in ('{"email":1,"email":2}', '{"email":NaN}'):
+        fields.write_text(malformed, encoding="utf-8")
+        client.reset_mock()
+        client.request.return_value = ConversionHttpResponse(
+            200, {"maximum_model_request_bytes": 4096}
+        )
+        assert (
+            main(
+                (
+                    "composer",
+                    "authors",
+                    "create",
+                    "--name",
+                    "Ada",
+                    "--fields-file",
+                    str(fields),
+                )
+            )
+            == 1
+        )
+        assert client.request.call_count == 1
+        assert malformed not in capsys.readouterr().err

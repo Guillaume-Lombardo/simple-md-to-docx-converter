@@ -49,6 +49,11 @@ const stepSchema = v.object({
   created_at: v.string(),
   updated_at: v.string(),
 });
+const promptPreviewSchema = v.object({
+  transmitted_content: v.string(),
+  author_refs: v.array(v.unknown()),
+  preview_digest: v.string(),
+});
 const questionSchema = v.object({
   id: v.string(),
   draft_id: v.string(),
@@ -58,6 +63,7 @@ const questionSchema = v.object({
   text: v.string(),
   answer_message_id: v.nullable(v.string()),
   answer_content: v.nullable(v.string()),
+  source_author_ids: v.optional(v.array(v.string())),
   created_at: v.string(),
   answered_at: v.nullable(v.string()),
 });
@@ -144,6 +150,7 @@ export type ComposerDraftSummary = v.InferOutput<typeof draftSummarySchema>;
 export type ComposerMessage = v.InferOutput<typeof messageSchema>;
 export type ComposerProposal = v.InferOutput<typeof proposalSchema>;
 export type ComposerStep = v.InferOutput<typeof stepSchema>;
+export type ComposerPromptPreview = v.InferOutput<typeof promptPreviewSchema>;
 export type ComposerQuestion = v.InferOutput<typeof questionSchema>;
 export type ComposerRevision = v.InferOutput<typeof revisionSchema>;
 export type ComposerRevisionSummary = v.InferOutput<
@@ -354,6 +361,8 @@ export class ComposerWorkspaceApi {
       max_output_tokens: number;
       intent: "proposal" | "question";
       answered_question_id?: string;
+      author_refs?: unknown[];
+      author_preview_digest?: string;
     },
     key: string,
     signal?: AbortSignal,
@@ -366,6 +375,31 @@ export class ComposerWorkspaceApi {
         csrf: true,
         etag: draft.etag,
         idempotencyKey: key,
+        method: "POST",
+        signal,
+      },
+    );
+  }
+
+  previewStep(
+    draft: Pick<ComposerDraft, "id" | "etag">,
+    input: {
+      connection_id: string;
+      approved_endpoint: string;
+      approved_model: string;
+      content: string;
+      author_ids: string[];
+      max_output_tokens: number;
+    },
+    signal?: AbortSignal,
+  ): Promise<ComposerPromptPreview> {
+    return this.transport.json(
+      `/api/v1/composer/drafts/${encodeURIComponent(draft.id)}/model-steps/preview`,
+      promptPreviewSchema,
+      {
+        body: JSON.stringify(input),
+        csrf: true,
+        etag: draft.etag,
         method: "POST",
         signal,
       },

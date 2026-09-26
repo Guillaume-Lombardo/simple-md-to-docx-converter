@@ -69,6 +69,7 @@ def test_composer_retention_uses_configured_window_and_bounded_batch(
     composer.cleanup_orphan_sources.return_value = 1
     content_audit = mocker.Mock(spec=ComposerContentAuditRepository)
     content_audit.cleanup_content_audit.return_value = 2
+    content_audit.cleanup_t91_audit.return_value = 2
     composer_audit = mocker.Mock(spec=ComposerConnectionAuditRepository)
     composer_audit.cleanup_connection_audit.return_value = 1
     service = RetentionService(
@@ -81,12 +82,15 @@ def test_composer_retention_uses_configured_window_and_bounded_batch(
         clock=lambda: now,
     )
 
-    assert service.cleanup(limit=3) == 6
+    assert service.cleanup(limit=3) == 8
     composer.cleanup_expired_drafts.assert_called_once_with(
         cutoff_at=now - timedelta(seconds=7200), limit=3
     )
     composer.cleanup_orphan_sources.assert_called_once_with(limit=3)
     content_audit.cleanup_content_audit.assert_called_once_with(
+        cutoff_at=now - timedelta(days=365), limit=3
+    )
+    content_audit.cleanup_t91_audit.assert_called_once_with(
         cutoff_at=now - timedelta(days=365), limit=3
     )
     composer_audit.cleanup_connection_audit.assert_called_once_with(

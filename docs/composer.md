@@ -50,15 +50,53 @@ Choose **Ask for missing information** when the assistant should return one expl
 The question remains pending across refresh and provider outages. Save your answer to link it to
 that question and the conversation. **Prepare answer for model** fills the exact question-and-answer
 text for your review; sending it starts a fresh authorized, bounded step. No worker waits while you
-answer, and saving the answer alone makes no document change or model call.
+answer, and saving the answer alone makes no document change or model call. If the original
+question used selected author entries, refresh their exact prompt preview before resuming; a
+revoked or changed entry blocks that step.
 
 Expand a proposal to inspect its result, provenance, proposed change, and validation state. Model
 statements are unverified unless you approve them; a model response does not create a citation.
 Accept the proposed text, enter a correction with your own value, or reject it. Rejection leaves
 the document unchanged. A stale decision after a concurrent edit asks you to reload and review.
 For approved Markdown proposals, **Publish approved text** creates a new immutable revision.
-Native Office editing and template filling are separate later capabilities; an unsupported
-publication returns a safe error and leaves the existing artifact intact.
+Native Office editing is a separate later capability; an unsupported publication returns a safe
+error and leaves the existing artifact intact.
+
+## Use author knowledge
+
+**Authors** opens the private author directory. Create an entry with a name and structured fields,
+and mark each field as supplied, cited with a source reference, model suggested, human approved, or
+human edited. An unresolved fact has no value until you review it. The owner may grant an entry to
+one named user and revoke that grant; access changes are audited. Administrator status alone does
+not grant access to another owner's entry. Author information is included in a model request only
+when you select it and review the exact transmitted prompt. Composer rechecks access when the
+request starts, before sending it, when a paused step resumes, and before its result is published.
+If access or the entry version changes, the step stops without publishing the stale result.
+
+Revocation prevents new disclosure, while an already published revision retains its provenance
+under its own owner and retention rules. A style-reference template never grants access to an
+author entry.
+
+## Fill a typed Word template
+
+**Fill templates** manages private DOCX templates with an explicit field schema. These are distinct
+from the style-reference templates used by ordinary conversions. The schema names required and
+optional text, date, boolean, and integer fields, their constraints, any authored defaults, and
+bounded paragraph repeats. An owner may share a template with a named user without sharing any
+author entries. Uploads are scanned before DOCX parsing; unsupported content controls or unsafe
+Office packages are rejected. A replacement creates a new immutable version, leaving prior
+versions available to authorized users.
+
+In a draft's **Fill template** panel, select one exact template version and any authorized author
+entries. Composer proposes matching author values and asks durable questions for missing or
+ambiguous fields. Edit the values and provenance, then approve the complete plan. Approval makes
+no document change by itself. **Publish fill** creates a new immutable DOCX revision whose preview
+and download are identical. The revision records the exact source and template digests, schema,
+approved values, provenance, author references, and component version. It does not ask a model to
+fill the document. **Regenerate** uses those retained approved inputs and the exact template
+version, checks the output digest, and makes no model call. A changed template or value requires a
+new plan and review. Typed filling supports the qualified content-control subset; general Word
+editing remains a later capability.
 
 ## Generate a reviewed document
 

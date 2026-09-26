@@ -25,6 +25,7 @@ from markweave.composer.revisions import (
     direct_publish_lineage,
 )
 from markweave.persistence.composer.audit import SYSTEM_ACTOR_ID, record_content_audit
+from markweave.persistence.composer.author_knowledge import SqlAuthorKnowledgeRepository
 from markweave.persistence.composer.common import (
     DEFAULT_PAGE_LIMIT,
     PageOrder,
@@ -35,10 +36,13 @@ from markweave.persistence.composer.common import (
     validate_page,
     validate_page_order,
 )
+from markweave.persistence.composer.typed_templates import SqlTypedTemplateRepository
 from markweave.persistence.errors import PersistenceError
 from markweave.persistence.schema import (
     ComposerArtifactRow,
     ComposerDraftRow,
+    ComposerFillPlanRow,
+    ComposerModelStepRow,
     ComposerProposalRow,
     ComposerRevisionRow,
 )
@@ -52,6 +56,8 @@ from markweave.storage import (
 )
 
 _MAX_IDEMPOTENCY_KEY_LENGTH = 128
+_SHA256_HEX_LENGTH = 64
+_MATCHING_ARTIFACT_COUNT = 2
 
 
 def _snapshot(row: ComposerRevisionRow) -> RevisionSnapshot:
@@ -63,6 +69,7 @@ def _snapshot(row: ComposerRevisionRow) -> RevisionSnapshot:
         model_identity=row.model_identity,
         provenance=row.provenance,
         operation=row.operation,
+        typed_fill_snapshot=row.typed_fill_snapshot,
     )
 
 
@@ -106,6 +113,7 @@ def _request_digest(
         "model_identity": snapshot.model_identity,
         "provenance": snapshot.provenance,
         "operation": snapshot.operation,
+        "typed_fill_snapshot": snapshot.typed_fill_snapshot,
         "restored_from": str(restored_from) if restored_from else None,
         "artifacts": [
             {
@@ -129,6 +137,217 @@ class _SqlComposerRevisions:
     _clock: Callable[[], datetime]
     _new_id: Callable[[], UUID]
     _publication_lease: timedelta
+
+    @staticmethod
+    def _require_proposal_author_access(
+        database: Session,
+        owner_id: UUID,
+        draft_id: UUID,
+        proposal: ComposerProposalRow,
+    ) -> None:
+        """Fence the model step's frozen author grants in the publication transaction."""
+
+        if not proposal.provenance.startswith("model-step:"):
+            return
+        try:
+            step_id = UUID(proposal.provenance.removeprefix("model-step:"))
+        except ValueError:
+            raise ComposerConflictError("Composer proposal origin changed") from None
+        step = database.scalar(
+            select(ComposerModelStepRow)
+            .where(
+                ComposerModelStepRow.id == str(step_id),
+                ComposerModelStepRow.draft_id == str(draft_id),
+                ComposerModelStepRow.owner_id == str(owner_id),
+                ComposerModelStepRow.proposal_id == proposal.id,
+                ComposerModelStepRow.state == "completed",
+            )
+            .with_for_update()
+        )
+        if step is None:
+            raise ComposerConflictError("Composer proposal origin changed")
+        try:
+            refs = json.loads(step.author_refs)
+            if not isinstance(refs, list):
+                raise ValueError
+            seen: set[UUID] = set()
+            for ref in refs:
+                if (
+                    not isinstance(ref, dict)
+                    or set(ref) != {"id", "version"}
+                    or type(ref["version"]) is not int
+                    or ref["version"] <= 0
+                ):
+                    raise ValueError
+                author_id = UUID(ref["id"])
+                if author_id in seen:
+                    raise ValueError
+                seen.add(author_id)
+                SqlAuthorKnowledgeRepository.require_access(
+                    database,
+                    owner_id,
+                    author_id,
+                    expected_version=ref["version"],
+                    for_update=True,
+                )
+        except ValueError, TypeError, LookupError, RuntimeError:
+            raise ComposerConflictError("Author access changed") from None
+
+    @staticmethod
+    def _validate_typed_fill(  # noqa: PLR0912, PLR0913, PLR0915, PLR0917 - publication fences
+        database: Session,
+        owner_id: UUID,
+        draft_id: UUID,
+        draft: ComposerDraftRow,
+        snapshot: RevisionSnapshot,
+        artifacts: tuple[ArtifactContent, ...] | None = None,
+    ) -> None:
+        if snapshot.typed_fill_snapshot is None:
+            if snapshot.operation in {"fill_template", "regenerate_fill"}:
+                raise ComposerConflictError("Typed fill snapshot is missing")
+            return
+        if snapshot.operation not in {"fill_template", "regenerate_fill", "restore"}:
+            raise ComposerConflictError("Typed fill operation is invalid")
+        try:
+            data = json.loads(snapshot.typed_fill_snapshot)
+            template_version_id = UUID(data["template_version_id"])
+            template_sha256 = data["template_docx_sha256"]
+            schema_sha256 = data["template_schema_sha256"]
+            approved_values = data["approved_values"]
+            author_refs = data["author_refs"]
+            source_revision_id = UUID(data["source_revision_id"])
+            source_sha256 = data["source_sha256"]
+            result_sha256 = data["result_sha256"]
+        except KeyError, ValueError, TypeError, AttributeError:
+            raise ComposerConflictError("Typed fill snapshot is invalid") from None
+        if (
+            not isinstance(data, dict)
+            or not isinstance(approved_values, dict)
+            or not isinstance(author_refs, list)
+            or not all(
+                isinstance(value, str) and len(value) == _SHA256_HEX_LENGTH
+                for value in (
+                    template_sha256,
+                    schema_sha256,
+                    source_sha256,
+                    result_sha256,
+                )
+            )
+        ):
+            raise ComposerConflictError("Typed fill snapshot is invalid")
+        if snapshot.approved_values != "{}" or snapshot.template_reference is not None:
+            raise ComposerConflictError("Typed fill metadata is inconsistent")
+        if snapshot.source.sha256 != source_sha256:
+            raise ComposerConflictError("Typed fill source changed")
+        if artifacts is not None:
+            downloads = [
+                item for item in artifacts if item.kind in {"download", "preview"}
+            ]
+            if (
+                len(downloads) != _MATCHING_ARTIFACT_COUNT
+                or any(
+                    item.media_type
+                    != "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    or hashlib.sha256(item.content).hexdigest() != result_sha256
+                    for item in downloads
+                )
+                or downloads[0].content != downloads[1].content
+            ):
+                raise ComposerConflictError("Typed fill artifacts do not match")
+        if snapshot.operation == "restore":
+            return
+        try:
+            SqlTypedTemplateRepository.require_version_access(
+                database,
+                owner_id,
+                template_version_id,
+                expected_docx_sha256=template_sha256,
+                expected_schema_sha256=schema_sha256,
+                for_update=True,
+            )
+        except LookupError, RuntimeError:
+            raise ComposerConflictError("Typed template access changed") from None
+        try:
+            for ref in author_refs:
+                frozen_version = int(ref["version"])
+                SqlAuthorKnowledgeRepository.require_access(
+                    database,
+                    owner_id,
+                    UUID(ref["id"]),
+                    expected_version=(
+                        frozen_version
+                        if snapshot.operation == "fill_template"
+                        else None
+                    ),
+                    for_update=True,
+                )
+        except LookupError, RuntimeError, KeyError, ValueError, TypeError:
+            raise ComposerConflictError("Author access changed") from None
+        if snapshot.operation == "regenerate_fill":
+            try:
+                parent_id = UUID(data["parent_revision_id"])
+            except KeyError, ValueError, TypeError:
+                raise ComposerConflictError("Regeneration parent is invalid") from None
+            parent = database.scalar(
+                select(ComposerRevisionRow).where(
+                    ComposerRevisionRow.id == str(parent_id),
+                    ComposerRevisionRow.draft_id == str(draft_id),
+                    ComposerRevisionRow.publication_state == "published",
+                )
+            )
+            if parent is None or parent.typed_fill_snapshot is None:
+                raise ComposerConflictError("Regeneration source is unavailable")
+            try:
+                frozen = json.loads(parent.typed_fill_snapshot)
+            except ValueError:
+                raise ComposerConflictError("Regeneration source is invalid") from None
+            if any(
+                frozen.get(key) != data.get(key)
+                for key in (
+                    "template_version_id",
+                    "template_docx_sha256",
+                    "template_schema_sha256",
+                    "approved_values",
+                    "provenance",
+                    "author_refs",
+                    "source_revision_id",
+                    "source_sha256",
+                    "result_sha256",
+                    "component_versions",
+                )
+            ):
+                raise ComposerConflictError("Regeneration inputs changed")
+            return
+        try:
+            plan_id = UUID(data["fill_plan_id"])
+            plan_version = int(data["fill_plan_version"])
+        except KeyError, ValueError, TypeError:
+            raise ComposerConflictError("Fill plan reference is invalid") from None
+        plan = database.scalar(
+            select(ComposerFillPlanRow)
+            .where(
+                ComposerFillPlanRow.id == str(plan_id),
+                ComposerFillPlanRow.draft_id == str(draft_id),
+                ComposerFillPlanRow.owner_id == str(owner_id),
+            )
+            .with_for_update()
+        )
+        if (
+            plan is None
+            or plan.state != "approved"
+            or plan.version != plan_version
+            or plan.draft_version != draft.version
+            or draft.current_revision_id != str(source_revision_id)
+            or plan.source_revision_id != str(source_revision_id)
+            or plan.template_version_id != str(template_version_id)
+            or plan.template_docx_sha256 != template_sha256
+            or plan.template_schema_sha256 != schema_sha256
+            or json.loads(plan.values_json) != approved_values
+            or json.loads(plan.provenance_json) != data.get("provenance")
+            or json.loads(plan.author_refs) != author_refs
+            or json.loads(plan.questions_json)
+        ):
+            raise ComposerConflictError("Fill plan changed before publication")
 
     def publish_revision(  # noqa: PLR0913, PLR0912, PLR0915 - two-phase publication
         self,
@@ -185,6 +404,9 @@ class _SqlComposerRevisions:
                         return _revision(database, existing)
                     raise ComposerConflictError("Revision publication is in progress")
                 self._require_etag(draft, if_match)
+                self._validate_typed_fill(
+                    database, owner_id, draft_id, draft, snapshot, artifacts
+                )
                 if snapshot.operation == "publish_draft":
                     parent = (
                         database.get(ComposerRevisionRow, draft.current_revision_id)
@@ -298,6 +520,9 @@ class _SqlComposerRevisions:
                         raise ComposerConflictError(
                             "Composer proposal requires review again"
                         )
+                    self._require_proposal_author_access(
+                        database, owner_id, draft_id, proposal
+                    )
                     approved_draft_content = proposal.decided_value
                 pending = database.scalar(
                     select(ComposerRevisionRow.id).where(
@@ -332,6 +557,7 @@ class _SqlComposerRevisions:
                     model_identity=snapshot.model_identity,
                     provenance=snapshot.provenance,
                     operation=snapshot.operation,
+                    typed_fill_snapshot=snapshot.typed_fill_snapshot,
                     restored_from_revision_id=(
                         str(restored_from_revision_id)
                         if restored_from_revision_id
@@ -382,6 +608,28 @@ class _SqlComposerRevisions:
                 if reserved is None or draft.version != reserved.expected_draft_version:
                     raise ComposerConflictError(
                         "Composer draft changed during publication"
+                    )
+                self._validate_typed_fill(
+                    database,
+                    owner_id,
+                    draft_id,
+                    draft,
+                    _snapshot(reserved),
+                    artifacts,
+                )
+                if approved_proposal_id is not None:
+                    proposal = database.scalar(
+                        select(ComposerProposalRow)
+                        .where(
+                            ComposerProposalRow.id == str(approved_proposal_id),
+                            ComposerProposalRow.draft_id == str(draft_id),
+                        )
+                        .with_for_update()
+                    )
+                    if proposal is None:
+                        raise ComposerConflictError("Composer proposal origin changed")
+                    self._require_proposal_author_access(
+                        database, owner_id, draft_id, proposal
                     )
                 reserved.publication_state = "published"
                 reserved.publication_token = None

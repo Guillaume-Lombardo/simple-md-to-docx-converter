@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -24,6 +25,11 @@ CONNECTION_ID = "00000000-0000-4000-8000-000000000101"
 DRAFT_ID = "00000000-0000-4000-8000-000000000303"
 REVISION_ID = "00000000-0000-4000-8000-000000000505"
 STEP_ID = "00000000-0000-4000-8000-000000000606"
+AUTHOR_ID = "00000000-0000-4000-8000-000000000707"
+TEMPLATE_ID = "00000000-0000-4000-8000-000000000808"
+VERSION_ID = "00000000-0000-4000-8000-000000000909"
+PLAN_ID = "00000000-0000-4000-8000-000000000a0a"
+USER_ID = "00000000-0000-4000-8000-000000000202"
 
 
 def _step_response(*, status: str = "running") -> bytes:
@@ -131,7 +137,31 @@ def _service(
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self) -> None:
             length = int(self.headers["Content-Length"])
-            received.append(json.loads(self.rfile.read(length)))
+            body = json.loads(self.rfile.read(length))
+            received.append(body)
+            if self.path.endswith("/model-steps/preview"):
+                transmitted = (
+                    body["content"]
+                    + "\n\nSelected author records (reviewed data; preserve provenance):\n"
+                    + '[{"fields":{},"id":"'
+                    + AUTHOR_ID
+                    + '","name":"Ada","version":3}]'
+                )
+                payload = json.dumps(
+                    {
+                        "transmitted_content": transmitted,
+                        "author_refs": [{"id": AUTHOR_ID, "version": 3}],
+                        "preview_digest": hashlib.sha256(
+                            transmitted.encode("utf-8")
+                        ).hexdigest(),
+                    }
+                ).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
             if self.path.endswith("/model-steps"):
                 if model_error_text is not None:
                     payload = json.dumps(
@@ -257,6 +287,239 @@ def _private_file(path: Path, value: str) -> None:
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
         stream.write(value)
+
+
+@contextmanager
+def _typed_service() -> Iterator[tuple[str, list[dict[str, Any]]]]:
+    requests: list[dict[str, Any]] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def _send(self, status: int, value: dict[str, Any]) -> None:
+            content = json.dumps(value).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
+
+        def _record(self) -> None:
+            length = int(self.headers.get("Content-Length", "0"))
+            requests.append(
+                {
+                    "method": self.command,
+                    "path": self.path,
+                    "body": self.rfile.read(length),
+                    "content_type": self.headers.get("Content-Type"),
+                    "cookie": self.headers.get("Cookie"),
+                    "csrf": self.headers.get("X-CSRF-Token"),
+                    "if_match": self.headers.get("If-Match"),
+                    "idempotency_key": self.headers.get("Idempotency-Key"),
+                }
+            )
+
+        def do_GET(self) -> None:
+            self._record()
+            if self.path == "/api/v1/composer/capabilities":
+                self._send(200, {"maximum_model_request_bytes": 4096})
+            elif self.path == "/api/v1/template-context":
+                self._send(200, {"template_max_archive_bytes": 4096})
+            else:
+                self._send(404, {"error": {"code": "NOT_FOUND", "message": "Missing."}})
+
+        def do_POST(self) -> None:
+            self._record()
+            if self.path == "/api/v1/composer/authors":
+                self._send(201, {"id": AUTHOR_ID, "name": "Ada", "version": 1})
+            elif self.path == "/api/v1/composer/fill-templates":
+                self._send(201, {"id": TEMPLATE_ID, "name": "Report", "version": 1})
+            elif self.path.endswith("/fill-plans"):
+                self._send(201, {"id": PLAN_ID, "state": "pending", "version": 1})
+            elif self.path.endswith("/approve"):
+                self._send(200, {"id": PLAN_ID, "state": "approved", "version": 3})
+            elif self.path.endswith(("/publish", "/regenerations")):
+                self._send(
+                    201, {"id": REVISION_ID, "number": 3, "operation": "fill_template"}
+                )
+            else:
+                self._send(404, {"error": {"code": "NOT_FOUND", "message": "Missing."}})
+
+        def do_PATCH(self) -> None:
+            self._record()
+            if self.path.endswith(f"/fill-plans/{PLAN_ID}"):
+                self._send(200, {"id": PLAN_ID, "state": "pending", "version": 2})
+            else:
+                self._send(200, {"id": AUTHOR_ID, "name": "Ada", "version": 2})
+
+        def do_PUT(self) -> None:
+            self._record()
+            self._send(200, {"id": AUTHOR_ID, "name": "Ada", "version": 3})
+
+        def do_DELETE(self) -> None:
+            self._record()
+            self._send(200, {"id": TEMPLATE_ID, "name": "Report", "version": 3})
+
+        def log_message(self, format: str, *args: object) -> None:
+            del format, args
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}", requests
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
+def test_installed_typed_composer_cli_binds_session_csrf_versions_and_private_files(
+    tmp_path: Path,
+) -> None:
+    fields = tmp_path / "fields.json"
+    schema = tmp_path / "schema.json"
+    values = tmp_path / "values.json"
+    provenance = tmp_path / "provenance.json"
+    _private_file(
+        fields, '{"email":{"value":"ada@example.org","provenance":"supplied"}}'
+    )
+    _private_file(schema, '{"fields":[],"repeats":[]}')
+    _private_file(values, '{"author.name":"Ada"}')
+    _private_file(provenance, '{"author.name":{"kind":"human_edited"}}')
+    docx = tmp_path / "report.docx"
+    docx.write_bytes(b"PK\x03\x04typed-corpus")
+    common = ("--etag", '"1"', "--idempotency-key", "typed-1")
+
+    with _typed_service() as (url, requests):
+        env = _profile(tmp_path, url)
+        runs = (
+            _run(
+                env,
+                "--json",
+                "composer",
+                "authors",
+                "create",
+                "--name",
+                "Ada",
+                "--fields-file",
+                str(fields),
+            ),
+            _run(
+                env,
+                "--json",
+                "composer",
+                "authors",
+                "grant",
+                AUTHOR_ID,
+                USER_ID,
+                "--etag",
+                '"1"',
+            ),
+            _run(
+                env,
+                "--json",
+                "composer",
+                "fill-templates",
+                "create",
+                str(docx),
+                "--name",
+                "Report",
+                "--schema-file",
+                str(schema),
+            ),
+            _run(
+                env,
+                "--json",
+                "composer",
+                "fill-templates",
+                "revoke",
+                TEMPLATE_ID,
+                USER_ID,
+                "--etag",
+                '"1"',
+            ),
+            _run(
+                env,
+                "--json",
+                "composer",
+                "fill-plans",
+                "create",
+                DRAFT_ID,
+                "--source-revision",
+                REVISION_ID,
+                "--template",
+                TEMPLATE_ID,
+                "--template-version",
+                VERSION_ID,
+                "--values-file",
+                str(values),
+                *common,
+            ),
+            _run(
+                env,
+                "--json",
+                "composer",
+                "fill-plans",
+                "update",
+                DRAFT_ID,
+                PLAN_ID,
+                "--values-file",
+                str(values),
+                "--provenance-file",
+                str(provenance),
+                *common,
+            ),
+            _run(
+                env,
+                "--json",
+                "composer",
+                "fill-plans",
+                "approve",
+                DRAFT_ID,
+                PLAN_ID,
+                *common,
+            ),
+            _run(
+                env,
+                "--json",
+                "composer",
+                "fill-plans",
+                "publish",
+                DRAFT_ID,
+                PLAN_ID,
+                *common,
+            ),
+            _run(
+                env,
+                "--json",
+                "composer",
+                "fill-plans",
+                "regenerate",
+                DRAFT_ID,
+                REVISION_ID,
+                *common,
+            ),
+        )
+
+    assert all(run.returncode == 0 for run in runs), [run.stderr for run in runs]
+    mutations = [request for request in requests if request["method"] != "GET"]
+    assert len(mutations) == len(runs)
+    assert all(
+        request["cookie"] == "session=opaque" and request["csrf"] == "csrf-opaque"
+        for request in mutations
+    )
+    assert mutations[1]["if_match"] == '"1"'
+    assert mutations[4]["idempotency_key"] == "typed-1"
+    assert mutations[4]["if_match"] == '"1"'
+    assert json.loads(mutations[4]["body"])["template_version_id"] == VERSION_ID
+    assert (
+        json.loads(mutations[5]["body"])["provenance"]["author.name"]["kind"]
+        == "human_edited"
+    )
+    assert mutations[2]["content_type"].startswith("multipart/form-data; boundary=")
+    assert b'filename="template.docx"' in mutations[2]["body"]
+    assert b"PK\x03\x04typed-corpus" in mutations[2]["body"]
+    assert all(str(tmp_path).encode() not in request["body"] for request in mutations)
+    assert all("ada@example.org" not in run.stdout + run.stderr for run in runs)
 
 
 def test_installed_cli_admin_policy_uses_session_csrf_and_etag(tmp_path: Path) -> None:
@@ -473,6 +736,45 @@ def test_installed_cli_starts_reads_and_cancels_approved_model_step(
     assert all(
         content not in run.stdout + run.stderr for run in (started, status, cancelled)
     )
+
+
+def test_installed_cli_previews_selected_author_before_model_transmission(
+    tmp_path: Path,
+) -> None:
+    content = "Summarize Ada's approved findings."
+    content_file = tmp_path / "approved.txt"
+    _private_file(content_file, content)
+    with _service() as (url, received):
+        result = _run(
+            _profile(tmp_path, url),
+            "--json",
+            "--non-interactive",
+            "composer",
+            "model-steps",
+            "start",
+            DRAFT_ID,
+            CONNECTION_ID,
+            "--content-file",
+            str(content_file),
+            "--author",
+            AUTHOR_ID,
+            "--max-output-tokens",
+            "16",
+            "--etag",
+            '"draft-2"',
+            "--idempotency-key",
+            "selected-1",
+            "--force",
+        )
+    assert result.returncode == 0, result.stderr
+    assert len(received) == 2
+    preview, started = received
+    assert preview["author_ids"] == [AUTHOR_ID]
+    assert preview["content"] == content
+    assert started["author_refs"] == [{"id": AUTHOR_ID, "version": 3}]
+    assert started["content"] == content
+    assert len(started["author_preview_digest"]) == 64
+    assert content not in result.stdout + result.stderr
 
 
 def test_installed_cli_accepts_stdin_with_explicit_force(tmp_path: Path) -> None:

@@ -68,6 +68,7 @@ and the explicit trusted-upstream and insecure SSH-tunnel modes with their restr
 - [Python package and optional dependencies](docs/python-distribution.md)
 - [Provision users from a startup CSV and require password renewal](docs/authentication.md#startup-csv-provisioning)
 - [Conversion interface](docs/conversion-ui.md)
+- [Composer workspace, author directory, and typed Word filling](docs/composer.md)
 - [PowerPoint and Marp workflow](docs/powerpoint.md)
 - [Template administration](docs/administration-ui.md)
 - [Supported Markdown and DOCX behavior](docs/pandoc-docx.md)
