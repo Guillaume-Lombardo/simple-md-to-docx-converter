@@ -1736,7 +1736,7 @@ if podman logs "$composer_provider_name" 2>&1 | \
 fi
 provider_events="$(podman logs "$composer_provider_name")"
 if [[ "$(grep -Fc '"operation": "chat", "status": 503' <<<"$provider_events")" -ne 2 || \
-  "$(grep -Fc '"operation": "chat", "status": 200' <<<"$provider_events")" -ne 10 || \
+  "$(grep -Fc '"operation": "chat", "status": 200' <<<"$provider_events")" -ne 12 || \
   "$(grep -Fc '"operation": "authorization", "status": 401' <<<"$provider_events")" -ne 2 ]]; then
   echo "Composer HTTPS provider did not observe the expected outage and retry calls." >&2
   exit 1
@@ -1770,7 +1770,7 @@ run_browser_test "$application_name" /e2e/browser-next-composer-resilience.test.
   --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json"
 prove_composer_key_loss_continuity
 provider_events="$(podman logs "$composer_provider_name")"
-if [[ "$(grep -Fc '"operation": "chat", "status": 200' <<<"$provider_events")" -ne 15 ]]; then
+if [[ "$(grep -Fc '"operation": "chat", "status": 200' <<<"$provider_events")" -ne 17 ]]; then
   echo "Restored Composer calls, cancelled step, replacement step, and occupying connection test did not reach the provider." >&2
   exit 1
 fi

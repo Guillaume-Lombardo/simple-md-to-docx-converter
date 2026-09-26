@@ -61,6 +61,21 @@ T90.
   source. Both complete final-image profiles, hosted checks, verified main merge, and matched
   docker-box deployment/rollback remain required. T91 remains In Progress.
 
+- 2026-09-26: The final-head default Python suite passed 5,356 tests with 90.16% application
+  branch coverage and 94.85% changed Python line coverage; the web suite passed 689 tests with
+  90.02% branch coverage. PR #270 publishes `52a2f662188e4901fd6a8ca19a2787a69a353c7c`.
+  A complete standalone final-image run passed the Composer browser scenarios, then failed at
+  stale provider event counts: 12 successful chat calls were observed where the harness expected
+  10. The distributed full-image run has not started. The two successful chat calls come from the
+  typed scenario's connection test and model step; the observed two provider outages and two
+  unauthorized responses matched the harness. T91 remains In Progress.
+- 2026-09-26: Corrected the two full-image harness expectations to 12 successful chat calls after
+  the Composer browser phase and 17 cumulatively after resilience and recovery. Bash syntax, Ruff
+  formatting/lint, and `ty` pass. The focused harness/quickstart tests passed 94 tests, but that
+  invocation failed the repository-wide coverage threshold, which requires the full suite. Both
+  complete final-image profiles, hosted checks, verified main merge, and matched docker-box
+  deployment/rollback remain open. No complete profile pass is claimed yet.
+
 ## Synchronization
 
 Keep status, scope, acceptance criteria, dependencies, and progress aligned with G1L-590.
