@@ -4,16 +4,30 @@ from __future__ import annotations
 
 import argparse
 import os
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import boto3
 from sqlalchemy import insert, select
+from sqlalchemy.engine import URL
 
+from markweave.jobs.models import JobOutput, JobProcessResult, JobRequest, JobState
+from markweave.jobs.policy import JobAdmissionPolicy
+from markweave.jobs.service import JobService, JobServicePolicy
+from markweave.jobs.worker import ConversionWorker, WorkerPolicy, WorkerRuntime
+from markweave.persistence.jobs import SqlJobRepository
 from markweave.persistence.migrations import upgrade_database
-from markweave.persistence.schema import UserRow
+from markweave.persistence.schema import ConversionJobRow, UserRow
 from markweave.persistence.sql import create_database_engine, standalone_database_url
+from markweave.storage import (
+    FilesystemObjectStore,
+    ObjectKey,
+    ObjectScope,
+    ObjectStore,
+    S3ObjectStore,
+)
 
 
 def _s3():
@@ -35,15 +49,16 @@ def _listed_object_count(response: dict[str, Any]) -> int:
     return len(contents)
 
 
-def _upgrade_and_seed(database_url) -> None:
+def _upgrade_and_seed(database_url: str | URL) -> UUID:
     engine = create_database_engine(database_url)
+    owner_id = uuid4()
     try:
         upgrade_database(engine)
         with engine.begin() as connection:
             connection.execute(
                 insert(UserRow),
                 {
-                    "id": str(uuid4()),
+                    "id": str(owner_id),
                     "username": "Recovery E2E",
                     "normalized_username": f"recovery-e2e-{uuid4().hex}",
                     "password_hash": "hash:e2e",
@@ -55,6 +70,72 @@ def _upgrade_and_seed(database_url) -> None:
             )
     finally:
         engine.dispose()
+    return owner_id
+
+
+def _seed_cleaned_job(
+    database_url: str | URL, owner_id: UUID, objects: ObjectStore
+) -> None:
+    engine = create_database_engine(database_url)
+    try:
+        repository = SqlJobRepository(engine, JobAdmissionPolicy(2, 2))
+        service = JobService(repository, objects, JobServicePolicy(10))
+        now = datetime.now(UTC)
+        job, replayed = service.submit(
+            JobRequest(
+                owner_id,
+                b"# retention proof",
+                None,
+                None,
+                JobOutput.DOCX,
+                (("markweave", "e2e"),),
+                now,
+            ),
+            "retention-proof",
+        )
+        if replayed:
+            raise RuntimeError("retention proof replayed unexpectedly")
+        source = ObjectKey(ObjectScope.UPLOAD, owner_id, job.source_object_id)
+        service.cancel(job.id, actor_id=owner_id, actor_is_admin=False, now=now)
+
+        class NoopProcessor:
+            def process(self, *_args: object, **_kwargs: object) -> JobProcessResult:
+                raise RuntimeError("retention proof must not process jobs")
+
+        worker = ConversionWorker(
+            worker_id="retention-proof",
+            runtime=WorkerRuntime(
+                repository,
+                objects,
+                NoopProcessor(),
+                lambda: now + timedelta(seconds=11),
+            ),
+            policy=WorkerPolicy(5, 1, 10, 2),
+        )
+        if worker.cleanup(limit=1) != 1 or objects.exists(source):
+            raise RuntimeError("retention proof did not remove its source")
+        expired = repository.get(job.id)
+        if expired is None or expired.state is not JobState.EXPIRED:
+            raise RuntimeError("retention proof did not expire its job")
+    finally:
+        engine.dispose()
+
+
+def _verify_cleaned_job(database_url: str | URL) -> None:
+    engine = create_database_engine(database_url)
+    try:
+        with engine.connect() as connection:
+            rows = connection.execute(
+                select(
+                    ConversionJobRow.state,
+                    ConversionJobRow.source_ready,
+                    ConversionJobRow.cleanup_completed,
+                )
+            ).all()
+            if rows != [("expired", True, True)]:
+                raise RuntimeError("restored retention proof is invalid")
+    finally:
+        engine.dispose()
 
 
 def standalone_initialize(path: Path) -> None:
@@ -62,7 +143,9 @@ def standalone_initialize(path: Path) -> None:
     object_path = path / "objects" / "uploads" / str(uuid4()) / str(uuid4())
     object_path.parent.mkdir(mode=0o700, parents=True)
     object_path.write_bytes(b"final-image-standalone")
-    _upgrade_and_seed(standalone_database_url(path))
+    database_url = standalone_database_url(path)
+    owner_id = _upgrade_and_seed(database_url)
+    _seed_cleaned_job(database_url, owner_id, FilesystemObjectStore(path))
 
 
 def standalone_verify(path: Path) -> None:
@@ -73,6 +156,7 @@ def standalone_verify(path: Path) -> None:
                 raise RuntimeError("standalone restored database is invalid")
     finally:
         engine.dispose()
+    _verify_cleaned_job(standalone_database_url(path))
     objects = [
         item.read_bytes() for item in (path / "objects").rglob("*") if item.is_file()
     ]
@@ -81,7 +165,8 @@ def standalone_verify(path: Path) -> None:
 
 
 def distributed_initialize() -> None:
-    _upgrade_and_seed(os.environ["RECOVERY_DATABASE"])
+    database_url = os.environ["RECOVERY_DATABASE"]
+    owner_id = _upgrade_and_seed(database_url)
     client = _s3()
     for bucket in (
         os.environ["RECOVERY_SOURCE_BUCKET"],
@@ -94,6 +179,14 @@ def distributed_initialize() -> None:
         Key=f"uploads/{uuid4()}/{uuid4()}",
         Body=b"final-image-distributed",
     )
+    try:
+        _seed_cleaned_job(
+            database_url,
+            owner_id,
+            S3ObjectStore(client, os.environ["RECOVERY_SOURCE_BUCKET"]),
+        )
+    finally:
+        client.close()
 
 
 def distributed_verify() -> None:
@@ -104,6 +197,7 @@ def distributed_verify() -> None:
                 raise RuntimeError("distributed restored database is invalid")
     finally:
         engine.dispose()
+    _verify_cleaned_job(os.environ["RECOVERY_DATABASE"])
     client = _s3()
     target = client.list_objects_v2(Bucket=os.environ["RECOVERY_TARGET_BUCKET"])
     if _listed_object_count(target) != 1:

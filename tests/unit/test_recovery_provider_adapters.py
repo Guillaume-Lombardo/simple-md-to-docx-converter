@@ -384,6 +384,42 @@ def test_referenced_object_keys_cover_all_durable_payloads() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    ("state", "cleanup_completed", "upload_required"),
+    [
+        ("expired", True, False),
+        ("expired", 1, False),
+        ("expired", False, True),
+        ("expired", 0, True),
+        ("queued", True, True),
+        ("succeeded", True, True),
+        ("expired", "1", True),
+        ("expired", "true", True),
+        ("expired", 2, True),
+        ("expired", None, True),
+        ("EXPIRED", True, True),
+        (None, True, True),
+    ],
+)
+def test_only_completed_expired_jobs_release_upload_reference(
+    state: str | None, cleanup_completed: object, upload_required: bool
+) -> None:
+    owner, source, result, manifest = (str(uuid4()) for _ in range(4))
+    row = {
+        "owner_id": owner,
+        "source_object_id": source,
+        "source_ready": True,
+        "state": state,
+        "cleanup_completed": cleanup_completed,
+        "result_object_id": result,
+        "result_manifest_object_id": manifest,
+    }
+    keys = _referenced_keys_from_rows({"conversion_jobs": {"rows": [row]}})
+    assert (f"uploads/{owner}/{source}" in keys) is upload_required
+    assert f"results/{owner}/{result}" in keys
+    assert f"result-manifests/{owner}/{manifest}" in keys
+
+
 def test_path_guards_reject_relative_existing_and_symlinked_paths(
     tmp_path: Path,
 ) -> None:

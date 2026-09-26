@@ -785,7 +785,12 @@ def _referenced_keys_from_rows(tables: Mapping[str, Any]) -> frozenset[str]:
     jobs = tables.get("conversion_jobs", {}).get("rows", [])
     for row in jobs:
         owner = row["owner_id"]
-        if row.get("source_ready"):
+        cleanup_completed = row.get("cleanup_completed")
+        source_cleaned = row.get("state") == "expired" and (
+            cleanup_completed is True
+            or (isinstance(cleanup_completed, int) and cleanup_completed == 1)
+        )
+        if row.get("source_ready") and not source_cleaned:
             keys.add(f"uploads/{owner}/{row['source_object_id']}")
         if row.get("result_object_id"):
             keys.add(f"results/{owner}/{row['result_object_id']}")
@@ -834,6 +839,8 @@ def _verify_database_references(execute: Any, objects: Path) -> None:
                             "owner_id",
                             "source_object_id",
                             "source_ready",
+                            "state",
+                            "cleanup_completed",
                             "result_object_id",
                             "result_manifest_object_id",
                         ),
@@ -842,7 +849,8 @@ def _verify_database_references(execute: Any, objects: Path) -> None:
                     )
                 )
                 for row in execute(
-                    "SELECT owner_id, source_object_id, source_ready, result_object_id, "
+                    "SELECT owner_id, source_object_id, source_ready, state, "
+                    "cleanup_completed, result_object_id, "
                     "result_manifest_object_id FROM conversion_jobs"
                 ).fetchall()
             ]

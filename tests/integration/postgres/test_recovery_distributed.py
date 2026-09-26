@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from collections.abc import Iterator
 from contextlib import ExitStack, closing
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -19,17 +19,30 @@ from markweave.auth.models import (
     IdleSessionPolicy,
     IdleSessionPolicyAudit,
     IdleSessionPolicyOperation,
+    Role,
+    User,
 )
 from markweave.config import StorageProfile
+from markweave.jobs.models import JobOutput, JobProcessResult, JobRequest, JobState
+from markweave.jobs.policy import JobAdmissionPolicy
+from markweave.jobs.service import JobService, JobServicePolicy
+from markweave.jobs.worker import ConversionWorker, WorkerPolicy, WorkerRuntime
+from markweave.persistence.jobs import SqlJobRepository
 from markweave.persistence.migrations import upgrade_database
-from markweave.persistence.schema import IdleSessionPolicyAuditRow, UserRow
+from markweave.persistence.schema import (
+    ConversionJobRow,
+    IdleSessionPolicyAuditRow,
+    UserRow,
+)
 from markweave.persistence.sql import (
     SqlIdleSessionPolicyRepository,
+    SqlUserRepository,
     create_database_engine,
 )
 from markweave.recovery_adapters import S3Configuration
 from markweave.recovery_manifest import RecoveryError
 from markweave.recovery_service import BackupRequest, RecoveryService, RestoreRequest
+from markweave.storage import ObjectKey, ObjectScope, S3ObjectStore
 
 pytestmark = [
     pytest.mark.integration,
@@ -148,6 +161,124 @@ def _prepare_source(client, bucket: str) -> tuple[str, bytes, str, str, datetime
     content = b"distributed-stable-object"
     client.put_object(Bucket=bucket, Key=key, Body=content)
     return key, content, str(actor), str(audit_id), created_at
+
+
+@pytest.mark.parametrize(
+    "lifecycle", ["completed", "active_missing", "expired_incomplete"]
+)
+def test_distributed_restore_checks_retained_uploads_after_real_cleanup(  # noqa: PLR0915 - real provider lifecycle matrix
+    tmp_path: Path, s3_client, lifecycle: str
+) -> None:
+    client = s3_client
+    recovery = RecoveryService()
+    with ExitStack() as cleanup:
+        source_database = _target_database(cleanup)
+        target_database = _target_database(cleanup)
+        source_bucket = f"retention-source-{uuid4().hex}"
+        target_bucket = f"retention-target-{uuid4().hex}"
+        for bucket in (source_bucket, target_bucket):
+            client.create_bucket(Bucket=bucket)
+            cleanup.callback(_delete_bucket, client, bucket)
+        engine = create_database_engine(source_database)
+        cleanup.callback(engine.dispose)
+        upgrade_database(engine)
+        owner = User(
+            uuid4(), "Recovery owner", f"recovery-{uuid4().hex}", "hash", Role.USER
+        )
+        SqlUserRepository(engine).create(owner)
+        objects = S3ObjectStore(client, source_bucket)
+        repository = SqlJobRepository(engine, JobAdmissionPolicy(2, 2))
+        service = JobService(repository, objects, JobServicePolicy(10))
+        now = datetime.now(UTC)
+        job, replayed = service.submit(
+            JobRequest(
+                owner.id,
+                b"# distributed source",
+                None,
+                None,
+                JobOutput.DOCX,
+                (("markweave", "test"),),
+                now,
+            ),
+            "distributed-retention",
+        )
+        assert not replayed
+        source = ObjectKey(ObjectScope.UPLOAD, owner.id, job.source_object_id)
+        assert objects.exists(source)
+        if lifecycle != "active_missing":
+            service.cancel(job.id, actor_id=owner.id, actor_is_admin=False, now=now)
+            if lifecycle == "completed":
+
+                class NoopProcessor:
+                    def process(
+                        self, *_args: object, **_kwargs: object
+                    ) -> JobProcessResult:
+                        raise AssertionError("cleanup must not process jobs")
+
+                worker = ConversionWorker(
+                    worker_id="retention",
+                    runtime=WorkerRuntime(
+                        repository,
+                        objects,
+                        NoopProcessor(),
+                        lambda: now + timedelta(seconds=11),
+                    ),
+                    policy=WorkerPolicy(5, 1, 10, 2),
+                )
+                assert worker.cleanup(limit=1) == 1
+                expired = repository.get(job.id)
+                assert expired is not None and expired.state is JobState.EXPIRED
+            else:
+                claimed = repository.expire_terminal(
+                    "retention",
+                    now + timedelta(seconds=11),
+                    now + timedelta(seconds=16),
+                    1,
+                )
+                assert len(claimed) == 1
+                objects.delete(source)
+        else:
+            objects.delete(source)
+        assert not objects.exists(source)
+
+        manifest = recovery.backup(
+            BackupRequest(
+                StorageProfile.DISTRIBUTED,
+                (tmp_path / "sets").resolve(),
+                60,
+                database_url=source_database,
+                s3=_configuration(source_bucket),
+                consistency_proof="workers-drained-retention",
+            )
+        )
+        request = RestoreRequest(
+            StorageProfile.DISTRIBUTED,
+            (tmp_path / "sets" / manifest.backup_id).resolve(),
+            60,
+            "isolated-retention-proof",
+            database_url=target_database,
+            s3=_configuration(target_bucket),
+        )
+        if lifecycle != "completed":
+            with pytest.raises(RecoveryError, match="stable object references"):
+                recovery.restore(request)
+            assert not client.list_objects_v2(Bucket=target_bucket).get("Contents", [])
+            return
+        restored = recovery.restore(request)
+        assert restored.backup_id == manifest.backup_id
+        restored_engine = create_database_engine(target_database)
+        try:
+            with restored_engine.connect() as connection:
+                row = connection.execute(
+                    select(
+                        ConversionJobRow.state,
+                        ConversionJobRow.source_ready,
+                        ConversionJobRow.cleanup_completed,
+                    ).where(ConversionJobRow.id == str(job.id))
+                ).one()
+                assert row == ("expired", True, True)
+        finally:
+            restored_engine.dispose()
 
 
 def test_distributed_backup_and_isolated_restore_bind_both_provider_identities(
