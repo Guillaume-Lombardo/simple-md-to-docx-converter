@@ -578,6 +578,76 @@ def assert_regeneration_rechecks_frozen_author_grant(
         ]
 
 
+def test_regeneration_keeps_frozen_values_after_author_update(tmp_path: Path) -> None:
+    assert_regeneration_keeps_frozen_values_after_author_update(_sqlite(tmp_path))
+
+
+def assert_regeneration_keeps_frozen_values_after_author_update(
+    context: Prepared,
+) -> None:
+    pending = create_plan(context)
+    plan = context.plans.decide(
+        context.owner,
+        context.draft_id,
+        pending.id,
+        if_match=pending.etag,
+        idempotency_key="approve",
+        values=pending.values,
+        provenance=pending.provenance,
+        questions=(),
+        approve=True,
+    )
+    parent_id = publish_filled_revision(context, plan)
+    parent = context.composer.get_revision(context.owner, context.draft_id, parent_id)
+    assert parent.snapshot.typed_fill_snapshot is not None
+    frozen = json.loads(parent.snapshot.typed_fill_snapshot)
+    changed = context.authors.update(
+        context.sharer,
+        context.author.id,
+        if_match=context.author.etag,
+        name="Ada, updated",
+        fields_json=json.dumps(
+            {"affiliation": {"value": "New affiliation", "provenance": "supplied"}}
+        ),
+    )
+    assert changed.version != frozen["author_refs"][0]["version"]
+    assert context.authors.get(context.owner, context.author.id).id == changed.id
+    frozen["parent_revision_id"] = str(parent_id)
+    frozen["actor_id"] = str(context.owner)
+    draft = context.composer.get_draft(context.owner, context.draft_id)
+    regenerated = context.composer.publish_revision(
+        context.owner,
+        context.draft_id,
+        actor_id=context.owner,
+        if_match=draft.etag,
+        idempotency_key="regenerate-after-author-update",
+        snapshot=RevisionSnapshot(
+            parent.snapshot.source,
+            None,
+            "{}",
+            parent.snapshot.render_options,
+            None,
+            "human:frozen_regeneration",
+            "regenerate_fill",
+            typed_fill_snapshot=json.dumps(frozen),
+        ),
+        artifacts=(
+            ArtifactContent("download", _DOCX_MEDIA, b"filled-docx"),
+            ArtifactContent("preview", _DOCX_MEDIA, b"filled-docx"),
+        ),
+    )
+    assert regenerated.snapshot.typed_fill_snapshot is not None
+    regenerated_values = json.loads(regenerated.snapshot.typed_fill_snapshot)
+    assert regenerated_values["approved_values"] == frozen["approved_values"]
+    assert regenerated_values["author_refs"] == frozen["author_refs"]
+    assert (
+        context.composer.read_artifact(
+            context.owner, context.draft_id, regenerated.id, "download"
+        )
+        == b"filled-docx"
+    )
+
+
 def test_mark_published_rejects_unrelated_revision_and_recovers_exact_link(
     tmp_path: Path,
 ) -> None:

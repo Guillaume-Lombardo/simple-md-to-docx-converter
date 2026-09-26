@@ -269,11 +269,16 @@ class _SqlComposerRevisions:
             raise ComposerConflictError("Typed template access changed") from None
         try:
             for ref in author_refs:
+                frozen_version = int(ref["version"])
                 SqlAuthorKnowledgeRepository.require_access(
                     database,
                     owner_id,
                     UUID(ref["id"]),
-                    expected_version=int(ref["version"]),
+                    expected_version=(
+                        frozen_version
+                        if snapshot.operation == "fill_template"
+                        else None
+                    ),
                     for_update=True,
                 )
         except LookupError, RuntimeError, KeyError, ValueError, TypeError:

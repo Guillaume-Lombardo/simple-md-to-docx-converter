@@ -33,6 +33,7 @@ from markweave.persistence.sql import create_database_engine
 from markweave.storage import ObjectKey, ObjectScope
 from tests.integration.postgres.test_postgres_composer_foundations import _store
 from tests.integration.sqlite.test_composer_fill_plans import (
+    assert_regeneration_keeps_frozen_values_after_author_update,
     assert_regeneration_rechecks_frozen_author_grant,
     prepare,
 )
@@ -55,6 +56,17 @@ def test_postgresql_regeneration_rechecks_frozen_author_grant(
         assert_regeneration_rechecks_frozen_author_grant(
             context, mocker, revoke_during_publication
         )
+    finally:
+        objects.close()
+        engine.dispose()
+
+
+def test_postgresql_regeneration_keeps_frozen_values_after_author_update() -> None:
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
+    objects = _store()
+    try:
+        context = prepare(engine, objects)
+        assert_regeneration_keeps_frozen_values_after_author_update(context)
     finally:
         objects.close()
         engine.dispose()
