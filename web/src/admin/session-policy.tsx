@@ -25,12 +25,15 @@ const defaultAdministrationApi = new AdministrationApi();
 export function SessionPolicyWorkspace({
   api = defaultAdministrationApi,
   expire,
+  headingLevel = "h1",
   user,
 }: {
   api?: AdministrationApi;
   expire: () => void;
+  headingLevel?: "h1" | "h3";
   user: EffectiveUser;
 }) {
+  const Heading = headingLevel;
   const fence = useRef(new RequestFence());
   const expireSession = useStableVoidCallback(expire);
   const [policy, setPolicy] = useState<IdleSessionPolicyResponse>();
@@ -165,9 +168,9 @@ export function SessionPolicyWorkspace({
   if (user.role !== "admin")
     return (
       <section aria-labelledby="session-policy-title">
-        <h1 className="text-3xl font-semibold" id="session-policy-title">
+        <Heading className="text-3xl font-semibold" id="session-policy-title">
           Session policy
-        </h1>
+        </Heading>
         <Alert tone="danger">Administrator access is required.</Alert>
       </section>
     );
@@ -175,9 +178,9 @@ export function SessionPolicyWorkspace({
   return (
     <section className="space-y-6" aria-labelledby="session-policy-title">
       <div>
-        <h1 className="text-3xl font-semibold" id="session-policy-title">
+        <Heading className="text-3xl font-semibold" id="session-policy-title">
           Session policy
-        </h1>
+        </Heading>
         <p>Set the system-wide inactivity duration for each role.</p>
       </div>
       {error && <Alert tone="danger">{error}</Alert>}

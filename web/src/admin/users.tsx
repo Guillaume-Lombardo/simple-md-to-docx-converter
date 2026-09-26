@@ -26,12 +26,15 @@ const defaultAdministrationApi = new AdministrationApi();
 export function UsersWorkspace({
   api = defaultAdministrationApi,
   expire,
+  headingLevel = "h1",
   user,
 }: {
   api?: AdministrationApi;
   expire: () => void;
+  headingLevel?: "h1" | "h2";
   user: EffectiveUser;
 }) {
+  const Heading = headingLevel;
   const fence = useRef(new RequestFence());
   const expireSession = useStableVoidCallback(expire);
   const [users, setUsers] = useState<UserResponse[]>([]);
@@ -150,9 +153,9 @@ export function UsersWorkspace({
   if (user.role !== "admin")
     return (
       <section aria-labelledby="users-title">
-        <h1 className="text-3xl font-semibold" id="users-title">
+        <Heading className="text-3xl font-semibold" id="users-title">
           Users
-        </h1>
+        </Heading>
         <Alert tone="danger">Administrator access is required.</Alert>
       </section>
     );
@@ -160,9 +163,9 @@ export function UsersWorkspace({
   return (
     <section className="space-y-6" aria-labelledby="users-title">
       <div>
-        <h1 className="text-3xl font-semibold" id="users-title">
+        <Heading className="text-3xl font-semibold" id="users-title">
           Users
-        </h1>
+        </Heading>
         <p>
           Manage local accounts. FastAPI authorizes and audits every change.
         </p>

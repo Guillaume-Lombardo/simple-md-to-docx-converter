@@ -103,10 +103,10 @@ test("shell links target only delivered application routes", async () => {
     "/revert",
     "/templates",
     "/admin",
-    "/users",
   ]);
   for (const destination of destinations)
     assert.ok((await stat(`app${destination}`)).isDirectory());
+  assert.ok((await stat("app/users")).isDirectory());
 });
 
 test("Revert remains a browser-only same-origin FastAPI client", async () => {

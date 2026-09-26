@@ -76,6 +76,44 @@ function userCard(page, username) {
     });
 }
 
+async function assertCompactHeader(page) {
+  const originalSize = page.viewportSize();
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const desktop = await page.evaluate(() => {
+    const navigation = document.querySelector('nav[aria-label="Primary"]');
+    const centers = Array.from(navigation.children, (child) => {
+      const rect = child.getBoundingClientRect();
+      return rect.top + rect.height / 2;
+    });
+    return {
+      rowDifference: Math.max(...centers) - Math.min(...centers),
+      overflow: document.documentElement.scrollWidth > window.innerWidth,
+    };
+  });
+  assert.ok(desktop.rowDifference <= 2, "desktop header stays on one row");
+  assert.equal(desktop.overflow, false, "desktop header does not overflow");
+  assert.equal(
+    await page.getByText("(Administrator)", { exact: true }).isVisible(),
+    true,
+  );
+  assert.equal(
+    await page.getByRole("button", { name: "Sign out" }).isVisible(),
+    true,
+  );
+
+  await page.setViewportSize({ width: 390, height: 800 });
+  const narrow = await page.evaluate(() => ({
+    overflow: document.documentElement.scrollWidth > window.innerWidth,
+    signOutRight: document
+      .querySelector('nav[aria-label="Primary"] button')
+      .getBoundingClientRect().right,
+    width: window.innerWidth,
+  }));
+  assert.equal(narrow.overflow, false, "narrow header does not overflow");
+  assert.ok(narrow.signOutRight <= narrow.width, "sign out remains in view");
+  if (originalSize) await page.setViewportSize(originalSize);
+}
+
 function requiredPositiveInteger(name) {
   const value = Number(process.env[name]);
   assert.ok(Number.isSafeInteger(value) && value > 0, `${name} is required`);
@@ -200,13 +238,17 @@ test(
       assert.equal(originalPolicy.body.admin_idle_minutes, checkpointAdmin);
       assert.equal(originalPolicy.body.revision, checkpointRevision);
 
-      await adminPage
-        .getByRole("link", { name: "Users", exact: true })
-        .click();
-      await adminPage.waitForURL("**/users");
-      const policySection = adminPage.locator("details").filter({
-        has: adminPage.locator("summary", { hasText: "Session policy" }),
+      await adminPage.getByRole("link", { name: "Admin", exact: true }).click();
+      await adminPage.waitForURL("**/admin");
+      await assertCompactHeader(adminPage);
+      const usersToggle = adminPage.getByText("Users and sessions", {
+        exact: true,
       });
+      await usersToggle.focus();
+      await adminPage.keyboard.press("Space");
+      const policySection = adminPage
+        .locator("summary", { hasText: "Session policy" })
+        .locator("..");
       assert.equal(await policySection.getAttribute("open"), null);
       const policyToggle = policySection.locator("summary");
       await policyToggle.focus();
@@ -215,7 +257,10 @@ test(
       await adminPage.keyboard.press("Enter");
       assert.equal(await policySection.getAttribute("open"), null);
       await policyToggle.click();
-      assert.equal(await adminPage.getByText(/minutes of inactivity/).count(), 0);
+      assert.equal(
+        await adminPage.getByText(/minutes of inactivity/).count(),
+        0,
+      );
       await adminPage
         .getByRole("heading", { name: "Session policy", exact: true })
         .waitFor();
@@ -381,8 +426,7 @@ test(
       assert.equal(restoredPolicy.status, 200);
       adminPage.off("request", countPolicyPuts);
 
-      await adminPage.getByRole("link", { name: "Users", exact: true }).click();
-      await adminPage.waitForURL("**/users");
+      await policyToggle.click();
       await adminPage
         .getByRole("heading", { name: "Local accounts", exact: true })
         .waitFor();
