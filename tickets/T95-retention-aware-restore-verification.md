@@ -67,6 +67,27 @@ service was restored and verified. T91 deployment remains blocked.
   An operational rollback caveat remains: the new CLI auto-migrates to schema 26, whereas the live
   T90 rollback baseline is schema 24. A compatible old recovery-tool patch is prepared in the
   local deployment plan but has not been applied or used for live deployment.
+- 2026-09-27: Clean source `2a38d7000e120cf25faa7194d05cbebd881be27b` passed the
+  canonical engine-excluding Python suite: 5,376 passed, 60 engine-marked deselected, 19
+  warnings; total coverage 94.17%, application branch coverage 90.16% (8,336/9,246), and
+  changed Python lines 100% (3/3). Ruff format/lint, `ty`, shell syntax, and diff checks pass.
+  The first partial Python run lacked the pinned local reverse base image and is not counted;
+  after the repository's pinned-image bootstrap, the fresh full run passed. The canonical
+  backend image built successfully. Dedicated final-image recovery smoke passed in standalone
+  and distributed profiles, covering genuine retention-cleaned backup/isolated restore plus
+  manifest-valid missing active and cleanup-incomplete upload rejection before publication.
+  Both complete unattended final-image E2E profiles then passed with scenario-only flags unset.
+  Local receipt and checksummed logs are in `/home/g1lom/dev/scratch/t95-validation/`.
+  The host full-engine Python suite was unavailable; image E2E exercised bundled engines.
+- 2026-09-27: A separately reviewed local, network-none T90 schema-24 recovery child image
+  preserved the exact old image layers and changed only the recovery module. Synthetic old-image
+  proof reproduced the expired-cleaned rejection; the child passed real cleanup, backup, and
+  isolated restore at schema 24 while still rejecting missing active/incomplete uploads. This
+  qualifies only the disposable local rollback tool. No fresh live host backup/restore has passed,
+  no infrastructure changed, and T91 deployment remains blocked pending a separately authorized
+  and qualified host restore. T95 is unpublished and unverified on main, so it stays In Progress.
+  The unrelated T94 post-merge main CI scanner-probe failure is recorded separately; current
+  local T95 standalone and distributed final-image profiles both passed and do not resolve it.
 
 ## Synchronization
 
