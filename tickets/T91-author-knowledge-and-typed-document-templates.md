@@ -82,6 +82,31 @@ T90.
   All 197 CI validation tests, the validator entry point, Ruff formatting/lint, and `ty` pass.
   Hosted checks at the updated head, complete final-image profiles, main verification, and
   matched docker-box deployment/rollback remain open. T91 stays In Progress.
+- 2026-09-26: Ready PR #270 at `9a6c6288acb8ffbbe53c2f5c21ca315000f10a00` had terminal
+  failure in hosted CI run `36255154728`: 15 jobs passed and five failed. Both 30-minute Python
+  shards passed, but combined application branch coverage was 89.73% (8,296/9,246); the 90% gate
+  needs 26 more covered branches. Read-only analysis of the three authentic coverage artifacts
+  found that engine-independent real DOCX corpus tests were omitted from the light selection;
+  the unchanged changed-line gate would pass at 93.37% (2,449/2,623). The light job passed 688
+  of 689 web tests; the 100-author pagination case took 5,027 ms against its five-second limit.
+  Standalone image E2E failed on a Generate DOCX locator that also matched Regenerate DOCX.
+  Distributed image E2E exposed a question snapshot race after a model step completed.
+  The owner authorized four scoped corrections: a case-only ten-second test limit, an exact
+  Generate DOCX locator, `light_coverage` selection for engine-free DOCX corpus cases only, and
+  a bounded question refresh on model-step completion with a regression test. Implementation,
+  independent review, full hosted rerun, both complete image profiles, main verification, and
+  matched docker-box deployment/rollback remain open. T91 remains In Progress.
+- 2026-09-26: All four authorized corrections are committed and independently reviewed. The
+  browser E2E locator now matches Generate DOCX exactly (`65d43fa`); the engine-free DOCX corpus
+  is selected for light coverage (`238c816`), with 48 of 49 cases passing and the LibreOffice
+  case excluded as intended. A local aggregate projection reaches 90.14% application branch
+  coverage and 94.85% changed-line coverage; this is not a hosted CI result. The Composer fix
+  (`ceadfe8`) reconciles questions and proposals after a model step settles and guards late
+  success/error responses across draft changes; its focused 49 web tests and the full 694-test
+  web suite pass, with 90.04% web branch coverage. The author pagination test has a scoped
+  ten-second limit. Hosted CI and both complete final rootless-image profiles still require
+  reruns on the exact final head. Main verification and matched docker-box deployment/rollback
+  remain pending. T91 stays In Progress; no completion is claimed.
 
 ## Synchronization
 
