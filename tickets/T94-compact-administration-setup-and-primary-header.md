@@ -56,6 +56,15 @@ all user-management and conversion/Composer workflows.
   pass; independent code review found no blocking defects. Rendered browser geometry at desktop
   and mobile widths, both complete final-image E2E profiles, hosted checks, and main verification
   remain pending. T94 stays In Progress; no completion or deployment is claimed.
+- 2026-09-26: The exact UI source passed a rendered image screenshot probe at 1440, 1280,
+  480, and 390 CSS-pixel widths without horizontal overflow. The canonical standalone final-image
+  E2E run stopped before the Administration journey because the existing Composer browser scenario
+  still looked for the old Admin Templates locator. An independently reviewed test-only correction
+  follows the new collapsible setup link at `5586291094632c1a105c3b9d7b8e199402dfef6a`;
+  Node syntax, Prettier, and Git diff checks pass. The exact-head standalone full final-image
+  suite then passed, including the Administration keyboard and responsive-layout assertions and
+  the corrected Composer scenario. The distributed profile, a confirmed expanded Administration
+  screenshot, hosted checks, and main verification remain pending. T94 stays In Progress.
 
 ## Synchronization
 
