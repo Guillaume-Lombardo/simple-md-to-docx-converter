@@ -88,6 +88,17 @@ service was restored and verified. T91 deployment remains blocked.
   and qualified host restore. T95 is unpublished and unverified on main, so it stays In Progress.
   The unrelated T94 post-merge main CI scanner-probe failure is recorded separately; current
   local T95 standalone and distributed final-image profiles both passed and do not resolve it.
+- 2026-09-27: The first PR #272 hosted run at `140c405` ended with 14 of 16 jobs passing;
+  only `CI / light` and its derived gate failed on an unchanged typed-template pagination test.
+  Both complete hosted E2E profiles and other domains passed. The owner authorized a scoped
+  test-only correction, committed as `989a928bcfd66d00cd43f328c1d33203d2697eeb`: unique
+  template IDs across fixture pages and a ten-second limit for only the heavy pagination case,
+  preserving its assertions. Independent review approved it with no duplicate-ID warning.
+  Targeted web tests pass 47/47; full web checks pass 699/699 with 90.02% branch coverage,
+  formatting, lint, types, bindings, and structure checks. The original T95 Python, recovery
+  smoke, and both-profile image qualification remain valid because this commit changes only the
+  web test. A new exact-head hosted run, protected merge, and main verification remain pending;
+  T95 stays In Progress and T91 deployment remains blocked.
 
 ## Synchronization
 
