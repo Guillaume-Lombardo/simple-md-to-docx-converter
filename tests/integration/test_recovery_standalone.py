@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -14,18 +14,28 @@ from markweave.auth.models import (
     IdleSessionPolicy,
     IdleSessionPolicyAudit,
     IdleSessionPolicyOperation,
+    Role,
+    User,
 )
 from markweave.config import StorageProfile
+from markweave.jobs.models import JobOutput, JobProcessResult, JobRequest, JobState
+from markweave.jobs.policy import JobAdmissionPolicy
+from markweave.jobs.service import JobService, JobServicePolicy
+from markweave.jobs.worker import ConversionWorker, WorkerPolicy, WorkerRuntime
+from markweave.persistence.jobs import SqlJobRepository
 from markweave.persistence.migrations import upgrade_database
-from markweave.persistence.schema import IdleSessionPolicyAuditRow
+from markweave.persistence.schema import ConversionJobRow, IdleSessionPolicyAuditRow
 from markweave.persistence.sql import (
     SqlIdleSessionPolicyRepository,
+    SqlUserRepository,
     create_database_engine,
     standalone_database_url,
 )
 from markweave.recovery_adapters import filesystem_lock
 from markweave.recovery_manifest import RecoveryError, load_and_verify_manifest
 from markweave.recovery_service import BackupRequest, RecoveryService, RestoreRequest
+from markweave.storage import FilesystemObjectStore, ObjectKey, ObjectScope
+from tests.template_records import publish_template_pair
 
 pytestmark = [pytest.mark.unit, pytest.mark.integration]
 
@@ -42,6 +52,157 @@ def _standalone_data(root: Path) -> Path:
     finally:
         engine.dispose()
     return data
+
+
+def _data_with_queued_job(root: Path):
+    data = root / "data"
+    data.mkdir()
+    engine = create_database_engine(standalone_database_url(data))
+    upgrade_database(engine)
+    owner = User(uuid4(), "Recovery owner", "recovery-owner", "hash", Role.USER)
+    SqlUserRepository(engine).create(owner)
+    template_id, version_id = uuid4(), uuid4()
+    publish_template_pair(engine, owner.id, template_id, version_id)
+    objects = FilesystemObjectStore(data)
+    objects.put(
+        ObjectKey(ObjectScope.TEMPLATE_VERSION, owner.id, version_id),
+        b"template",
+    )
+    repository = SqlJobRepository(engine, JobAdmissionPolicy(2, 2))
+    service = JobService(repository, objects, JobServicePolicy(10))
+    now = datetime.now(UTC)
+    job, replayed = service.submit(
+        JobRequest(
+            owner.id,
+            b"# recovery source",
+            template_id,
+            version_id,
+            JobOutput.DOCX,
+            (("markweave", "test"),),
+            now,
+        ),
+        "recovery-upload",
+    )
+    assert not replayed
+    source = ObjectKey(ObjectScope.UPLOAD, owner.id, job.source_object_id)
+    assert objects.exists(source)
+    return data, engine, repository, objects, service, owner.id, job.id, source, now
+
+
+def _backup_and_restore(data: Path, root: Path) -> Path:
+    service = RecoveryService()
+    manifest = service.backup(
+        BackupRequest(
+            StorageProfile.STANDALONE,
+            (root / "backups").resolve(),
+            30,
+            data_directory=data.resolve(),
+        )
+    )
+    target = root / "restored"
+    service.restore(
+        RestoreRequest(
+            StorageProfile.STANDALONE,
+            (root / "backups" / manifest.backup_id).resolve(),
+            30,
+            "offline-expired-upload-proof",
+            data_directory=target.resolve(),
+        )
+    )
+    return target
+
+
+def test_standalone_restores_backup_after_completed_job_retention_cleanup(
+    tmp_path: Path,
+) -> None:
+    data, engine, repository, objects, service, owner_id, job_id, source, now = (
+        _data_with_queued_job(tmp_path)
+    )
+    service.cancel(job_id, actor_id=owner_id, actor_is_admin=False, now=now)
+
+    class NoopProcessor:
+        def process(self, *_args: object, **_kwargs: object) -> JobProcessResult:
+            raise AssertionError("cleanup must not process jobs")
+
+    worker = ConversionWorker(
+        worker_id="retention",
+        runtime=WorkerRuntime(
+            repository,
+            objects,
+            NoopProcessor(),
+            lambda: now + timedelta(seconds=11),
+        ),
+        policy=WorkerPolicy(5, 1, 10, 2),
+    )
+    assert worker.cleanup(limit=1) == 1
+    expired = repository.get(job_id)
+    assert expired is not None and expired.state is JobState.EXPIRED
+    assert not objects.exists(source)
+    with engine.connect() as connection:
+        row = connection.execute(
+            select(
+                ConversionJobRow.state,
+                ConversionJobRow.source_ready,
+                ConversionJobRow.cleanup_completed,
+            ).where(ConversionJobRow.id == str(job_id))
+        ).one()
+        assert row == ("expired", True, True)
+    engine.dispose()
+
+    restored = _backup_and_restore(data, tmp_path)
+    restored_engine = create_database_engine(standalone_database_url(restored))
+    try:
+        with restored_engine.connect() as connection:
+            row = connection.execute(
+                select(
+                    ConversionJobRow.state,
+                    ConversionJobRow.source_ready,
+                    ConversionJobRow.cleanup_completed,
+                ).where(ConversionJobRow.id == str(job_id))
+            ).one()
+            assert row == ("expired", True, True)
+    finally:
+        restored_engine.dispose()
+    assert not (restored / "objects" / source.as_posix()).exists()
+
+
+@pytest.mark.parametrize("expired_incomplete", [False, True])
+def test_standalone_restore_rejects_missing_required_upload(
+    tmp_path: Path, expired_incomplete: bool
+) -> None:
+    data, engine, repository, objects, service, owner_id, job_id, source, now = (
+        _data_with_queued_job(tmp_path)
+    )
+    if expired_incomplete:
+        service.cancel(job_id, actor_id=owner_id, actor_is_admin=False, now=now)
+        claimed = repository.expire_terminal(
+            "retention", now + timedelta(seconds=11), now + timedelta(seconds=16), 1
+        )
+        assert len(claimed) == 1
+    objects.delete(source)
+    engine.dispose()
+
+    service = RecoveryService()
+    manifest = service.backup(
+        BackupRequest(
+            StorageProfile.STANDALONE,
+            (tmp_path / "backups").resolve(),
+            30,
+            data_directory=data.resolve(),
+        )
+    )
+    target = tmp_path / "restored"
+    with pytest.raises(RecoveryError, match="stable object references"):
+        service.restore(
+            RestoreRequest(
+                StorageProfile.STANDALONE,
+                (tmp_path / "backups" / manifest.backup_id).resolve(),
+                30,
+                "offline-required-upload-proof",
+                data_directory=target.resolve(),
+            )
+        )
+    assert not target.exists()
 
 
 def test_standalone_backup_is_content_addressed_and_restores_atomically(

@@ -90,6 +90,7 @@ for _attempt in {1..60}; do
 done
 [[ "$ready" == true ]]
 ensure_postgres_database "$postgres" target
+ensure_postgres_database "$postgres" missing
 
 run_setup() {
   local -a container_arguments=()
@@ -130,6 +131,27 @@ run_cli -- --non-interactive --timeout 60 restore --profile standalone \
   --data-directory /e2e/standalone-restored \
   --offline-proof final-image-e2e --yes >/dev/null
 run_setup -- standalone-verify --path /e2e/standalone-restored
+for case in active incomplete; do
+  run_setup -- "standalone-missing-$case" --path /e2e/standalone-source
+  missing_json="$(run_cli -- --json --non-interactive --timeout 60 backup \
+    --profile standalone --data-directory /e2e/standalone-source \
+    --destination "/e2e/standalone-missing-$case-sets")"
+  missing_id="$(jq -er '.backup_id' <<<"$missing_json")"
+  rejected_target="/e2e/standalone-$case-rejected"
+  if rejected_json="$(run_cli -- --json --non-interactive --timeout 60 restore \
+    --profile standalone \
+    --source "/e2e/standalone-missing-$case-sets/$missing_id" \
+    --data-directory "$rejected_target" \
+    --offline-proof final-image-e2e --yes 2>&1)"; then
+    echo "standalone restore accepted a missing $case upload" >&2
+    exit 1
+  fi
+  jq -e '
+    .error.code == "recovery_failed"
+    and .error.message == "Restored stable object references are incomplete"
+  ' <<<"$rejected_json" >/dev/null
+  run_setup -- verify-empty-target --path "$rejected_target"
+done
 run_setup -- tamper --path "/e2e/standalone-sets/$standalone_id"
 if run_cli -- --non-interactive --timeout 60 restore --profile standalone \
   --source "/e2e/standalone-sets/$standalone_id" \
@@ -141,6 +163,7 @@ fi
 
 readonly source_url='postgresql+psycopg://postgres:recovery-test-only@postgres:5432/source'
 readonly target_url='postgresql+psycopg://postgres:recovery-test-only@postgres:5432/target'
+readonly missing_url='postgresql+psycopg://postgres:recovery-test-only@postgres:5432/missing'
 readonly common_s3=(
   --env RECOVERY_S3_ENDPOINT=http://rustfs:9000
   --env RECOVERY_S3_ACCESS=recovery-test
@@ -148,6 +171,7 @@ readonly common_s3=(
   --env RECOVERY_SOURCE_BUCKET=source-bucket
   --env RECOVERY_TARGET_BUCKET=target-bucket
   --env RECOVERY_FAILED_BUCKET=failed-bucket
+  --env RECOVERY_MISSING_BUCKET=missing-bucket
 )
 run_setup "${common_s3[@]}" --env RECOVERY_DATABASE="$source_url" -- \
   distributed-initialize
@@ -169,6 +193,38 @@ run_cli "${common_s3[@]}" --env RECOVERY_DATABASE="$target_url" -- \
   --s3-region us-east-1 --s3-access-key-environment RECOVERY_S3_ACCESS \
   --s3-secret-key-environment RECOVERY_S3_SECRET \
   --offline-proof final-image-isolated --yes >/dev/null
+for case in active incomplete; do
+  run_setup "${common_s3[@]}" --env RECOVERY_DATABASE="$source_url" -- \
+    "distributed-missing-$case"
+  missing_json="$(run_cli "${common_s3[@]}" \
+    --env RECOVERY_DATABASE="$source_url" -- \
+    --json --non-interactive --timeout 60 backup --profile distributed \
+    --destination "/e2e/distributed-missing-$case-sets" \
+    --database-url-environment RECOVERY_DATABASE \
+    --s3-bucket source-bucket --s3-endpoint-url http://rustfs:9000 \
+    --s3-region us-east-1 --s3-access-key-environment RECOVERY_S3_ACCESS \
+    --s3-secret-key-environment RECOVERY_S3_SECRET \
+    --consistency-proof final-image-workers-drained)"
+  missing_id="$(jq -er '.backup_id' <<<"$missing_json")"
+  if rejected_json="$(run_cli "${common_s3[@]}" \
+    --env RECOVERY_DATABASE="$missing_url" -- \
+    --json --non-interactive --timeout 60 restore --profile distributed \
+    --source "/e2e/distributed-missing-$case-sets/$missing_id" \
+    --database-url-environment RECOVERY_DATABASE \
+    --s3-bucket missing-bucket --s3-endpoint-url http://rustfs:9000 \
+    --s3-region us-east-1 --s3-access-key-environment RECOVERY_S3_ACCESS \
+    --s3-secret-key-environment RECOVERY_S3_SECRET \
+    --offline-proof final-image-isolated --yes 2>&1)"; then
+    echo "distributed restore accepted a missing $case upload" >&2
+    exit 1
+  fi
+  jq -e '
+    .error.code == "recovery_failed"
+    and .error.message == "Restored stable object references are incomplete"
+  ' <<<"$rejected_json" >/dev/null
+  run_setup "${common_s3[@]}" --env RECOVERY_DATABASE="$missing_url" -- \
+    verify-empty-target
+done
 failed_restore_json=""
 if failed_restore_json="$(run_cli "${common_s3[@]}" \
   --env RECOVERY_DATABASE="$source_url" -- \

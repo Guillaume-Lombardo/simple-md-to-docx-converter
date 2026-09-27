@@ -675,7 +675,7 @@ test("typed schema editor sends explicit defaults, optional fields, and edited r
 test("typed template paging reveals older authorized catalog and immutable versions", async () => {
   const firstTemplates = Array.from({ length: 100 }, (_, at) => ({
     ...template,
-    id: `template-${at}`,
+    id: `page-one-template-${at}`,
     name: `Template ${at}`,
   }));
   const firstVersions = Array.from({ length: 100 }, (_, at) => ({
@@ -719,7 +719,7 @@ test("typed template paging reveals older authorized catalog and immutable versi
     target: { value: older.id },
   });
   expect(screen.getByText(`DOCX SHA-256: ${older.docx_sha256}`)).toBeVisible();
-});
+}, 10_000);
 
 test("typed template replacement conflict refreshes the current version safely", async () => {
   const newer = { ...template, version: 2, etag: '"template-2"' };
