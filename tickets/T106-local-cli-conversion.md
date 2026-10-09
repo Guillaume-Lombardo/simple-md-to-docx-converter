@@ -18,7 +18,7 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 ## Acceptance criteria
 
 - A local command (for example `markweave convert doc.md --to docx,pdf --template t.docx -o out/`) runs the existing validation, archive, image, Mermaid, Pandoc and LibreOffice adapters with the same limits.
-- It reports the engine versions it used and fails clearly when a required engine is missing or its version differs from the approved pin (with an explicit override flag if D1 allows one).
+- It records the engine versions it used, fails clearly when a required engine is missing, and warns when a version differs from the approved pin; `--require-pinned` turns that warning into a failure (D1).
 - A documented container invocation runs the command with the bundled engines.
 - Business HTTP commands are unchanged.
 - Unit, integration (real engines, marked) and final-image E2E tests cover success, missing engine, invalid input, timeout and cancellation.
@@ -30,7 +30,7 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 
 ## Blocking points
 
-- Requires decision D1 (section 2 CLI boundary).
+- Decision D1 recorded in specification section 3.7.
 - Local mode depends on host engines; reproducibility guarantees must be stated honestly when host versions differ from the pinned toolchain.
 
 ## Progress

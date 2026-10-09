@@ -29,7 +29,7 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 
 ## Blocking points
 
-- Requires decision D7 (section 2 'no API token').
+- Decision D7 recorded in specification section 3.7 (Bearer header only, CSRF-exempt, configurable maximum lifetime defaulting to 365 days).
 - Sequencing: start only after the in-progress Composer iterations T89, T90 and T91 are Done (work-in-progress limit accepted on 2026-10-09). This is an ordering rule, not a Linear blocking relation.
 
 ## Progress

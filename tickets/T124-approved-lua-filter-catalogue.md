@@ -2,7 +2,7 @@
 ticket: T124
 linear_id: G1L-656
 linear_url: https://linear.app/g1lom/issue/G1L-656/t124-add-an-administrator-approved-pandoc-lua-filter-catalogue
-status: Backlog
+status: Canceled
 priority: Low
 project: Markdown to DOCX and PDF Converter
 ---
@@ -28,7 +28,7 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 
 ## Blocking points
 
-- Requires decision D12; a sandboxed Lua environment must be proven before acceptance.
+- Rejected by decision D12 (specification section 3.7): Pandoc's `--sandbox` does not restrict Lua filters, so an administrator-supplied filter would be arbitrary code on the worker. Cancelled.
 - Reuses the internal-filter mechanism introduced by T111.
 - Sequencing: start only after the in-progress Composer iterations T89, T90 and T91 are Done (work-in-progress limit accepted on 2026-10-09). This is an ordering rule, not a Linear blocking relation.
 
@@ -36,6 +36,7 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 
 - 2026-10-09: Created in Linear and mirrored here from the owner-accepted repository analysis.
   Not started.
+- 2026-10-09: Cancelled by T96 decision D12.
 
 ## Synchronization
 

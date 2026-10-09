@@ -18,7 +18,7 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 ## Acceptance criteria
 
 - Browser 2docx and 2pptx workspaces accept a multi-file or folder selection and drag and drop; the CLI accepts a Markdown path and collects the referenced local images.
-- The client or API packages the files into the existing approved archive boundary; all archive, path, image, SVG, size and count limits and ClamAV scanning still apply.
+- The browser or CLI client packages the files client-side into the existing approved archive boundary and the HTTP input contract is unchanged (D2); all archive, path, image, SVG, size and count limits and ClamAV scanning still apply.
 - Missing or escaping image references produce the existing stable validation errors.
 - Unit, integration and final-image E2E tests in both profiles cover the primary path, missing image, path traversal and oversize cases.
 - Update the conversion UI, CLI and capability documentation.
@@ -29,7 +29,7 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 
 ## Blocking points
 
-- Requires decision D2 (input contract change).
+- Decision D2 recorded in specification section 3.7: client-side packaging, unchanged HTTP input contract.
 
 ## Progress
 

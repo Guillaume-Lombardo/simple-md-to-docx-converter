@@ -28,7 +28,7 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 
 ## Blocking points
 
-- Requires decision D4.
+- Decision D4 recorded in specification section 3.7.
 - LibreOffice does not always populate a Pandoc TOC field on PDF export; a verified index-update step is required before PDF claims.
 - Sequencing: start only after the in-progress Composer iterations T89, T90 and T91 are Done (work-in-progress limit accepted on 2026-10-09). This is an ordering rule, not a Linear blocking relation.
 

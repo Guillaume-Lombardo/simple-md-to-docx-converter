@@ -27,7 +27,7 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 
 ## Blocking points
 
-- Requires decision D14.
+- Deferred by decision D14 (specification section 3.7): Linux/AMD64 remains the only supported image platform.
 - Several pinned artifacts are x86-64 only today (anydoc ABI3 wheel; the Chrome build used by Mermaid); ARM64 replacements need supply-chain review.
 - ARM64 CI runners are required.
 - Sequencing: start only after the in-progress Composer iterations T89, T90 and T91 are Done (work-in-progress limit accepted on 2026-10-09). This is an ordering rule, not a Linear blocking relation.
@@ -36,6 +36,7 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 
 - 2026-10-09: Created in Linear and mirrored here from the owner-accepted repository analysis.
   Not started.
+- 2026-10-09: Deferred by T96 decision D14; stays in the backlog.
 
 ## Synchronization
 

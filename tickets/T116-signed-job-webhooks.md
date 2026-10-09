@@ -29,7 +29,7 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 
 ## Blocking points
 
-- Requires decision D9 (outbound network policy).
+- Decision D9 recorded in specification section 3.7 (reuse the Composer egress policy component).
 - Endpoint registration for automation relies on T114 tokens.
 - Sequencing: start only after the in-progress Composer iterations T89, T90 and T91 are Done (work-in-progress limit accepted on 2026-10-09). This is an ordering rule, not a Linear blocking relation.
 

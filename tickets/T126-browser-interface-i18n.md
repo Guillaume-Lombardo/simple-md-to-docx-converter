@@ -27,13 +27,14 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 
 ## Blocking points
 
-- Requires decision D13: AGENTS.md currently requires English user-interface copy.
+- Deferred by decision D13 (specification section 3.7): the English-only interface rule stays in force.
 - Sequencing: start only after the in-progress Composer iterations T89, T90 and T91 are Done (work-in-progress limit accepted on 2026-10-09). This is an ordering rule, not a Linear blocking relation.
 
 ## Progress
 
 - 2026-10-09: Created in Linear and mirrored here from the owner-accepted repository analysis.
   Not started.
+- 2026-10-09: Deferred by T96 decision D13; stays in the backlog.
 
 ## Synchronization
 

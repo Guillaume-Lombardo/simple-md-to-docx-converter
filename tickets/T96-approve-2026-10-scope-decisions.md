@@ -2,7 +2,7 @@
 ticket: T96
 linear_id: G1L-616
 linear_url: https://linear.app/g1lom/issue/G1L-616/t96-approve-the-2026-10-scope-changes-in-the-product-specification
-status: Backlog
+status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -47,6 +47,12 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 
 - 2026-10-09: Created in Linear and mirrored here from the owner-accepted repository analysis.
   Not started.
+- 2026-10-09: The owner reviewed recommendations for D1-D15 and approved them. D1-D10 and D15 are
+  approved as recommended; D11 approves HTML and ODT and defers EPUB; D12 rejects the Lua filter
+  catalogue (T124 cancelled); D13 and D14 are deferred (T126 and T127 stay in the backlog). The
+  decisions are recorded in new specification section 3.7, with the matching section 2, 3.4, 4, 5,
+  7, 8, 13 and 14 amendments, and the dependent ticket mirrors and Linear issues are updated.
+  Documentation tests pass. T96 stays In Progress until the change is verified on main.
 
 ## Synchronization
 

@@ -7,7 +7,7 @@ priority: Low
 project: Markdown to DOCX and PDF Converter
 ---
 
-# T122 - Add HTML, EPUB and ODT outputs
+# T122 - Add self-contained HTML and ODT outputs
 
 ## Objective
 
@@ -17,7 +17,7 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 
 ## Acceptance criteria
 
-- Self-contained HTML with no remote resources and a strict sanitizer policy, EPUB, and ODT outputs selectable in API, browser and CLI.
+- Self-contained HTML with no remote resources and a strict sanitizer policy, and ODT outputs, selectable in API, browser and CLI.
 - Mermaid and images embedded; templates applied where meaningful.
 - Golden and final-image E2E coverage; capability matrix updated.
 
@@ -27,13 +27,14 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 
 ## Blocking points
 
-- Requires decision D11.
+- Decision D11 recorded in specification section 3.7: HTML and ODT approved, EPUB deferred.
 - Sequencing: start only after the in-progress Composer iterations T89, T90 and T91 are Done (work-in-progress limit accepted on 2026-10-09). This is an ordering rule, not a Linear blocking relation.
 
 ## Progress
 
 - 2026-10-09: Created in Linear and mirrored here from the owner-accepted repository analysis.
   Not started.
+- 2026-10-09: Re-scoped by T96 decision D11: EPUB removed, HTML and ODT kept.
 
 ## Synchronization
 

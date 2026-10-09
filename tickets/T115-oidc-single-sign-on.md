@@ -28,7 +28,7 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 
 ## Blocking points
 
-- Requires decision D8.
+- Decision D8 recorded in specification section 3.7 (OIDC only; SAML and LDAP through an OIDC broker).
 - Integration and E2E tests need a pinned IdP image (for example Keycloak or Dex) in CI.
 - Sequencing: start only after the in-progress Composer iterations T89, T90 and T91 are Done (work-in-progress limit accepted on 2026-10-09). This is an ordering rule, not a Linear blocking relation.
 

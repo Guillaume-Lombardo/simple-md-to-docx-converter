@@ -19,7 +19,7 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 
 - Archive inputs may include a bibliography file; front matter selects it and a CSL style from an administrator-managed, versioned catalogue.
 - Bibliography parsing is bounded and validated; no remote CSL or bibliography loading.
-- Missing citation keys produce warnings or stable errors as decided in D6.
+- Missing citation keys produce warnings, not failures (D6).
 - Golden DOCX/PDF tests and final-image E2E in both profiles.
 
 ## Dependencies
@@ -28,7 +28,7 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 
 ## Blocking points
 
-- Requires decision D6, including CSL style licensing (many styles are CC BY-SA).
+- Decision D6 recorded in specification section 3.7; bundled CSL styles must carry their CC BY-SA attribution.
 - Sequencing: start only after the in-progress Composer iterations T89, T90 and T91 are Done (work-in-progress limit accepted on 2026-10-09). This is an ordering rule, not a Linear blocking relation.
 
 ## Progress

@@ -17,7 +17,7 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 
 ## Acceptance criteria
 
-- Record in the specification (decision D15) and in README/`docs/index.md` that 2md is kept, experimental and feature-frozen: only security fixes, dependency updates and regressions are accepted.
+- Record in README/`docs/index.md` the D15 freeze already stated in specification section 3.7: 2md is kept, experimental and feature-frozen: only security fixes, dependency updates and regressions are accepted.
 - List the reverse-conversion tickets and ideas that are paused (including OCR and the T74 Kubernetes backend).
 - No code is removed; all reverse-conversion tests remain in CI.
 

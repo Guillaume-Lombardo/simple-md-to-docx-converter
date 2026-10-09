@@ -28,7 +28,7 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 
 ## Blocking points
 
-- Requires decision D10.
+- Decision D10 recorded in specification section 3.7 (local stdio server first; remote HTTP MCP needs a separate decision).
 - Sequencing: start only after the in-progress Composer iterations T89, T90 and T91 are Done (work-in-progress limit accepted on 2026-10-09). This is an ordering rule, not a Linear blocking relation.
 
 ## Progress
