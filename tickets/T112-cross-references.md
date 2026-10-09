@@ -18,7 +18,7 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 ## Acceptance criteria
 
 - Documented syntax for labels and references; numbering is consistent in DOCX, PDF and PPTX where meaningful.
-- Unresolved references produce a warning or a stable error, as decided in D5.
+- Unresolved references produce a warning, not a failure (D5).
 - Golden and E2E coverage; supply-chain record for any new binary.
 
 ## Dependencies

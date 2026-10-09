@@ -19,8 +19,8 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 
 - Owner renames the GitHub repository; GitHub redirects remain in place.
 - Update project URLs in `pyproject.toml`, README, docs, SECURITY/SUPPORT policies, OCI image labels, CLI help, quickstart clone commands and tests that assert URLs.
-- Update the PyPI Trusted Publisher configuration and verify a dry-run publication path before the next release.
-- Decide whether the GHCR image name `md-converter` is kept (no break) or migrated (requires a dual-publication and upgrade note).
+- Before the rename, add the new repository name as a second PyPI Trusted Publisher; remove the old publisher only after a successful release from the renamed repository.
+- Keep the GHCR image name `md-converter` (owner decision 2026-10-09); no image migration.
 - Rename the Linear project if the owner wants the names aligned.
 
 ## Dependencies

@@ -21,6 +21,7 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 - Cover malformed TeX and confirm the stable failure or literal fallback behavior.
 - Clarify the section 5 sentence 'TeX-like text is ordinary text' so it refers to raw TeX only, and document math in `docs/pandoc-docx.md` and `docs/powerpoint.md`.
 - Verify with the exact approved Pandoc 3.10.2 artifact (the analysis checked only Pandoc 3.1.3).
+- Add a final-image test that fails when the LibreOffice Math module is missing, because without it equations silently disappear from the PDF while the DOCX keeps them.
 
 ## Dependencies
 
@@ -28,7 +29,7 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 
 ## Blocking points
 
-- LibreOffice must render OMML correctly in the PDF path; verify before claiming PDF math.
+- Spike 2026-10-09 (Pandoc 3.1.3, LibreOffice 24.2): OMML equations render in the PDF only when LibreOffice Math is installed; confirm with the pinned Pandoc 3.10.2 and LibreOffice 26.2.5 final image.
 
 ## Progress
 

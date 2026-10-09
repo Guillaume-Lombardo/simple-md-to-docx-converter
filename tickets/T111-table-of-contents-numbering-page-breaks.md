@@ -29,7 +29,7 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 ## Blocking points
 
 - Decision D4 recorded in specification section 3.7.
-- LibreOffice does not always populate a Pandoc TOC field on PDF export; a verified index-update step is required before PDF claims.
+- Spike 2026-10-09 (Pandoc 3.1.3, LibreOffice 24.2): `soffice --convert-to pdf` leaves the table of contents empty; updating the document indexes through a fixed LibreOffice UNO script before PDF export populates entries and page numbers. Use that UNO path only when the document contains an index, keep the existing `--convert-to` path otherwise, and include a security review of the UNO path (isolated profile, local pipe, process-group termination). Confirm with the pinned versions.
 - Sequencing: start only after the in-progress Composer iterations T89, T90 and T91 are Done (work-in-progress limit accepted on 2026-10-09). This is an ordering rule, not a Linear blocking relation.
 
 ## Progress

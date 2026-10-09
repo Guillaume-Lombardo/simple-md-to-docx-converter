@@ -29,7 +29,7 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 
 ## Blocking points
 
-- A pull request created with the default `GITHUB_TOKEN` does not trigger the required CI workflows; a GitHub App or fine-grained token with reviewed permissions is required. Owner action on repository secrets is needed.
+- A pull request created with the default `GITHUB_TOKEN` does not trigger the required CI workflows; the owner chose a dedicated GitHub App installed only on this repository with `contents: write` and `pull-requests: write` (2026-10-09). The owner must create it and store its credentials as repository secrets before implementation.
 
 ## Progress
 

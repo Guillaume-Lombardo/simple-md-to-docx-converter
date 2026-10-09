@@ -30,7 +30,7 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 
 ## Blocking points
 
-- Coverage merging across workers and the custom `scripts.ci.pytest_branch_coverage` plugin must be proven equivalent before CI adopts parallelism.
+- Coverage merging across workers and the custom `scripts.ci.pytest_branch_coverage` plugin must be proven equivalent before CI adopts parallelism. Recommended approach (owner-approved 2026-10-09): pytest-xdist with pytest-cov's built-in xdist support, after a short spike on the custom plugin.
 
 ## Progress
 

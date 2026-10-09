@@ -708,7 +708,8 @@ documentation.
   reviewed validator proves it.
 - **D5 – Cross-references (T112).** Use a reviewed internal Pandoc filter bundled with the product;
   do not add the separate `pandoc-crossref` binary. Internal filters are product code with fixed
-  arguments and tests; they are never selected or supplied by users or administrators.
+  arguments and tests; they are never selected or supplied by users or administrators. An
+  unresolved reference produces a warning, not a failure.
 - **D6 – Citations (T113).** Use Pandoc's built-in citeproc. BibTeX or CSL-JSON bibliographies
   arrive inside the input archive. A small set of CSL styles ships with the product with the
   attribution its licence requires; administrators may add immutable, versioned styles with the

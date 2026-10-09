@@ -29,7 +29,7 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 ## Blocking points
 
 - Decision D4 recorded in specification section 3.7 (PDF/A-2b and tagged PDF; no PDF/UA conformance claim).
-- A PDF/A validator (veraPDF requires Java) must be added to the reviewed test toolchain.
+- Validate in CI with the official veraPDF container image pinned by digest; do not add Java to the product image. PDF/A export uses `--convert-to` filter options and does not need the T111 UNO path (owner-approved 2026-10-09).
 - Sequencing: start only after the in-progress Composer iterations T89, T90 and T91 are Done (work-in-progress limit accepted on 2026-10-09). This is an ordering rule, not a Linear blocking relation.
 
 ## Progress

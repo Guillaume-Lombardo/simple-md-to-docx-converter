@@ -29,7 +29,7 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 
 ## Blocking points
 
-- Must not land while a published release and the public Compose pin differ (AGENTS.md release rule); schedule outside a release-adoption window.
+- Must not land while a published release and the public Compose pin differ (AGENTS.md release rule); schedule outside a release-adoption window. Owner preference (2026-10-09): land before the T93 0.8.0 release starts; PyPI and the public Compose pin were both 0.7.3 on that date.
 
 ## Progress
 

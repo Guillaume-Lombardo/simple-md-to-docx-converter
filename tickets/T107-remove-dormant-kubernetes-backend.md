@@ -30,8 +30,8 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 
 ## Blocking points
 
-- Owner confirms T74 stays deferred.
-- Removing a published optional extra and console script is a packaging compatibility change; it must ship in a release with an upgrade note.
+- The owner confirmed on 2026-10-09 that T74 stays deferred.
+- Removing a published optional extra and console script is a packaging compatibility change; it must ship in a release with an upgrade note; target the 0.8.0 minor release (T93).
 - If T96 is still open, T96 owns the specification wording for sections 2 and 14; only one ticket edits the specification at a time.
 
 ## Progress

@@ -30,7 +30,7 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 
 ## Blocking points
 
-- Changing the canonical command edits AGENTS.md and specification section 10; the PR needs explicit owner approval of that operational-rule change.
+- The owner approved the AGENTS.md and specification section 10 canonical-command change on 2026-10-09; the PR still needs the normal independent review.
 
 ## Progress
 

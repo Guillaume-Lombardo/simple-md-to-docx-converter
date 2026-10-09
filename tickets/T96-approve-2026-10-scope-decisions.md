@@ -53,6 +53,10 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
   decisions are recorded in new specification section 3.7, with the matching section 2, 3.4, 4, 5,
   7, 8, 13 and 14 amendments, and the dependent ticket mirrors and Linear issues are updated.
   Documentation tests pass. T96 stays In Progress until the change is verified on main.
+- 2026-10-09: The owner also decided that an unresolved cross-reference produces a warning (D5),
+  approved the recommendations for the remaining blocking points (recorded in T97, T98, T99, T100,
+  T102, T103, T107, T111, T112, T115, T118 and T125), and asked to publish T96 from
+  `docs/T96-scope-decisions`.
 
 ## Synchronization
 
