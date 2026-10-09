@@ -21,7 +21,7 @@ The service accepts a standalone `.md` file or a `.zip` archive containing Markd
 The product includes Convert and experimental Revert workspaces, the optional Composer workspace,
 template administration, local authentication, two configurable storage profiles, a hardened UBI 9
 image, selective GitHub
-Actions workflows, and an autonomous Codex development workflow.
+Actions workflows, and an autonomous development workflow.
 
 ## 2. Fixed decisions
 
@@ -52,8 +52,8 @@ Actions workflows, and an autonomous Codex development workflow.
 | Forge and CI | GitHub and GitHub Actions |
 | Python distribution | `markweave` on PyPI with public import `markweave`; availability must be rechecked immediately before the first publication attempt, and a pending Trusted Publisher does not reserve the name |
 | Command line | The installed `markweave` executable exposes every supported HTTP user/administrator operation and the local `serve`, `worker`, `doctor`, `migrate`, `backup`, and `restore` operational commands |
-| CLI boundary | Business commands use only the documented HTTP API; only operational commands may access runtime or storage services directly |
-| CLI authentication | Remote commands reuse the existing session and CSRF contract, prompt passwords without echo or process arguments, and keep only bounded session state in owner-only XDG files; no API token is introduced |
+| CLI boundary | Business commands use only the documented HTTP API; only operational commands and the explicit local conversion command of section 3.7 (D1) may access runtime services directly |
+| CLI authentication | Remote commands reuse the existing session and CSRF contract, prompt passwords without echo or process arguments, and keep only bounded session state in owner-only XDG files; scoped API tokens follow section 3.7 (D7) |
 | Configuration names | `MARKWEAVE_*` is canonical; legacy `MD_CONVERTER_*` aliases remain supported throughout 0.x, conflicting dual definitions fail closed, and aliases are removed in 1.0 |
 | Git workflow | Trunk-based, short branches, pull requests to `main`, squash merge |
 | Python dependencies | `uv` |
@@ -61,9 +61,9 @@ Actions workflows, and an autonomous Codex development workflow.
 | Coverage | At least 90% of application Python and 90% of changed Python lines |
 | Standalone storage | SQLite and files on a PVC, one replica |
 | Distributed storage | PostgreSQL and S3-compatible object storage |
-| Initial authentication | Local username/password behind an OIDC-ready abstraction |
+| Initial authentication | Local username/password behind an OIDC-ready abstraction; OIDC single sign-on follows section 3.7 (D8); SAML and LDAP are out of scope |
 | Document resources | Remote-loaded resources are forbidden; validated HTTP(S) hyperlinks are allowed |
-| Markdown reader | `commonmark_x+pipe_tables+footnotes+attributes+yaml_metadata_block-raw_html`, with raw HTML rejected before Pandoc |
+| Markdown reader | `commonmark_x+pipe_tables+footnotes+attributes+yaml_metadata_block-raw_html`, with raw HTML rejected before Pandoc except the closed allowlist of section 3.7 (D3) |
 | Browser sandbox | Keep Chromium's sandbox enabled; validate a minimal seccomp/user-namespace profile on rootless Podman, then k3s; never use `--no-sandbox`; defer OpenShift proof |
 | Document fonts | Liberation plus Carlito/Caladea, DejaVu as fallback, and Noto only for explicitly required scripts |
 | Distributed test object store | RustFS for CI and k3s, behind a provider-neutral AWS S3-compatible contract |
@@ -321,7 +321,8 @@ non-interactive execution, and retain arbitrary-UID and read-only-root behavior 
 `markweave login` prompts a password through a non-echoing terminal path and never accepts it as a
 process argument. Named remote profiles keep the service URL, opaque session state, and CSRF state
 under the XDG directories in atomic owner-only `0600` files. They never retain the password. TLS
-verification is enabled by default. API tokens are outside this delivery scope.
+verification is enabled by default. Remote profiles may instead use the scoped API tokens of
+section 3.7 (D7); the local conversion command follows section 3.7 (D1).
 
 T31 owns the root command registry and pre-registers stable, initially unavailable command-family
 modules for authentication, conversions/jobs, templates, administration/audit/health, runtime
@@ -678,9 +679,78 @@ their delivery without separately approved scope. Numerical limits, retention pe
 access defaults, preview cache budgets, and fidelity thresholds remain configurable or evidence-
 gated; this specification does not invent production values.
 
+### 3.7 Approved capability decisions (T96)
+
+On 2026-10-09 the owner recorded these decisions for T96. They amend the sections they name and
+authorize only the referenced tickets; each ticket still owns its implementation, tests, and
+documentation.
+
+- **D1 – Local conversion command (T106).** `markweave convert` gains an explicit local mode that
+  runs the same validation, archive, image, Mermaid, Pandoc, and LibreOffice adapters and limits
+  without the HTTP API, an account, persistence, or ClamAV, because the input is the operator's own
+  local file. It refuses to run when a required engine is missing. When an engine version differs
+  from the approved pin it warns and records the actual versions in the traceability manifest;
+  `--require-pinned` turns that warning into a failure. The final image is the documented way to
+  run it with the approved engines. Local mode is not a substitute for the service for untrusted
+  input, and remote business commands keep the HTTP-only boundary.
+- **D2 – Markdown with local images (T104).** The HTTP input contract of sections 3.1 and 4 is
+  unchanged. The browser and CLI clients may let a user select or drop a Markdown file together
+  with its images or a folder, and package them client-side into the approved archive layout before
+  upload. The server applies the same archive, image, scanning, and limit rules to that archive.
+- **D3 – Inline HTML allowlist (T105).** Before Pandoc, the validator translates only `<br>`,
+  `<sub>`, `<sup>`, `<kbd>`, and `<u>` without attributes into equivalent Pandoc constructs and
+  removes HTML comments. Every other raw HTML node, every attribute, and every malformed or
+  encoded variant is still rejected. Literal HTML inside code spans and code blocks stays literal.
+- **D4 – Table of contents and PDF/A (T111, T118).** Automatic table of contents, section numbering,
+  and explicit page breaks are approved as template defaults with job-level overrides. PDF/A-2b and
+  tagged PDF are approved as PDF export options through LibreOffice. A table-of-contents claim for
+  PDF requires a verified populated index. The product does not claim PDF/UA conformance until a
+  reviewed validator proves it.
+- **D5 – Cross-references (T112).** Use a reviewed internal Pandoc filter bundled with the product;
+  do not add the separate `pandoc-crossref` binary. Internal filters are product code with fixed
+  arguments and tests; they are never selected or supplied by users or administrators. An
+  unresolved reference produces a warning, not a failure.
+- **D6 – Citations (T113).** Use Pandoc's built-in citeproc. BibTeX or CSL-JSON bibliographies
+  arrive inside the input archive. A small set of CSL styles ships with the product with the
+  attribution its licence requires; administrators may add immutable, versioned styles with the
+  same ownership and audit rules as templates. Remote styles and bibliographies are never loaded.
+  A missing citation key produces a warning, not a failure.
+- **D7 – API tokens (T114).** Scoped, revocable, expiring API tokens are approved. They are accepted
+  only in the `Authorization: Bearer` header, never in cookies or URLs, and are stored only as
+  digests. Because browsers never send them ambiently, token-authenticated requests are exempt
+  from CSRF checks; cookie sessions keep the existing CSRF contract. The maximum lifetime defaults
+  to 365 days and is configurable; every use is audited; administrators can disable the feature
+  and revoke any token.
+- **D8 – Single sign-on (T115).** OpenID Connect is approved through the existing abstraction, with
+  just-in-time account creation and configurable group-to-role mapping. Local accounts remain
+  available, at least for administrator break-glass access. SAML and LDAP are out of scope;
+  deployments that need them use an OIDC broker.
+- **D9 – Webhooks (T116).** Job-completion webhooks are approved. Delivery reuses the Composer egress
+  policy component: HTTPS only, an administrator destination allowlist, private and special-purpose
+  addresses rejected by default with DNS re-validation, content-free payloads limited to job
+  identifiers and states, HMAC-SHA256 signatures with timestamps, and bounded at-least-once
+  retries. Document engines remain unable to initiate network requests.
+- **D10 – MCP (T117).** A local stdio MCP server (`markweave mcp`) is approved. It authenticates with
+  D7 tokens and calls only the documented HTTP API, like other remote CLI commands. A remote HTTP
+  MCP endpoint requires a separate decision.
+- **D11 – Additional outputs (T122).** Self-contained HTML without remote resources and ODT are
+  approved. EPUB is deferred.
+- **D12 – Lua filter catalogue (T124).** Rejected. Pandoc's `--sandbox` does not restrict Lua
+  filters, so an administrator-supplied filter would be arbitrary code on the worker. Only the
+  internal filters of D5 and T111 are allowed. T124 is cancelled.
+- **D13 – Interface languages (T126).** Deferred. The English-only user-interface rule in AGENTS.md
+  remains in force; T126 stays in the backlog.
+- **D14 – Linux/ARM64 images (T127).** Deferred. Linux/AMD64 remains the only supported image
+  platform; T127 stays in the backlog.
+- **D15 – Reverse conversion freeze (T108).** Experimental reverse conversion is kept and its scope
+  is frozen. Only security fixes, regression fixes, and dependency updates that pass the existing
+  qualification are accepted. OCR and the T74 Kubernetes backend remain paused.
+
 ## 4. Input contract
 
-A standalone Markdown file is accepted only when it has no local-resource dependency. The service
+A standalone Markdown file is accepted only when it has no local-resource dependency. Clients may
+package a selected Markdown file and its local images into the archive layout below (section 3.7,
+D2). The service
 never downloads document images, stylesheets, or other remote resources. Ordinary hyperlink
 destinations are not loaded: accept only well-formed absolute HTTP(S) hyperlinks with a host, no
 embedded credentials, and no control characters. Reject other URI schemes, protocol-relative
@@ -710,7 +780,9 @@ Supported image candidates are PNG, JPEG, sanitized SVG, static GIF, and WebP. R
 Use the exact Pandoc reader expression
 `commonmark_x+pipe_tables+footnotes+attributes+yaml_metadata_block-raw_html`. Because Pandoc 3.10.2
 can still emit raw HTML nodes with that reader, reject raw HTML in the validated Markdown input
-before invoking Pandoc. Disable user filters, user includes, and remote resources. TeX-like text is
+before invoking Pandoc. Disable user and administrator filters, user includes, and remote resources; only the reviewed
+internal filters of section 3.7 (D5) may run. Translate only the inline HTML allowlist of section
+3.7 (D3). TeX-like text is
 ordinary text for this reader; no unsupported `-raw_tex` flag is added.
 
 Evaluate `pandoc --sandbox` in T00 with images and `reference.docx`; do not claim it is enabled until the complete pipeline passes. Run Pandoc from the job workspace with fixed arguments, no shell, no network, deadlines, memory limits, and an unprivileged identity.
@@ -781,6 +853,9 @@ bounded pagination and payloads, safe errors, and private no-store downloads. Th
 receives corresponding supported operations. Secrets are write-only and never appear in OpenAPI
 examples, response bodies, logs, or generated client fixtures.
 
+Section 3.7 adds scoped API-token management (D7), OIDC login (D8), and webhook registration (D9)
+to this contract.
+
 Support `Idempotency-Key` for job creation. Preserve the existing forward-conversion authorization
 contract. For reverse conversions, enforce the stricter owner-only content and lifecycle contract
 in section 3.5; administrator visibility is limited to its separately audited, content-free
@@ -798,6 +873,7 @@ readiness cheap; it must not run a conversion.
 - Restrict egress by profile and never allow document-controlled network access.
 - Permit Composer model egress only through the authorized backend connection boundary of section
   3.6.1; document engines and rendered documents remain unable to initiate network requests.
+- Permit webhook delivery egress only through the policy of section 3.7 (D9).
 - Produce JSON logs with correlation identifiers and no content, filename, secret, or absolute path.
 - Expose queue depth and age, active jobs, step durations, failures, saturation, expiration, retry, and recovery metrics.
 - Audit actor, owner, operation, target, and version for every sensitive mutation.
@@ -888,7 +964,7 @@ readiness cheap; it must not run a conversion.
 
 ## 9. Repository and autonomous development
 
-Keep `main` as the only long-lived branch. Every contributor and agent uses a short `<type>/<issue>-<subject>` branch and an isolated worktree when needed. Branch names never identify Codex, another agent, or an automation tool. One pull request normally covers one issue or coherent vertical slice. Draft pull requests run light checks; ready pull requests run the required domain matrix. Squash after required checks, resolved discussions, and an independent agent or GitHub review. Delete the branch and worktree only after verified merge.
+Keep `main` as the only long-lived branch. Every contributor and agent uses a short `<type>/<issue>-<subject>` branch and an isolated worktree when needed. Branch names never identify an agent or an automation tool. One pull request normally covers one issue or coherent vertical slice. Draft pull requests run light checks; ready pull requests run the required domain matrix. Squash after required checks, resolved discussions, and an independent agent or GitHub review. Delete the branch and worktree only after verified merge.
 
 The orchestrator selects ready work from the [Linear project](https://linear.app/g1lom/project/markdown-to-docx-and-pdf-converter-3724edb949f9), synchronizes it with `tickets/*.md`, limits scope, reserves components, tracks dependencies, assigns implementation and independent review, serializes or queues merges, watches `main`, and stops merges when `main` is red. Two agents must not edit the same component concurrently.
 
@@ -1074,6 +1150,49 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T91 | Add permissioned structured author knowledge and typed repeating document templates | T90 |
 | T92 | Deliver qualified structured DOCX/PPTX editing tools and a cited, permissioned document library | T91 |
 | T93 | Complete two-profile/final-image Composer qualification, publish minor 0.8.0, adopt exact published receipts, and deploy the matched public set | T92 |
+| T96 | Record the owner scope decisions D1-D15 that the 2026-10-09 findings require before implementation | — |
+| T97 | Mark Podman-dependent tests and repair the default local test command | — |
+| T98 | Make the local Python test suite fast enough for iteration without weakening coverage gates | T97 |
+| T99 | Consolidate Compose variants with profiles without changing deployed behavior | — |
+| T100 | Automate published image receipt adoption after a release from verified evidence | — |
+| T101 | Separate the normative specification from delivery history | T96 |
+| T102 | Rename the GitHub repository to markweave | — |
+| T103 | Document and test math rendering | — |
+| T104 | Accept Markdown with local images without a hand-built ZIP | T96 |
+| T105 | Allow a sanitized inline HTML subset | T96 |
+| T106 | Add local serverless CLI conversion | T96 |
+| T107 | Remove the dormant Kubernetes isolation backend from main, recoverable from an archive tag | — |
+| T108 | Freeze the experimental reverse conversion scope | T96 |
+| T109 | Relocate completed spikes and archive historical evidence | — |
+| T110 | Remove legacy `MD_CONVERTER_*` configuration aliases at 1.0 | — |
+| T111 | Add table of contents, section numbering and page breaks | T96 |
+| T112 | Add cross-references for figures, tables and equations | T96, T111 |
+| T113 | Add citations and bibliography | T96 |
+| T114 | Add scoped revocable API tokens | T96 |
+| T115 | Add OIDC single sign-on with group-to-role mapping | T96 |
+| T116 | Add signed job-completion webhooks | T96, T114 |
+| T117 | Add an MCP server for AI agents | T96, T114 |
+| T118 | Add PDF/A and tagged accessible PDF output | T96 |
+| T119 | Add a live preview to the conversion workspace | T90 |
+| T120 | Add batch conversion and a CLI watch mode | T106 |
+| T121 | Provide a GitHub Action and a pre-commit hook | T106 |
+| T122 | Add self-contained HTML and ODT outputs (EPUB deferred by D11) | T96 |
+| T123 | Add deterministic data-driven DOCX template filling | T91 |
+| T124 | Cancelled by D12: administrator-approved Pandoc Lua filter catalogue | T96, T111 |
+| T125 | Add VS Code and Obsidian integrations | T104, T114 |
+| T126 | Internationalize the browser interface (deferred by D13) | T96 |
+| T127 | Publish Linux/ARM64 images (deferred by D14) | T96 |
+
+On 2026-10-09 the owner accepted the repository analysis that created T96–T127. The owner kept
+the experimental reverse conversion and asked for its scope to be frozen (T108) rather than removed.
+T96 records the owner's scope decisions D1–D15 in section 3.7. A ticket that depends on T96 may
+start once T96 is merged on main; until then the earlier requirements remain authoritative. D12
+cancels T124, D11 removes EPUB from T122, and D13 and D14 keep T126 and T127 deferred.
+T97, T99, T100, T102, T103, T107, T109 and T110 need no scope decision; T97, T102, T107 and T110
+still carry the owner actions or release constraints recorded in their tickets. The
+competitor-feature tickets T111–T127 start only after the in-progress Composer iterations T89–T91
+are Done; this work-in-progress limit is an ordering rule and does not add blocking dependencies. Only one ticket
+edits this specification at a time, so T101 follows T96.
 
 The Composer programme approved on 2026-09-22 follows T88 qualification, then T89–T92 as four
 cohesive implementation iterations and T93 release/adoption. The earlier priority notes below
@@ -1160,8 +1279,10 @@ the ticket before touching any path owned by another active ticket.
   approved template/audit retention, ClamAV, and recovery contracts are fixed in section 8.2.
 - T22 fixes the complete-suite schedule to Sunday at 03:17 UTC, the heavy-job timeout to 45 minutes,
   and heavy-matrix parallelism to two jobs. Monitor hosted usage before changing this policy.
-- PDF/A output and automatic Word or PDF table-of-contents generation are outside the initial
-  product scope. Adding either capability requires separately approved future scope.
+- PDF/A-2b, tagged PDF, and automatic table-of-contents generation were initially excluded and
+  are now approved by section 3.7 (D4). PDF/UA conformance claims, EPUB output, user or
+  administrator Pandoc filters, interface languages other than English, and Linux/ARM64 images
+  remain outside the approved scope (section 3.7, D4 and D11–D14).
 - T69 owns the exact reverse-conversion format matrix, pinned anydoc release and binding, asset-aware
   serializer strategy, content-free manifest schema, asset-free download type, honest text-PDF/image
   contract, and synchronous-native-call cancellation/timeout/memory/lease decision. Its approved
