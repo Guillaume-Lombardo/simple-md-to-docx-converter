@@ -781,7 +781,8 @@ Use the exact Pandoc reader expression
 `commonmark_x+pipe_tables+footnotes+attributes+yaml_metadata_block-raw_html`. Because Pandoc 3.10.2
 can still emit raw HTML nodes with that reader, reject raw HTML in the validated Markdown input
 before invoking Pandoc. Disable user and administrator filters, user includes, and remote resources; only the reviewed
-internal filters of section 3.7 (D5) may run. Translate only the inline HTML allowlist of section
+internal cross-reference and page-break filters approved in section 3.7 (D5 and D12,
+T111) may run. Translate only the inline HTML allowlist of section
 3.7 (D3). TeX-like text is
 ordinary text for this reader; no unsupported `-raw_tex` flag is added.
 

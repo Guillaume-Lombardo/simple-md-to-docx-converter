@@ -58,7 +58,7 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
   T102, T103, T107, T111, T112, T115, T118 and T125), and asked to publish T96 from
   `docs/T96-scope-decisions`.
 
-- 2026-10-10: Prepared the owner-approved scope changes on `docs/T96-scope-decisions`
+- 2026-10-10: Prepared the owner-approved scope changes on `docs/T96-approved-scope`
   against current main, preserved all 32 ticket mirrors, and verified their Linear identifiers,
   statuses, projects, teams and dependency relationships. Publication and independent review
   are pending; no application behavior or package version changes in this documentation work.
