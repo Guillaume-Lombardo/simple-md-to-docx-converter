@@ -1074,6 +1074,51 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T91 | Add permissioned structured author knowledge and typed repeating document templates | T90 |
 | T92 | Deliver qualified structured DOCX/PPTX editing tools and a cited, permissioned document library | T91 |
 | T93 | Complete two-profile/final-image Composer qualification, publish minor 0.8.0, adopt exact published receipts, and deploy the matched public set | T92 |
+| T96 | Record the owner scope decisions D1-D15 that the 2026-10-09 findings require before implementation | — |
+| T97 | Mark Podman-dependent tests and repair the default local test command | — |
+| T98 | Make the local Python test suite fast enough for iteration without weakening coverage gates | T97 |
+| T99 | Consolidate Compose variants with profiles without changing deployed behavior | — |
+| T100 | Automate published image receipt adoption after a release from verified evidence | — |
+| T101 | Separate the normative specification from delivery history | T96 |
+| T102 | Rename the GitHub repository to markweave | — |
+| T103 | Document and test math rendering | — |
+| T104 | Accept Markdown with local images without a hand-built ZIP | T96 |
+| T105 | Allow a sanitized inline HTML subset | T96 |
+| T106 | Add local serverless CLI conversion | T96 |
+| T107 | Remove the dormant Kubernetes isolation backend from main, recoverable from an archive tag | — |
+| T108 | Freeze the experimental reverse conversion scope | T96 |
+| T109 | Relocate completed spikes and archive historical evidence | — |
+| T110 | Remove legacy `MD_CONVERTER_*` configuration aliases at 1.0 | — |
+| T111 | Add table of contents, section numbering and page breaks | T96 |
+| T112 | Add cross-references for figures, tables and equations | T96, T111 |
+| T113 | Add citations and bibliography | T96 |
+| T114 | Add scoped revocable API tokens | T96 |
+| T115 | Add OIDC single sign-on with group-to-role mapping | T96 |
+| T116 | Add signed job-completion webhooks | T96, T114 |
+| T117 | Add an MCP server for AI agents | T96, T114 |
+| T118 | Add PDF/A and tagged accessible PDF output | T96 |
+| T119 | Add a live preview to the conversion workspace | T90 |
+| T120 | Add batch conversion and a CLI watch mode | T106 |
+| T121 | Provide a GitHub Action and a pre-commit hook | T106 |
+| T122 | Add HTML, EPUB and ODT outputs | T96 |
+| T123 | Add deterministic data-driven DOCX template filling | T91 |
+| T124 | Add an administrator-approved Pandoc Lua filter catalogue | T96, T111 |
+| T125 | Add VS Code and Obsidian integrations | T104, T114 |
+| T126 | Internationalize the browser interface | T96 |
+| T127 | Publish Linux/ARM64 images | T96 |
+
+On 2026-10-09 the owner accepted the repository analysis that created T96–T127. The owner kept
+the experimental reverse conversion and asked for its scope to be frozen (T108) rather than removed.
+These tickets do not change any normative requirement by themselves: T96 records each scope
+decision (D1–D15) that contradicts a fixed decision, input contract, or exclusion above, and every
+ticket that needs one is blocked by T96 until its decision is recorded on main. Until then, the
+existing requirements, including the section 2 CLI boundary and API-token exclusion, the section 5
+raw HTML rule, and the section 14 table-of-contents and PDF/A exclusions, remain authoritative.
+T97, T99, T100, T102, T103, T107, T109 and T110 need no scope decision; T97, T102, T107 and T110
+still carry the owner actions or release constraints recorded in their tickets. The
+competitor-feature tickets T111–T127 start only after the in-progress Composer iterations T89–T91
+are Done; this work-in-progress limit is an ordering rule and does not add blocking dependencies. Only one ticket
+edits this specification at a time, so T101 follows T96.
 
 The Composer programme approved on 2026-09-22 follows T88 qualification, then T89–T92 as four
 cohesive implementation iterations and T93 release/adoption. The earlier priority notes below
