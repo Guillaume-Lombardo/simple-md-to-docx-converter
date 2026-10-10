@@ -1,4 +1,11 @@
 import JSZip from "jszip";
+import MarkdownIt, {
+  type MarkdownIt as Parser,
+  type StateBlock,
+  type Token,
+} from "markdown-it";
+import footnote from "markdown-it-footnote";
+import { isAlias, isMap, isScalar, isSeq, parseDocument } from "yaml";
 
 /**
  * Client-side packaging of a Markdown file with its referenced local images
@@ -6,6 +13,19 @@ import JSZip from "jszip";
  * the approved archive layout before upload. The service still applies every
  * archive, path, image, scanning, and limit rule; these checks only give early
  * feedback with the service's stable validation messages.
+ *
+ * Image references are found with markdown-it, the original of the service's
+ * markdown-it-py parser, configured like the service: the CommonMark preset with
+ * HTML tokens, every link destination tokenized, footnotes, and the service's
+ * front-matter rule. YAML metadata scalars are parsed as Markdown like the
+ * service does. Intentional difference: the browser's YAML 1.2
+ * parser is stricter than the service's PyYAML (for example an unquoted value
+ * starting with "![" is an unseparated tag). When it rejects the metadata, image
+ * references found line by line in that metadata are optional: packaged when
+ * the file is selected, never an early error. The client is therefore never
+ * stricter than the service and never omits a selected image the service may
+ * need; the service stays authoritative. The shared fixture tests/fixtures/markdown-image-references.json
+ * proves parity with the service parser.
  */
 
 export const ENTRYPOINT = "document.md";
@@ -32,21 +52,128 @@ export const MIXED_ARCHIVE_SELECTION =
 const REMOTE_RESOURCE = /^(?:[a-z][a-z0-9+.-]*(?::|%3a)|\/\/|%2f%2f)/i;
 const AMBIGUOUS_ESCAPE = /%(?:2e|2f|5c)/i;
 const MAX_URL_DECODE_PASSES = 2;
-const FENCE = /^( {0,3})(`{3,}|~{3,})(.*)$/;
-const CONTAINER_PREFIX = /^(?:\s{0,3}(?:>|[-+*]|\d{1,9}[.)])(?:\s+|$))+/;
-const LIST_ITEM = /^\s{0,3}(?:[-+*]|\d{1,9}[.)])(?:\s|$)/;
-const DEFINITION = /^ {0,3}\[((?:[^\]\\]|\\.){1,999})\]:[ \t]*(\S.*)?$/;
-const ASCII_PUNCTUATION = new Set("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~");
-const INDENTED_CODE_COLUMNS = 4;
-const ASCII_CONTROL_END = 32;
-const NAMED_ENTITIES: Record<string, string> = {
-  amp: "&",
-  apos: "'",
-  gt: ">",
-  lt: "<",
-  nbsp: " ",
-  quot: '"',
-};
+
+const DOCUMENT = resourceParser().use(frontMatter);
+const METADATA = resourceParser();
+
+function resourceParser(): Parser {
+  const parser = new MarkdownIt("commonmark", { html: true }).use(footnote);
+  // Tokenize every destination so validation, not the parser, decides policy.
+  parser.validateLink = () => true;
+  return parser;
+}
+
+/** The service's front-matter block rule (mdit-py-plugins), ported exactly. */
+function frontMatter(parser: Parser): void {
+  parser.block.ruler.before("table", "front_matter", frontMatterRule, {
+    alt: ["paragraph", "reference", "blockquote", "list"],
+  });
+}
+
+function frontMatterRule(
+  state: StateBlock,
+  startLine: number,
+  endLine: number,
+  silent: boolean,
+): boolean {
+  const marker = "-";
+  let start = state.bMarks[startLine]! + state.tShift[startLine]!;
+  let maximum = state.eMarks[startLine]!;
+  if (startLine !== 0 || state.src[0] !== marker) return false;
+  let position = start + 1;
+  while (position <= maximum && position < state.src.length) {
+    if (state.src[position] !== marker) break;
+    position += 1;
+  }
+  const markerCount = position - start;
+  if (markerCount < 3) return false;
+  if (silent) return true;
+  let nextLine = startLine;
+  let autoClosed = false;
+  for (;;) {
+    nextLine += 1;
+    if (nextLine >= endLine) return false;
+    if (state.src.slice(start, maximum) === "...") break;
+    start = state.bMarks[nextLine]! + state.tShift[nextLine]!;
+    maximum = state.eMarks[nextLine]!;
+    if (start < maximum && state.sCount[nextLine]! < state.blkIndent) break;
+    if (state.src[start] !== marker) continue;
+    if (state.sCount[nextLine]! - state.blkIndent >= 4) continue;
+    position = start + 1;
+    while (position < maximum) {
+      if (state.src[position] !== marker) break;
+      position += 1;
+    }
+    if (position - start < markerCount) continue;
+    position = state.skipSpaces(position);
+    if (position < maximum) continue;
+    autoClosed = true;
+    break;
+  }
+  const oldParent = state.parentType;
+  const oldLineMax = state.lineMax;
+  state.parentType = "container" as typeof state.parentType;
+  state.lineMax = nextLine;
+  const token = state.push("front_matter", "", 0);
+  token.hidden = true;
+  token.markup = marker.repeat(3);
+  token.content = state.src.slice(
+    state.bMarks[startLine + 1],
+    state.eMarks[nextLine - 1],
+  );
+  token.block = true;
+  state.parentType = oldParent;
+  state.lineMax = oldLineMax;
+  state.line = nextLine + (autoClosed ? 1 : 0);
+  token.map = [startLine, state.line];
+  return true;
+}
+
+function walk(tokens: Token[]): Token[] {
+  const all: Token[] = [];
+  for (const token of tokens) {
+    all.push(token);
+    if (token.children) all.push(...walk(token.children));
+  }
+  return all;
+}
+
+function imageSources(tokens: Token[]): string[] {
+  return tokens
+    .filter((token) => token.type === "image")
+    .map((token) => String(token.attrGet("src") ?? ""));
+}
+
+/**
+ * Yield YAML scalar values in the service's traversal order. Like PyYAML's
+ * compose, this reads the node graph without constructing tagged values, keeps
+ * duplicate keys, and visits an aliased node once.
+ */
+function metadataScalars(metadata: string): string[] | undefined {
+  const document = parseDocument(metadata, { uniqueKeys: false });
+  if (document.errors.length) return undefined;
+  const scalars: string[] = [];
+  const pending: unknown[] = [document.contents];
+  const seen = new Set<unknown>();
+  while (pending.length) {
+    let node = pending.pop();
+    if (isAlias(node)) node = node.resolve(document);
+    if (!node || seen.has(node)) continue;
+    seen.add(node);
+    if (isScalar(node)) {
+      scalars.push(
+        typeof node.source === "string"
+          ? node.source
+          : String(node.value ?? ""),
+      );
+    } else if (isSeq(node)) {
+      pending.push(...node.items);
+    } else if (isMap(node)) {
+      for (const pair of node.items) pending.push(pair.key, pair.value);
+    }
+  }
+  return scalars;
+}
 
 export class PackageError extends Error {
   readonly code = "validation";
@@ -60,40 +187,43 @@ export type PreparedSource = {
   markdownName?: string;
 };
 
-/** Return image destinations in source order, excluding code. */
+/**
+ * Return every image src the service validates, in the service's order: body
+ * images first, then images in YAML metadata scalars.
+ */
 export function imageDestinations(markdown: string): string[] {
-  const text = stripInlineCode(withoutCodeBlocks(markdown));
-  const definitions = referenceDefinitions(text);
-  const destinations: string[] = [];
-  let index = 0;
-  while (index < text.length) {
-    if (text[index] === "\\") {
-      index += 2;
+  return imageReferences(markdown).required;
+}
+
+/**
+ * Split references into those the service certainly validates (`required`)
+ * and best-effort candidates (`optional`). Optional references come only from
+ * metadata the browser's YAML parser rejects although the service may accept
+ * it: they are packaged when present, but never block an upload.
+ */
+export function imageReferences(markdown: string): {
+  required: string[];
+  optional: string[];
+} {
+  const tokens = walk(DOCUMENT.parse(markdown, {}));
+  const required = imageSources(tokens);
+  const optional: string[] = [];
+  for (const token of tokens) {
+    if (token.type !== "front_matter") continue;
+    const scalars = metadataScalars(token.content);
+    if (scalars === undefined) {
+      for (const line of token.content.split("\n"))
+        optional.push(
+          ...imageSources(
+            walk(METADATA.parse(line.trim().replace(/^- /, ""), {})),
+          ),
+        );
       continue;
     }
-    if (!text.startsWith("![", index)) {
-      index += 1;
-      continue;
-    }
-    const labelEnd = matchingBracket(text, index + 1);
-    if (labelEnd === undefined) {
-      index += 2;
-      continue;
-    }
-    const [destination, next] = imageDestination(
-      text,
-      labelEnd,
-      text.slice(index + 2, labelEnd),
-      definitions,
-    );
-    if (destination === undefined) {
-      index += 2;
-    } else {
-      destinations.push(destination);
-      index = next;
-    }
+    for (const scalar of scalars)
+      required.push(...imageSources(walk(METADATA.parse(scalar, {}))));
   }
-  return destinations;
+  return { required, optional };
 }
 
 /**
@@ -174,17 +304,33 @@ export async function prepareSelection(
   const flat = [...scoped.keys()].every((path) => !path.includes("/"));
   const images = new Map<string, File>();
   const keys = new Set<string>();
-  for (const destination of imageDestinations(text)) {
-    const path = resolveImagePath(destination);
-    if (path === undefined || images.has(path)) continue;
-    if (!hasImageSuffix(path)) throw new PackageError(MISSING_IMAGE);
-    const file = scoped.get(path) ?? (flat ? byName(scoped, path) : undefined);
-    if (!file) throw new PackageError(MISSING_IMAGE);
+  const references = imageReferences(text);
+  const add = (destination: string, required: boolean) => {
+    let path: string | undefined;
+    try {
+      path = resolveImagePath(destination);
+    } catch (error) {
+      if (required) throw error;
+      return;
+    }
+    if (path === undefined || images.has(path)) return;
+    const file = hasImageSuffix(path)
+      ? (scoped.get(path) ?? (flat ? byName(scoped, path) : undefined))
+      : undefined;
+    if (!file) {
+      if (required) throw new PackageError(MISSING_IMAGE);
+      return;
+    }
     const key = path.normalize("NFC").toLowerCase();
-    if (keys.has(key)) throw new PackageError(INVALID_ARCHIVE);
+    if (keys.has(key)) {
+      if (required) throw new PackageError(INVALID_ARCHIVE);
+      return;
+    }
     keys.add(key);
     images.set(path, file);
-  }
+  };
+  for (const destination of references.required) add(destination, true);
+  for (const destination of references.optional) add(destination, false);
   if (images.size === 0) return { file: markdown.file, imageCount: 0 };
   const stem = markdown.file.name.replace(/\.md$/i, "") || "document";
   const content = await buildPackage(markdownBytes, images);
@@ -334,266 +480,4 @@ function percentDecode(value: string, fatal: boolean): string | undefined {
   } catch {
     return undefined;
   }
-}
-
-function withoutCodeBlocks(markdown: string): string {
-  const lines = markdown.replace(/\r\n?/g, "\n").split("\n");
-  const kept: string[] = [];
-  let fence: [string, number] | undefined;
-  let previousBlank = true;
-  let inList = false;
-  for (const line of lines) {
-    const content = line.replace(CONTAINER_PREFIX, "");
-    if (fence) {
-      const closing = FENCE.exec(content);
-      if (
-        closing &&
-        closing[2]![0] === fence[0] &&
-        closing[2]!.length >= fence[1] &&
-        !closing[3]!.trim()
-      )
-        fence = undefined;
-      kept.push("");
-      previousBlank = true;
-      continue;
-    }
-    const opening = FENCE.exec(content);
-    if (opening && !(opening[2]![0] === "`" && opening[3]!.includes("`"))) {
-      fence = [opening[2]![0]!, opening[2]!.length];
-      kept.push("");
-      previousBlank = true;
-      continue;
-    }
-    const blank = !line.trim();
-    if (LIST_ITEM.test(line)) inList = true;
-    else if (!blank && previousBlank && !/^\s/.test(line)) inList = false;
-    const expanded = line.replace(/\t/g, "    ");
-    const indented = expanded.length - expanded.replace(/^ +/, "").length;
-    if (
-      !blank &&
-      !inList &&
-      previousBlank &&
-      indented >= INDENTED_CODE_COLUMNS
-    ) {
-      kept.push("");
-      continue;
-    }
-    kept.push(line);
-    previousBlank = blank;
-  }
-  return kept.join("\n");
-}
-
-function stripInlineCode(text: string): string {
-  const output: string[] = [];
-  let index = 0;
-  while (index < text.length) {
-    const character = text[index]!;
-    if (character === "\\" && index + 1 < text.length) {
-      output.push(text.slice(index, index + 2));
-      index += 2;
-      continue;
-    }
-    if (character !== "`") {
-      output.push(character);
-      index += 1;
-      continue;
-    }
-    let runEnd = index;
-    while (runEnd < text.length && text[runEnd] === "`") runEnd += 1;
-    const length = runEnd - index;
-    const closing = closingBackticks(text, runEnd, length);
-    if (closing === undefined) {
-      output.push(text.slice(index, runEnd));
-      index = runEnd;
-      continue;
-    }
-    output.push(" ".repeat(closing + length - index));
-    index = closing + length;
-  }
-  return output.join("");
-}
-
-function closingBackticks(
-  text: string,
-  start: number,
-  length: number,
-): number | undefined {
-  const paragraphEnd = text.indexOf("\n\n", start);
-  const limit = paragraphEnd < 0 ? text.length : paragraphEnd;
-  let index = start;
-  while (index < limit) {
-    if (text[index] !== "`") {
-      index += 1;
-      continue;
-    }
-    let runEnd = index;
-    while (runEnd < limit && text[runEnd] === "`") runEnd += 1;
-    if (runEnd - index === length) return index;
-    index = runEnd;
-  }
-  return undefined;
-}
-
-function matchingBracket(text: string, opening: number): number | undefined {
-  let depth = 0;
-  let index = opening;
-  while (index < text.length) {
-    const character = text[index];
-    if (character === "\\") {
-      index += 2;
-      continue;
-    }
-    if (character === "\n" && text[index + 1] === "\n") return undefined;
-    if (character === "[") depth += 1;
-    else if (character === "]") {
-      depth -= 1;
-      if (depth === 0) return index;
-    }
-    index += 1;
-  }
-  return undefined;
-}
-
-function imageDestination(
-  text: string,
-  labelEnd: number,
-  label: string,
-  definitions: Map<string, string>,
-): [string | undefined, number] {
-  const following = labelEnd + 1;
-  if (text[following] === "(") {
-    const inline = inlineDestination(text, following + 1);
-    if (inline) return inline;
-  }
-  if (text[following] === "[") {
-    const referenceEnd = matchingBracket(text, following);
-    if (referenceEnd !== undefined) {
-      const reference = text.slice(following + 1, referenceEnd);
-      const key = labelKey(reference.trim() ? reference : label);
-      return [definitions.get(key), referenceEnd + 1];
-    }
-  }
-  return [definitions.get(labelKey(label)), following];
-}
-
-function inlineDestination(
-  text: string,
-  start: number,
-): [string, number] | undefined {
-  let index = skipSpace(text, start);
-  const parsed =
-    text[index] === "<"
-      ? angleDestination(text, index)
-      : bareDestination(text, index);
-  if (!parsed) return undefined;
-  const [raw, afterDestination] = parsed;
-  index = skipSpace(text, afterDestination);
-  const opener = text[index];
-  if (
-    index > afterDestination &&
-    opener !== undefined &&
-    "\"'(".includes(opener)
-  ) {
-    const closing = opener === "(" ? ")" : opener;
-    index += 1;
-    while (index < text.length && text[index] !== closing)
-      index += text[index] === "\\" ? 2 : 1;
-    if (index >= text.length) return undefined;
-    index = skipSpace(text, index + 1);
-  }
-  if (text[index] !== ")") return undefined;
-  return [normalizeDestination(raw), index + 1];
-}
-
-function angleDestination(
-  text: string,
-  index: number,
-): [string, number] | undefined {
-  let end = index + 1;
-  while (end < text.length && !"<>\n".includes(text[end]!))
-    end += text[end] === "\\" ? 2 : 1;
-  if (end >= text.length || text[end] !== ">") return undefined;
-  return [text.slice(index + 1, end), end + 1];
-}
-
-function bareDestination(text: string, index: number): [string, number] {
-  let end = index;
-  let depth = 0;
-  while (end < text.length) {
-    const character = text[end]!;
-    if (character === "\\" && end + 1 < text.length) {
-      end += 2;
-      continue;
-    }
-    if (/\s/.test(character) || character.charCodeAt(0) < ASCII_CONTROL_END)
-      break;
-    if (character === "(") depth += 1;
-    else if (character === ")") {
-      if (depth === 0) break;
-      depth -= 1;
-    }
-    end += 1;
-  }
-  return [text.slice(index, end), end];
-}
-
-function skipSpace(text: string, start: number): number {
-  let index = start;
-  let newlines = 0;
-  while (index < text.length && " \t\n".includes(text[index]!)) {
-    if (text[index] === "\n") {
-      newlines += 1;
-      if (newlines > 1) break;
-    }
-    index += 1;
-  }
-  return index;
-}
-
-function referenceDefinitions(text: string): Map<string, string> {
-  const definitions = new Map<string, string>();
-  for (const line of text.split("\n")) {
-    const match = DEFINITION.exec(line);
-    if (!match || match[2] === undefined) continue;
-    const rest = match[2].trim();
-    let raw: string;
-    if (rest.startsWith("<")) {
-      const end = rest.indexOf(">");
-      if (end < 0) continue;
-      raw = rest.slice(1, end);
-    } else {
-      raw = rest.split(/\s+/)[0]!;
-    }
-    const key = labelKey(match[1]!);
-    if (key && !definitions.has(key))
-      definitions.set(key, normalizeDestination(raw));
-  }
-  return definitions;
-}
-
-function labelKey(label: string): string {
-  return label.trim().split(/\s+/).join(" ").toLowerCase();
-}
-
-function normalizeDestination(raw: string): string {
-  const unescaped = raw.replace(/\\(.)/gs, (escape, character: string) =>
-    ASCII_PUNCTUATION.has(character) ? character : escape,
-  );
-  return unescaped.replace(
-    /&(#x[0-9a-f]{1,6}|#[0-9]{1,7}|[a-z]+);/gi,
-    (entity, body: string) => {
-      if (body.startsWith("#")) {
-        const hex = body[1] === "x" || body[1] === "X";
-        const codePoint = Number.parseInt(
-          body.slice(hex ? 2 : 1),
-          hex ? 16 : 10,
-        );
-        return codePoint > 0 && codePoint <= 0x10ffff
-          ? String.fromCodePoint(codePoint)
-          : "�";
-      }
-      return NAMED_ENTITIES[body] ?? entity;
-    },
-  );
 }

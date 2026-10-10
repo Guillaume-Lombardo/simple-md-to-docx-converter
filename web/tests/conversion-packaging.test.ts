@@ -13,6 +13,7 @@ import {
   buildPackage,
   droppedFiles,
   imageDestinations,
+  imageReferences,
   prepareSelection,
   resolveImagePath,
   selectedFiles,
@@ -20,7 +21,12 @@ import {
 } from "../src/conversion/packaging";
 
 type References = {
-  markdown: { markdown: string; destinations: string[] }[];
+  markdown: {
+    markdown: string;
+    destinations?: string[];
+    error?: string;
+    body_destinations?: string[];
+  }[];
   resolutions: {
     destination: string;
     path?: string;
@@ -37,21 +43,23 @@ const references = JSON.parse(
   ),
 ) as References;
 
-function looseDecode(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
-}
-
 describe.each(references.markdown)(
   "image destinations for %#",
-  ({ markdown, destinations }) => {
+  ({ markdown, destinations, body_destinations }) => {
     it("match the service Markdown parser", () => {
-      expect(imageDestinations(markdown).map(looseDecode)).toEqual(
-        destinations,
-      );
+      const service = destinations ?? body_destinations ?? [];
+      const { required, optional } = imageReferences(markdown);
+      expect(imageDestinations(markdown)).toEqual(required);
+      if (optional.length === 0) {
+        // Exact parity, including order, whenever the browser parsed everything.
+        expect(required).toEqual(service);
+      } else {
+        // Never stricter (required is a subset) and never omitting (the union
+        // covers every reference the service validates).
+        for (const value of required) expect(service).toContain(value);
+        for (const value of service)
+          expect([...required, ...optional]).toContain(value);
+      }
     });
   },
 );
@@ -62,9 +70,10 @@ describe.each(references.resolutions)(
     it("matches the service path rules and stable messages", () => {
       if (remote) {
         expect(resolveImagePath(destination)).toBeUndefined();
-      } else if (error) {
+      } else if (error || path === "") {
+        // An empty path names no file; the service reports it as missing.
         expect(() => resolveImagePath(destination)).toThrow(
-          new PackageError(error),
+          new PackageError(error ?? MISSING_IMAGE),
         );
       } else {
         expect(resolveImagePath(destination)).toBe(path);
@@ -72,6 +81,52 @@ describe.each(references.resolutions)(
     });
   },
 );
+
+test.each([
+  [
+    "multiline definition",
+    "![logo][ref]\n\n[ref]:\n  assets/logo.png\n",
+    "assets/logo.png",
+  ],
+  [
+    "container definition",
+    "![logo][ref]\n\n> [ref]: assets/logo.png\n",
+    "assets/logo.png",
+  ],
+  ["HTML entity", "![logo](assets/&copy;.png)", "assets/\u00a9.png"],
+])(
+  "review regression: a %s packages the referenced image",
+  async (_name, markdown, image) => {
+    const prepared = await prepareSelection([
+      entry("doc.md", markdown),
+      entry(image),
+    ]);
+    expect(Object.keys(await members(prepared.file))).toEqual([
+      ENTRYPOINT,
+      image,
+    ]);
+  },
+);
+
+test("review regression: list-indented code is not an image reference", async () => {
+  const markdown = entry("doc.md", "- list\n\n      ![literal](missing.png)");
+  expect(await prepareSelection([markdown, entry("other.png")])).toEqual({
+    file: markdown.file,
+    imageCount: 0,
+  });
+});
+
+test("metadata images are packaged and unloadable metadata adds nothing", async () => {
+  const prepared = await prepareSelection([
+    entry("doc.md", "---\nlogo: '![l](meta.png)'\n---\n# Title\n"),
+    entry("meta.png"),
+  ]);
+  expect(Object.keys(await members(prepared.file))).toEqual([
+    ENTRYPOINT,
+    "meta.png",
+  ]);
+  expect(imageDestinations("---\na: [\n---\n# Title\n")).toEqual([]);
+});
 
 const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
 
@@ -293,4 +348,29 @@ test("drops without entry support fall back to the file list", async () => {
   expect(
     await droppedFiles({ files: [file] } as unknown as DataTransfer),
   ).toEqual([{ file, path: "doc.md" }]);
+});
+
+test("optional metadata references are packaged when present and never block", async () => {
+  const markdown = [
+    "---",
+    "list:",
+    "  - ![y](item.png)",
+    "  - ![z](../escape.png)",
+    "  - ![w](absent.png)",
+    "  - ![v](ITEM.png)",
+    "  - ![t](notes.txt)",
+    "---",
+    "# Title",
+  ].join("\n");
+  expect(imageReferences(markdown).required).toEqual([]);
+  const prepared = await prepareSelection([
+    entry("doc.md", markdown),
+    entry("item.png"),
+    entry("ITEM.png"),
+    entry("notes.txt", "text"),
+  ]);
+  expect(Object.keys(await members(prepared.file))).toEqual([
+    ENTRYPOINT,
+    "item.png",
+  ]);
 });

@@ -123,6 +123,11 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     convert.add_argument(
         "--slide-level", type=int, choices=range(1, 7), action=_RequestOption
     )
+    convert.add_argument(
+        "--no-package",
+        action=_FlagOption,
+        help="Upload a Markdown source unchanged instead of packaging local images.",
+    )
     convert.add_argument("--template-id", action=_RequestOption)
     convert.add_argument("--template-version-id", action=_RequestOption)
     convert.add_argument("--idempotency-key", action=_RequestOption)
@@ -229,7 +234,7 @@ def _convert(context: CommandContext, writer: OutputWriter, request: _Request) -
     source_path = Path(_string(request, "source"))
     source_kind, source = _read_source(source_path)
     packaged_images: int | None = None
-    if source_kind == "md":
+    if source_kind == "md" and not request.values.get("no_package"):
         try:
             package = package_markdown(source_path, source)
         except PackageError as error:

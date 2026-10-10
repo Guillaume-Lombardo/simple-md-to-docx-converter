@@ -440,7 +440,7 @@ def test_browser_driver_has_its_own_bounded_cgroup_and_current_backend_network()
     assert '"$test_file" == /e2e/browser-next-composer-resilience.test.mjs' in browser
     assert browser.count("/run/composer-e2e-client.key:ro,z") == 1
     assert 'run_browser_test "$expiry_application_name"' in runner
-    assert runner.count('run_browser_test "$application_name"') == 34
+    assert runner.count('run_browser_test "$application_name"') == 35
     assert runner.count('run_browser_test "$expiry_application_name"') == 2
     assert runner.count("node --test") == 1
     assert "node --test /e2e/browser-" not in runner

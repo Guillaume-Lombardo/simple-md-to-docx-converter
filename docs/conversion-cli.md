@@ -25,8 +25,16 @@ When a Markdown source references local images, `markweave convert` collects the
 ZIP package instead of the bare Markdown file (specification section 3.7, decision D2):
 
 ```text
+uv tool install 'markweave[packaging]'
 markweave convert ./report/report.md --output docx
 ```
+
+The references are found and resolved by the service's own Markdown parser module, so the client
+packages exactly what the service validates. That parser needs the optional `packaging` extra (see
+[Python distribution](python-distribution.md#installation-profiles)); the final image includes it.
+On a base installation, a Markdown source containing image syntax fails before upload with
+`packaging_unavailable` and installation guidance. `--no-package` uploads any Markdown source
+unchanged, as earlier releases did.
 
 The client places the Markdown at the root as `document.md` and each referenced PNG, JPEG, SVG,
 GIF, or WebP image at its referenced relative path, in a deterministic uncompressed ZIP. Repeating

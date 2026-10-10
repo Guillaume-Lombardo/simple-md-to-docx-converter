@@ -6,90 +6,154 @@ import errno
 import io
 import json
 import os
+import subprocess
+import sys
 import zipfile
 from pathlib import Path, PurePosixPath
-from urllib.parse import unquote
 
 import pytest
 
+from markweave import conversion as conversion_package
 from markweave.cli import markdown_package
 from markweave.cli.commands import conversions
 from markweave.cli.commands.conversion_http import ConversionHttpResponse
 from markweave.cli.main import main
 from markweave.cli.markdown_package import (
     ENTRYPOINT,
-    ESCAPING_IMAGE_PATH,
     INVALID_ARCHIVE,
-    INVALID_IMAGE_PATH,
-    MISSING_IMAGE,
+    PACKAGING_UNAVAILABLE,
     PackageError,
     build_package,
-    image_destinations,
+    load_image_references,
     package_markdown,
-    resolve_image_path,
 )
+from markweave.conversion import image_references, validation
 from markweave.conversion.errors import ConversionError
-from markweave.conversion.images import SUPPORTED_IMAGE_SUFFIXES
-from markweave.conversion.validation import (
-    _MARKDOWN,
-    _is_remote_destination,
-    _resolve_local_image,
-    _walk,
+from markweave.conversion.image_references import (
+    ESCAPING_IMAGE_PATH,
+    INVALID_IMAGE_PATH,
+    INVALID_METADATA,
+    MISSING_IMAGE,
 )
+from markweave.conversion.images import SUPPORTED_IMAGE_SUFFIXES
+from tests.markdown_image_references import FIXTURE, render
 
 pytestmark = pytest.mark.unit
 
 PNG = b"\x89PNG\r\n\x1a\nclient-side-bytes"
 JOB_ID = "11111111-1111-4111-8111-111111111111"
 CORRELATION_ID = "22222222-2222-4222-8222-222222222222"
+REFERENCES = json.loads(FIXTURE.read_text(encoding="utf-8"))
 
 
-REFERENCES = json.loads(
-    Path("tests/fixtures/markdown-image-references.json").read_text(encoding="utf-8")
-)
+def test_checked_in_parity_fixture_is_the_service_parser_output() -> None:
+    """Regenerate with ``uv run python -m tests.markdown_image_references``."""
+    assert FIXTURE.read_text(encoding="utf-8") == render()
 
 
-@pytest.mark.parametrize(
-    "case", REFERENCES["markdown"], ids=lambda case: repr(case["markdown"])[:40]
-)
-def test_destinations_match_the_service_markdown_parser(case: dict) -> None:
-    """The shared fixture is the service's answer; the client must agree."""
-    markdown = case["markdown"]
-    service = [
-        unquote(str(token.attrGet("src") or ""))
-        for token in _walk(_MARKDOWN.parse(markdown))
-        if token.type == "image"
-    ]
-
-    assert service == case["destinations"]
-    assert [unquote(value) for value in image_destinations(markdown)] == service
+def test_service_validation_uses_the_shared_reference_module() -> None:
+    assert validation._MARKDOWN is image_references.MARKDOWN
+    assert validation._METADATA_MARKDOWN is image_references.METADATA_MARKDOWN
+    assert validation._is_remote_destination is image_references.is_remote_destination
+    assert load_image_references() is image_references
 
 
 @pytest.mark.parametrize(
     "case", REFERENCES["resolutions"], ids=lambda case: repr(case["destination"])
 )
-def test_resolution_reuses_the_service_messages(case: dict) -> None:
+def test_service_resolution_matches_the_fixture(case: dict) -> None:
     destination = case["destination"]
-    assert _is_remote_destination(destination) is bool(case.get("remote"))
+    entrypoint = PurePosixPath(ENTRYPOINT)
     if case.get("remote"):
-        assert resolve_image_path(destination) is None
+        assert validation._is_remote_destination(destination)
         return
     if "error" in case:
-        with pytest.raises(ConversionError) as service:
-            _resolve_local_image(destination, PurePosixPath(ENTRYPOINT), frozenset())
-        assert str(service.value) == case["error"]
-        with pytest.raises(PackageError) as client:
-            resolve_image_path(destination)
-        assert client.value.message == case["error"]
-        assert client.value.code == "validation"
+        with pytest.raises(ConversionError) as raised:
+            validation._resolve_local_image(destination, entrypoint, frozenset())
+        assert str(raised.value) == case["error"]
         return
-    path = PurePosixPath(case["path"])
-    _resolve_local_image(destination, PurePosixPath(ENTRYPOINT), frozenset({path}))
-    assert resolve_image_path(destination) == path
+    validation._resolve_local_image(
+        destination, entrypoint, frozenset({PurePosixPath(case["path"])})
+    )
 
 
 def test_client_suffixes_match_the_service_image_formats() -> None:
     assert markdown_package.SUPPORTED_IMAGE_SUFFIXES == SUPPORTED_IMAGE_SUFFIXES
+
+
+def test_reference_module_does_not_import_image_engines() -> None:
+    script = (
+        "import sys\n"
+        "import markweave.cli.markdown_package\n"
+        "assert 'markdown_it' not in sys.modules\n"
+        "import markweave.conversion.image_references\n"
+        "loaded = [m for m in ('PIL', 'cairosvg', 'tinycss2', 'fastapi') "
+        "if m in sys.modules]\n"
+        "assert not loaded, loaded\n"
+    )
+    result = subprocess.run(
+        (sys.executable, "-I", "-c", script),
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    ("markdown", "packaged"),
+    [
+        ("![logo][ref]\n\n[ref]:\n  assets/logo.png\n", "assets/logo.png"),
+        ("![logo][ref]\n\n> [ref]: assets/logo.png\n", "assets/logo.png"),
+        ("![logo](assets/&copy;.png)", "assets/©.png"),
+    ],
+    ids=["multiline-definition", "container-definition", "html-entity"],
+)
+def test_review_regressions_package_what_the_service_requires(
+    tmp_path: Path, markdown: str, packaged: str
+) -> None:
+    (tmp_path / "assets").mkdir()
+    (tmp_path / packaged).write_bytes(PNG)
+
+    package = package_markdown(tmp_path / "doc.md", markdown.encode())
+
+    assert package is not None
+    assert list(_members(package.content)) == [ENTRYPOINT, packaged]
+
+
+def test_review_regression_list_indented_code_is_not_an_image(
+    tmp_path: Path,
+) -> None:
+    markdown = b"- list\n\n      ![literal](missing.png)"
+
+    assert package_markdown(tmp_path / "doc.md", markdown) is None
+
+
+def test_invalid_metadata_reuses_the_service_message(tmp_path: Path) -> None:
+    with pytest.raises(PackageError) as raised:
+        package_markdown(tmp_path / "doc.md", b"---\n: [\n---\n![x](x.png)")
+
+    assert raised.value.message == INVALID_METADATA
+    assert raised.value.code == "validation"
+
+
+def test_missing_packaging_extra_needs_guidance_only_for_image_syntax(
+    tmp_path: Path, mocker, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delattr(conversion_package, "image_references")
+    mocker.patch.dict(
+        sys.modules,
+        {"markdown_it": None, "markweave.conversion.image_references": None},
+    )
+    assert load_image_references() is None
+    assert package_markdown(tmp_path / "doc.md", b"# Plain text only\n") is None
+
+    with pytest.raises(PackageError) as raised:
+        package_markdown(tmp_path / "doc.md", b"![x](x.png)")
+
+    assert raised.value.code == "packaging_unavailable"
+    assert raised.value.message == PACKAGING_UNAVAILABLE
+    assert "markweave[packaging]" in PACKAGING_UNAVAILABLE
 
 
 def _members(content: bytes) -> dict[str, bytes]:
@@ -287,3 +351,19 @@ def test_convert_reports_stable_validation_errors_before_upload(
     error = json.loads(capsys.readouterr().err)["error"]
     assert error == {"code": "validation", "message": ESCAPING_IMAGE_PATH}
     client_factory.assert_not_called()
+
+
+def test_convert_can_upload_markdown_unchanged_without_packaging(
+    tmp_path: Path, mocker, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = tmp_path / "doc.md"
+    source.write_text("![x](absent.png)", encoding="utf-8")
+    client = mocker.Mock()
+    client.submit.return_value = _accepted()
+    mocker.patch.object(conversions, "_client", return_value=client)
+
+    assert main(("--json", "convert", str(source), "--no-package")) == 0
+
+    assert "packaged_images" not in json.loads(capsys.readouterr().out)
+    assert client.submit.call_args.args[0] == b"![x](absent.png)"
+    assert client.submit.call_args.kwargs["source_kind"] == "md"

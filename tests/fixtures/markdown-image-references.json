@@ -1,4 +1,5 @@
 {
+  "generator": "uv run python -m tests.markdown_image_references",
   "markdown": [
     {
       "markdown": "![a](img/a.png)",
@@ -9,7 +10,99 @@
     {
       "markdown": "![a](<my file.png> \"t\")",
       "destinations": [
-        "my file.png"
+        "my%20file.png"
+      ]
+    },
+    {
+      "markdown": "![a](x.png 'title')",
+      "destinations": [
+        "x.png"
+      ]
+    },
+    {
+      "markdown": "![a](x.png (title))",
+      "destinations": [
+        "x.png"
+      ]
+    },
+    {
+      "markdown": "![a]( spaced.png )",
+      "destinations": [
+        "spaced.png"
+      ]
+    },
+    {
+      "markdown": "![a](\n  next-line.png\n)",
+      "destinations": [
+        "next-line.png"
+      ]
+    },
+    {
+      "markdown": "![a](\n\nblank.png)",
+      "destinations": []
+    },
+    {
+      "markdown": "![a](<unterminated.png)",
+      "destinations": []
+    },
+    {
+      "markdown": "![a](<a\\>b.png>)",
+      "destinations": [
+        "a%3Eb.png"
+      ]
+    },
+    {
+      "markdown": "![a](open.png 'title)",
+      "destinations": []
+    },
+    {
+      "markdown": "![a](trailing.png junk)",
+      "destinations": []
+    },
+    {
+      "markdown": "![a](p(1).png)",
+      "destinations": [
+        "p(1).png"
+      ]
+    },
+    {
+      "markdown": "![a](p(1.png)",
+      "destinations": []
+    },
+    {
+      "markdown": "![a [b] c](n.png)",
+      "destinations": [
+        "n.png"
+      ]
+    },
+    {
+      "markdown": "![never closed",
+      "destinations": []
+    },
+    {
+      "markdown": "![a\n\nb](split.png)",
+      "destinations": []
+    },
+    {
+      "markdown": "[![a](in.png)](https://example.com)",
+      "destinations": [
+        "in.png"
+      ]
+    },
+    {
+      "markdown": "![x](a.png\u0001)",
+      "destinations": []
+    },
+    {
+      "markdown": "![a](café.png)",
+      "destinations": [
+        "caf%C3%A9.png"
+      ]
+    },
+    {
+      "markdown": "line\r\n![a](crlf.png)\r\n",
+      "destinations": [
+        "crlf.png"
       ]
     },
     {
@@ -21,7 +114,7 @@
     {
       "markdown": "![R]\n\n[r]: <y z.png>",
       "destinations": [
-        "y z.png"
+        "y%20z.png"
       ]
     },
     {
@@ -35,12 +128,74 @@
       "destinations": []
     },
     {
+      "markdown": "![logo][ref]\n\n[ref]:\n  assets/logo.png\n",
+      "destinations": [
+        "assets/logo.png"
+      ]
+    },
+    {
+      "markdown": "![logo][ref]\n\n[ref]:\n  assets/logo.png\n  \"Title\"\n",
+      "destinations": [
+        "assets/logo.png"
+      ]
+    },
+    {
+      "markdown": "![logo][ref]\n\n> [ref]: assets/quoted.png\n",
+      "destinations": [
+        "assets/quoted.png"
+      ]
+    },
+    {
+      "markdown": "![logo][ref]\n\n- [ref]: assets/listed.png\n",
+      "destinations": [
+        "assets/listed.png"
+      ]
+    },
+    {
+      "markdown": "> ![q][ref]\n>\n> [ref]: assets/inner.png\n",
+      "destinations": [
+        "assets/inner.png"
+      ]
+    },
+    {
+      "markdown": "![a][R  E F]\n\n[r e f]: spaced-label.png",
+      "destinations": [
+        "spaced-label.png"
+      ]
+    },
+    {
+      "markdown": "![a][r]\n\n[r]: first.png\n[r]: second.png",
+      "destinations": [
+        "first.png"
+      ]
+    },
+    {
+      "markdown": "[r]:\n![r]",
+      "destinations": []
+    },
+    {
+      "markdown": "[r]: <broken\n![r]",
+      "destinations": []
+    },
+    {
       "markdown": "`![a](no.png)`",
       "destinations": []
     },
     {
       "markdown": "text ``![x](d.png)`` more",
       "destinations": []
+    },
+    {
+      "markdown": "``unclosed ![a](unclosed-code.png)",
+      "destinations": [
+        "unclosed-code.png"
+      ]
+    },
+    {
+      "markdown": "\\`![a](after-escaped-tick.png)`",
+      "destinations": [
+        "after-escaped-tick.png"
+      ]
     },
     {
       "markdown": "```\n![a](no.png)\n```",
@@ -75,30 +230,24 @@
       ]
     },
     {
+      "markdown": "- list\n\n      ![literal](missing.png)",
+      "destinations": []
+    },
+    {
+      "markdown": "1. list\n\n       ![literal](numbered-code.png)",
+      "destinations": []
+    },
+    {
       "markdown": "- item\n\nback\n\n    ![a](after-list.png)",
+      "destinations": []
+    },
+    {
+      "markdown": "> quote\n>\n>     ![a](quoted-code.png)",
       "destinations": []
     },
     {
       "markdown": "\\![a](esc.png)",
       "destinations": []
-    },
-    {
-      "markdown": "![a [b] c](n.png)",
-      "destinations": [
-        "n.png"
-      ]
-    },
-    {
-      "markdown": "![a](p(1).png)",
-      "destinations": [
-        "p(1).png"
-      ]
-    },
-    {
-      "markdown": "[![a](in.png)](https://example.com)",
-      "destinations": [
-        "in.png"
-      ]
     },
     {
       "markdown": "![a](a\\_b.png)",
@@ -109,7 +258,7 @@
     {
       "markdown": "![a](a\\b.png)",
       "destinations": [
-        "a\\b.png"
+        "a%5Cb.png"
       ]
     },
     {
@@ -119,9 +268,39 @@
       ]
     },
     {
-      "markdown": "![a](&#x41;&#66;.png)",
+      "markdown": "![logo](assets/&copy;.png)",
+      "destinations": [
+        "assets/%C2%A9.png"
+      ]
+    },
+    {
+      "markdown": "![e](&eacute;t&eacute;.png)",
+      "destinations": [
+        "%C3%A9t%C3%A9.png"
+      ]
+    },
+    {
+      "markdown": "![n](&#x41;&#66;.png)",
       "destinations": [
         "AB.png"
+      ]
+    },
+    {
+      "markdown": "![n](&CounterClockwiseContourIntegral;.png)",
+      "destinations": [
+        "%E2%88%B3.png"
+      ]
+    },
+    {
+      "markdown": "![n](&notanentity;.png)",
+      "destinations": [
+        "&notanentity;.png"
+      ]
+    },
+    {
+      "markdown": "![n](&#0;.png)",
+      "destinations": [
+        "&#0;.png"
       ]
     },
     {
@@ -131,85 +310,17 @@
       ]
     },
     {
-      "markdown": "![a](x.png 'title')",
+      "markdown": "Text[^1]\n\n[^1]: ![f](footnote.png)",
       "destinations": [
-        "x.png"
+        "footnote.png"
       ]
     },
     {
-      "markdown": "![a](x.png (title))",
-      "destinations": [
-        "x.png"
-      ]
-    },
-    {
-      "markdown": "![a]( spaced.png )",
-      "destinations": [
-        "spaced.png"
-      ]
-    },
-    {
-      "markdown": "![a](<unterminated.png)",
+      "markdown": "<img src=\"html.png\">",
       "destinations": []
     },
     {
-      "markdown": "![a](<a\\>b.png>)",
-      "destinations": [
-        "a>b.png"
-      ]
-    },
-    {
-      "markdown": "![a](open.png 'title)",
-      "destinations": []
-    },
-    {
-      "markdown": "![a](trailing.png junk)",
-      "destinations": []
-    },
-    {
-      "markdown": "![a](\n  next-line.png\n)",
-      "destinations": [
-        "next-line.png"
-      ]
-    },
-    {
-      "markdown": "![a](\n\nblank.png)",
-      "destinations": []
-    },
-    {
-      "markdown": "![never closed",
-      "destinations": []
-    },
-    {
-      "markdown": "![a\n\nb](split.png)",
-      "destinations": []
-    },
-    {
-      "markdown": "``unclosed ![a](unclosed-code.png)",
-      "destinations": [
-        "unclosed-code.png"
-      ]
-    },
-    {
-      "markdown": "\\`![a](after-escaped-tick.png)`",
-      "destinations": [
-        "after-escaped-tick.png"
-      ]
-    },
-    {
-      "markdown": "[r]:\n![r]",
-      "destinations": []
-    },
-    {
-      "markdown": "[r]: <broken\n![r]",
-      "destinations": []
-    },
-    {
-      "markdown": "![a](p(1.png)",
-      "destinations": []
-    },
-    {
-      "markdown": "![x](a.png\u0001)",
+      "markdown": "<https://example.com/a.png>",
       "destinations": []
     },
     {
@@ -219,15 +330,65 @@
       ]
     },
     {
-      "markdown": "![a](café.png)",
+      "markdown": "| a |\n| - |\n| ![t](table.png) |",
       "destinations": [
-        "café.png"
+        "table.png"
       ]
     },
     {
-      "markdown": "line\r\n![a](crlf.png)\r\n",
+      "markdown": "---\nimage: ![x](meta.png)\n---\n# t",
+      "destinations": []
+    },
+    {
+      "markdown": "---\nnested:\n    deep: ![x](deep.png)\n---\n",
+      "destinations": []
+    },
+    {
+      "markdown": "---\nquoted: \"![x](quoted.png)\"\nlist:\n  - ![y](item.png)\n---\nbody ![z](body.png)\n",
       "destinations": [
-        "crlf.png"
+        "body.png",
+        "quoted.png"
+      ]
+    },
+    {
+      "markdown": "---\nblock: |\n  ![x](block.png)\n---\n",
+      "destinations": [
+        "block.png"
+      ]
+    },
+    {
+      "markdown": "---\nnot: closed\n![x](unclosed-front.png)\n",
+      "destinations": [
+        "unclosed-front.png"
+      ]
+    },
+    {
+      "markdown": "---\nshared: &a '![s](s.png)'\nagain: *a\nlist: [*a, '![t](t.png)']\n---\n",
+      "destinations": [
+        "t.png",
+        "s.png"
+      ]
+    },
+    {
+      "markdown": "---\ntagged: !custom '![c](tag.png)'\nplain: '![p](plain.png)'\n---\n",
+      "destinations": [
+        "plain.png",
+        "tag.png"
+      ]
+    },
+    {
+      "markdown": "---\ndup: '![a](one.png)'\ndup: '![b](two.png)'\n'![k](key.png)': 1\n---\n",
+      "destinations": [
+        "key.png",
+        "two.png",
+        "one.png"
+      ]
+    },
+    {
+      "markdown": "---\na: [\n---\n![x](after-invalid.png)\n",
+      "error": "Markdown input contains invalid YAML metadata.",
+      "body_destinations": [
+        "after-invalid.png"
       ]
     }
   ],
@@ -257,12 +418,16 @@
       "path": "my file.png"
     },
     {
-      "destination": "100%.png",
+      "destination": "100%25.png",
       "path": "100%.png"
     },
     {
       "destination": "caf%C3%A9.png",
       "path": "café.png"
+    },
+    {
+      "destination": "assets/%C2%A9.png",
+      "path": "assets/©.png"
     },
     {
       "destination": "../a.png",
@@ -309,28 +474,24 @@
       "error": "Markdown image path is invalid."
     },
     {
-      "destination": "a\\b.png",
-      "error": "Markdown image path is invalid."
-    },
-    {
       "destination": "1:a.png",
       "error": "Markdown image path is invalid."
     },
     {
-      "destination": "x\u0000.png",
+      "destination": "x%00.png",
       "error": "Markdown image path is invalid."
     },
     {
       "destination": ".",
-      "error": "Markdown image is missing or unapproved."
+      "path": ""
     },
     {
       "destination": "./",
-      "error": "Markdown image is missing or unapproved."
+      "path": ""
     },
     {
       "destination": "a/..",
-      "error": "Markdown image is missing or unapproved."
+      "path": ""
     },
     {
       "destination": "https://example.com/a.png",

@@ -23,14 +23,11 @@ from PIL import Image
 from markweave.app import create_app
 from markweave.cli.http import HttpTransport
 from markweave.cli.main import main
-from markweave.cli.markdown_package import (
-    ESCAPING_IMAGE_PATH,
-    MISSING_IMAGE,
-    build_package,
-)
+from markweave.cli.markdown_package import build_package
 from markweave.cli.profiles import ProfileStore
 from markweave.cli.types import ConnectionProfile
 from markweave.config import Settings
+from markweave.conversion.image_references import ESCAPING_IMAGE_PATH, MISSING_IMAGE
 from markweave.conversion.processor import build_production_processor
 from markweave.malware import TrustingUploadScanner
 from tests.settings import template_settings
