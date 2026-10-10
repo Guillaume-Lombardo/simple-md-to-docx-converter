@@ -5,29 +5,61 @@ host without Podman. A test that executes Podman without that marker makes the
 command fail with ``FileNotFoundError`` on such a host. This deterministic AST
 scan finds those tests; ``tests/unit/test_container_runtime_markers.py`` runs it.
 
-A test requires a runtime when its body, a helper it calls (transitively, also
-across test-tree modules), or a fixture it requests (transitively, including
-conftest, imported and autouse fixtures) passes the runtime executable as the
-program of a subprocess call. Subprocess functions are recognized through
-module imports, module aliases and from-imports of ``subprocess``, ``asyncio``
-and ``os``. The program is recognized by basename through literals, module or
-local variables, ``Path``/``str``/``os.fspath``/``shutil.which`` wrappers and
-path joins. Launching the host-native broker counts as executing Podman because
-the broker refuses to start without ``/usr/bin/podman`` and executes it.
-Mentions inside larger strings, such as asserted shell fragments, are not
-invocations. Podman executed by shell scripts or application code is out of the
-scan's reach; the Podman-free canonical run covers that.
+A test requires a runtime when its body, a helper it calls, or a fixture it
+requests executes the runtime. Helpers are followed transitively, through
+``self``/``cls`` methods and across test-tree modules, including arguments a
+helper forwards to a launch (positional, keyword or ``*args`` parameters, over
+any number of helper levels). Fixtures are followed through conftest, imported,
+class-level, autouse, ``usefixtures`` and ``request.getfixturevalue`` requests.
+
+Recognized process launches, resolved through module imports, aliases and
+from-imports bound in the lexical scope of each call:
+
+* ``subprocess.run``/``Popen``/``call``/``check_call``/``check_output``: the
+  argument vector (positional or ``args=``), an explicit ``executable``
+  (keyword or ``Popen`` position 2), and a ``shell=True`` command string;
+* ``subprocess.getoutput``/``getstatusoutput``, ``os.system``, ``os.popen`` and
+  ``asyncio.create_subprocess_shell`` command strings;
+* ``asyncio.create_subprocess_exec``, ``os.exec*``, ``os.spawn*``,
+  ``os.posix_spawn*`` and ``pty.spawn`` programs;
+* ``functools.partial`` objects wrapping any of the above.
+
+A program is recognized by basename through literals, module, local and
+imported test-tree constants, ``Path``/``str``/``os.fspath``/``shutil.which``/
+``os.path.join``/``Path.as_posix`` wrappers, path joins, ``or`` and conditional
+alternatives, list concatenation, ``shlex.split`` and ``bash``/``sh -c``
+strings. In a command string, every command position is checked after ``;``,
+``&&``, ``||``, ``|`` and leading ``VAR=value``, ``env``, ``exec``,
+``command``, ``sudo`` or ``nohup`` words; a shell function with a runtime's
+name shadows that runtime. Launching the host-native broker counts as executing
+Podman because the broker refuses to start without ``/usr/bin/podman`` and
+executes it. Mentions outside a command position, such as asserted text, are
+not launches. The scan is conservative where it cannot tell: an argument vector
+naming a runtime is flagged even when ``executable`` names another program.
+
+Known limits, covered by the Podman-free canonical run rather than this scan:
+programs built from runtime data (configuration files, environment variables,
+values returned by functions, instance or class attributes), shell scripts or
+files executed by a test, dynamic dispatch (``getattr``, callables stored in
+containers or lambdas), pytest hooks and indirect parametrization, third-party
+process libraries, application code under ``src``, helpers outside the scanned
+tree, and mocks. The one reviewed test that calls a runtime-capable harness
+with its reached branch patched is listed in ``PATCHED_RUNTIME_CALLS``, which
+exempts only calls to that helper from that test and only while the patch is
+present.
 """
 
 from __future__ import annotations
 
 import ast
-from dataclasses import dataclass, field
+import re
+import shlex
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterator, Mapping
 
 BROKER = "markweave-broker"
 RUNTIME_MARKERS = {
@@ -37,42 +69,76 @@ RUNTIME_MARKERS = {
 }
 EXECUTABLES = frozenset({"podman", "docker"})
 BROKER_ENTRY_POINTS = frozenset({"markweave.broker.process", "markweave-broker"})
-_SUBPROCESS = frozenset({"run", "Popen", "call", "check_call", "check_output"})
-_OS_PROGRAM_FIRST = frozenset(
-    {
-        "execl",
-        "execle",
-        "execlp",
-        "execlpe",
-        "execv",
-        "execve",
-        "execvp",
-        "execvpe",
-        "posix_spawn",
-        "posix_spawnp",
-    }
+SHELLS = frozenset({"bash", "sh", "dash", "zsh"})
+_COMMAND_PREFIXES = frozenset({"env", "exec", "command", "sudo", "nohup"})
+_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_SEPARATORS = re.compile(r"&&|\|\||[;|&()\n`]|\$\(")
+_SHELL_FUNCTION = re.compile(
+    r"(?:^|[;&|\n])\s*(?:function\s+)?([A-Za-z_][\w-]*)\s*\(\s*\)"
 )
-_OS_PROGRAM_SECOND = frozenset(
-    {
-        "spawnl",
-        "spawnle",
-        "spawnlp",
-        "spawnlpe",
-        "spawnv",
-        "spawnve",
-        "spawnvp",
-        "spawnvpe",
-    }
-)
-PROCESS_FUNCTIONS = {
-    "subprocess": _SUBPROCESS,
-    "asyncio": frozenset({"create_subprocess_exec"}),
-    "asyncio.subprocess": frozenset({"create_subprocess_exec"}),
-    "os": _OS_PROGRAM_FIRST | _OS_PROGRAM_SECOND,
+
+# How each recognized function receives its program: "argv" (argument vector),
+# "program" (an executable path), or "shell" (a command string), by position.
+_EXEC = "argv"
+_PROGRAM = "program"
+_SHELL = "shell"
+_SUBPROCESS_EXEC = frozenset({"run", "Popen", "call", "check_call", "check_output"})
+PROCESS_FUNCTIONS: dict[str, dict[str, tuple[str, int]]] = {
+    "subprocess": {
+        **dict.fromkeys(_SUBPROCESS_EXEC, (_EXEC, 0)),
+        "getoutput": (_SHELL, 0),
+        "getstatusoutput": (_SHELL, 0),
+    },
+    "asyncio": {
+        "create_subprocess_exec": (_PROGRAM, 0),
+        "create_subprocess_shell": (_SHELL, 0),
+    },
+    "asyncio.subprocess": {
+        "create_subprocess_exec": (_PROGRAM, 0),
+        "create_subprocess_shell": (_SHELL, 0),
+    },
+    "os": {
+        **dict.fromkeys(
+            (
+                "execl",
+                "execle",
+                "execlp",
+                "execlpe",
+                "execv",
+                "execve",
+                "execvp",
+                "execvpe",
+                "posix_spawn",
+                "posix_spawnp",
+            ),
+            (_PROGRAM, 0),
+        ),
+        **dict.fromkeys(
+            (
+                "spawnl",
+                "spawnle",
+                "spawnlp",
+                "spawnlpe",
+                "spawnv",
+                "spawnve",
+                "spawnvp",
+                "spawnvpe",
+            ),
+            (_PROGRAM, 1),
+        ),
+        "system": (_SHELL, 0),
+        "popen": (_SHELL, 0),
+    },
+    "pty": {"spawn": (_EXEC, 0)},
 }
+_IMPORTABLE = frozenset({*PROCESS_FUNCTIONS, "functools"})
 PASSTHROUGH_CALLS = frozenset(
     {"Path", "PurePath", "PosixPath", "PurePosixPath", "str", "fspath", "which"}
 )
+PATH_METHODS = frozenset(
+    {"as_posix", "resolve", "absolute", "expanduser", "__fspath__"}
+)
+_POPEN_EXECUTABLE_POSITION = 2
 
 
 @dataclass(frozen=True)
@@ -107,16 +173,32 @@ BROKER_LAUNCHES_WITHOUT_PODMAN = {
     ),
 }
 
-# Tests that call a runtime-capable harness entry point while patching every
-# runtime-reaching branch they select. Each entry is verified to still be reached.
+
+@dataclass(frozen=True)
+class PatchedCall:
+    """One reviewed call to a runtime-capable helper whose reached branch is patched.
+
+    Only calls to ``callee`` (``module.function``) made directly by the listed test
+    are exempt, and only while the test patches ``patched`` on the callee's module.
+    Every other launch, helper call and fixture of the test is still checked.
+    """
+
+    callee: str
+    patched: str
+    reason: str
+
+
 PATCHED_RUNTIME_CALLS = {
     "tests/unit/e2e/test_reverse_cli_workflow.py::"
-    "test_main_dispatches_structured_pptx_phase": (
-        "selects the structured-pptx phase and patches _exercise_structured_pptx"
+    "test_main_dispatches_structured_pptx_phase": PatchedCall(
+        "tests.e2e.reverse_cli_workflow.main",
+        "_exercise_structured_pptx",
+        "selects the structured-pptx phase, whose only runtime branch is patched",
     ),
 }
 
 type Function = ast.FunctionDef | ast.AsyncFunctionDef
+type ScopeNode = ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
 
 
 def _call_name(node: ast.expr) -> str | None:
@@ -125,6 +207,17 @@ def _call_name(node: ast.expr) -> str | None:
     if isinstance(node, ast.Attribute):
         return node.attr
     return None
+
+
+def _dotted(node: ast.expr) -> list[str] | None:
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return None
+    parts.append(node.id)
+    return list(reversed(parts))
 
 
 def _assignments(nodes: list[ast.stmt] | list[ast.AST]) -> dict[str, ast.expr]:
@@ -143,6 +236,69 @@ def _assignments(nodes: list[ast.stmt] | list[ast.AST]) -> dict[str, ast.expr]:
     return values
 
 
+def _own_nodes(root: ast.AST) -> Iterator[ast.AST]:
+    """Yield descendants of ``root`` that belong to its own lexical scope."""
+    stack = list(ast.iter_child_nodes(root))
+    while stack:
+        node = stack.pop()
+        yield node
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            stack.extend(ast.iter_child_nodes(node))
+
+
+@dataclass(frozen=True)
+class _Imports:
+    """Names bound by imports visible in one lexical scope."""
+
+    modules: Mapping[str, str] = field(default_factory=dict)
+    functions: Mapping[str, tuple[str, str]] = field(default_factory=dict)
+    test_modules: Mapping[str, str] = field(default_factory=dict)
+    test_names: Mapping[str, tuple[str, str]] = field(default_factory=dict)
+
+    def bind(self, own_nodes: list[ast.AST], test_modules: set[str]) -> _Imports:
+        """Return these bindings overridden by imports among a scope's own nodes."""
+        modules = dict(self.modules)
+        functions = dict(self.functions)
+        tests = dict(self.test_modules)
+        names = dict(self.test_names)
+        for node in own_nodes:
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    bound = alias.asname or alias.name.partition(".")[0]
+                    target = alias.name if alias.asname else bound
+                    if target in _IMPORTABLE or target in test_modules:
+                        mapping = tests if target in test_modules else modules
+                        mapping[bound] = target
+            elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+                for alias in node.names:
+                    bound = alias.asname or alias.name
+                    qualified = f"{node.module}.{alias.name}"
+                    if qualified in _IMPORTABLE:
+                        modules[bound] = qualified
+                    elif node.module in _IMPORTABLE:
+                        functions[bound] = (node.module, alias.name)
+                    elif qualified in test_modules:
+                        tests[bound] = qualified
+                    elif node.module in test_modules:
+                        names[bound] = (node.module, alias.name)
+        return replace(
+            self,
+            modules=modules,
+            functions=functions,
+            test_modules=tests,
+            test_names=names,
+        )
+
+    def resolve(self, function: ast.expr) -> tuple[str, str] | None:
+        """Return the ``(module, name)`` of an imported library function."""
+        if isinstance(function, ast.Name):
+            return self.functions.get(function.id)
+        parts = _dotted(function)
+        if parts is None or len(parts) < 2 or parts[0] not in self.modules:
+            return None
+        return ".".join([self.modules[parts[0]], *parts[1:-1]]), parts[-1]
+
+
 @dataclass
 class _Scope:
     constants: dict[str, ast.expr]
@@ -152,20 +308,99 @@ class _Scope:
         return self.locals.get(name, self.constants.get(name))
 
 
-def _basename(node: ast.expr, scope: _Scope, seen: frozenset[str]) -> str | None:
-    """Return the basename of a statically resolvable path or program expression."""
+def _text(node: ast.expr, scope: _Scope, seen: frozenset[str]) -> str | None:
+    """Return a statically known string, with placeholders for formatted values."""
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return PurePosixPath(node.value).name
+        return node.value
     if isinstance(node, ast.Name) and node.id not in seen:
         value = scope.lookup(node.id)
-        return None if value is None else _basename(value, scope, seen | {node.id})
-    if isinstance(node, ast.Call) and node.args:
-        if _call_name(node.func) in PASSTHROUGH_CALLS:
-            return _basename(node.args[0], scope, seen)
-        return None
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
-        return _basename(node.right, scope, seen)
+        return None if value is None else _text(value, scope, seen | {node.id})
+    if isinstance(node, ast.JoinedStr):
+        return "".join(
+            part.value
+            if isinstance(part, ast.Constant) and isinstance(part.value, str)
+            else "_"
+            for part in node.values
+        )
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _text(node.left, scope, seen)
+        right = _text(node.right, scope, seen)
+        return None if left is None or right is None else left + right
     return None
+
+
+def _basename(node: ast.expr, scope: _Scope, seen: frozenset[str]) -> str | None:
+    """Return the basename of a statically resolvable path or program expression.
+
+    For alternatives (``a or b``, ``a if c else b``) a runtime basename wins.
+    """
+    result: str | None = None
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        result = PurePosixPath(node.value).name
+    elif isinstance(node, ast.Name) and node.id not in seen:
+        value = scope.lookup(node.id)
+        if value is not None:
+            result = _basename(value, scope, seen | {node.id})
+    elif isinstance(node, ast.BoolOp | ast.IfExp):
+        options = (
+            node.values if isinstance(node, ast.BoolOp) else [node.body, node.orelse]
+        )
+        names = [_basename(option, scope, seen) for option in options]
+        result = next((name for name in names if name in EXECUTABLES), None) or next(
+            (name for name in names if name), None
+        )
+    elif isinstance(node, ast.Call):
+        result = _call_basename(node, scope, seen)
+    elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        result = _basename(node.right, scope, seen)
+    return result
+
+
+def _call_basename(node: ast.Call, scope: _Scope, seen: frozenset[str]) -> str | None:
+    name = _call_name(node.func)
+    if name in PASSTHROUGH_CALLS and node.args:
+        return _basename(node.args[0], scope, seen)
+    if name == "join" and node.args:
+        return _basename(node.args[-1], scope, seen)
+    if name in PATH_METHODS and isinstance(node.func, ast.Attribute):
+        return _basename(node.func.value, scope, seen)
+    return None
+
+
+def _command_runtimes(command: str) -> set[str]:
+    """Return runtimes started at any command position of a shell string.
+
+    A shell function with a runtime's name shadows that runtime in the script.
+    """
+    shadowed = set(_SHELL_FUNCTION.findall(command))
+    runtimes: set[str] = set()
+    for segment in _SEPARATORS.split(command):
+        try:
+            words = shlex.split(segment)
+        except ValueError:
+            words = segment.split()
+        while words and (_ASSIGNMENT.match(words[0]) or words[0] in _COMMAND_PREFIXES):
+            words.pop(0)
+        if not words:
+            continue
+        program = PurePosixPath(words[0]).name
+        if program in EXECUTABLES and words[0] not in shadowed:
+            runtimes.add(program)
+        if BROKER_ENTRY_POINTS & {PurePosixPath(word).name for word in words}:
+            runtimes.add(BROKER)
+        if program in SHELLS and "-c" in words[:-1]:
+            nested = _command_runtimes(words[words.index("-c") + 1])
+            runtimes |= nested - shadowed
+    return runtimes
+
+
+def _shell_runtimes(node: ast.expr, scope: _Scope) -> set[str]:
+    text = _text(node, scope, frozenset())
+    if text is not None:
+        return _command_runtimes(text)
+    if isinstance(node, ast.List | ast.Tuple) and node.elts:
+        return _shell_runtimes(node.elts[0], scope)
+    return set()
 
 
 def _argv_runtimes(node: ast.expr, scope: _Scope, seen: frozenset[str]) -> set[str]:
@@ -174,100 +409,162 @@ def _argv_runtimes(node: ast.expr, scope: _Scope, seen: frozenset[str]) -> set[s
         value = scope.lookup(node.id)
         if value is not None:
             return _argv_runtimes(value, scope, seen | {node.id})
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return _argv_runtimes(node.left, scope, seen)
+    if isinstance(node, ast.Call) and _call_name(node.func) == "split" and node.args:
+        return _shell_runtimes(node.args[0], scope)
     if not isinstance(node, ast.List | ast.Tuple):
         name = _basename(node, scope, seen)
         return {name} if name in EXECUTABLES else set()
+    return _vector_runtimes(node, scope, seen)
+
+
+def _vector_runtimes(
+    node: ast.List | ast.Tuple, scope: _Scope, seen: frozenset[str]
+) -> set[str]:
+    """Return the runtimes executed by a literal argument vector."""
     if not node.elts:
         return set()
     head = node.elts[0]
     if isinstance(head, ast.Starred):
         return _argv_runtimes(head.value, scope, seen)
     runtimes: set[str] = set()
-    name = _basename(head, scope, seen)
-    if name in EXECUTABLES:
-        runtimes.add(name)
+    names = [
+        None if isinstance(element, ast.Starred) else _basename(element, scope, seen)
+        for element in node.elts
+    ]
+    if names[0] in EXECUTABLES:
+        runtimes.add(names[0])
     # The host-native broker may be launched through an interpreter or systemd-run.
-    for element in node.elts:
-        if not isinstance(element, ast.Starred) and (
-            _basename(element, scope, seen) in BROKER_ENTRY_POINTS
-        ):
-            runtimes.add(BROKER)
+    if BROKER_ENTRY_POINTS & set(names):
+        runtimes.add(BROKER)
+    if names[0] in SHELLS and "-c" in names[:-1]:
+        script = node.elts[names.index("-c") + 1]
+        runtimes |= _shell_runtimes(script, scope)
     return runtimes
 
 
-@dataclass
-class _Imports:
-    """Names bound by imports anywhere in one module."""
-
-    process_modules: dict[str, str] = field(default_factory=dict)
-    process_functions: dict[str, tuple[str, str]] = field(default_factory=dict)
-    test_modules: dict[str, str] = field(default_factory=dict)
-    test_names: dict[str, tuple[str, str]] = field(default_factory=dict)
+def _keyword(call: ast.Call, name: str) -> ast.expr | None:
+    return next((item.value for item in call.keywords if item.arg == name), None)
 
 
-def _bind_import(node: ast.Import, test_modules: set[str], found: _Imports) -> None:
-    for alias in node.names:
-        if alias.name in PROCESS_FUNCTIONS:
-            if alias.asname is not None:
-                found.process_modules[alias.asname] = alias.name
-            elif "." not in alias.name:
-                found.process_modules[alias.name] = alias.name
-        elif alias.name in test_modules and alias.asname is not None:
-            found.test_modules[alias.asname] = alias.name
+def _launch_inputs(
+    call: ast.Call, imports: _Imports
+) -> list[tuple[str, ast.expr]] | None:
+    """Return the ``(style, expression)`` inputs that select a launched program.
 
-
-def _bind_import_from(
-    node: ast.ImportFrom, test_modules: set[str], found: _Imports
-) -> None:
-    if not node.module or node.level:
-        return
-    for alias in node.names:
-        bound = alias.asname or alias.name
-        qualified = f"{node.module}.{alias.name}"
-        if qualified in PROCESS_FUNCTIONS:
-            found.process_modules[bound] = qualified
-        elif alias.name in PROCESS_FUNCTIONS.get(node.module, ()):
-            found.process_functions[bound] = (node.module, alias.name)
-        elif qualified in test_modules:
-            found.test_modules[bound] = qualified
-        elif node.module in test_modules:
-            found.test_names[bound] = (node.module, alias.name)
-
-
-def _imports(tree: ast.Module, test_modules: set[str]) -> _Imports:
-    found = _Imports()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            _bind_import(node, test_modules, found)
-        elif isinstance(node, ast.ImportFrom):
-            _bind_import_from(node, test_modules, found)
-    return found
-
-
-def _process_argv(call: ast.Call, imports: _Imports) -> ast.expr | None:
-    """Return the program or argument vector passed to a process-creating call."""
-    function = call.func
-    target: tuple[str, str] | None = None
-    if isinstance(function, ast.Attribute) and isinstance(function.value, ast.Name):
-        module = imports.process_modules.get(function.value.id)
-        if module is not None and function.attr in PROCESS_FUNCTIONS[module]:
-            target = (module, function.attr)
-    elif isinstance(function, ast.Name):
-        target = imports.process_functions.get(function.id)
-    if target is None:
+    ``None`` means the call does not create a process.
+    """
+    target = imports.resolve(call.func)
+    if target == ("functools", "partial") and call.args:
+        wrapped = ast.Call(
+            func=call.args[0], args=call.args[1:], keywords=call.keywords
+        )
+        return _launch_inputs(wrapped, imports)
+    module, name = target or ("", "")
+    style, position = PROCESS_FUNCTIONS.get(module, {}).get(name, ("", -1))
+    if not style:
         return None
-    module, name = target
-    if name == "create_subprocess_exec":
-        return ast.Tuple(elts=list(call.args), ctx=ast.Load()) if call.args else None
-    if module == "os":
-        index = 1 if name in _OS_PROGRAM_SECOND else 0
-        return call.args[index] if len(call.args) > index else None
-    if call.args:
-        return call.args[0]
-    for keyword in call.keywords:
-        if keyword.arg == "args":
-            return keyword.value
+    program = call.args[position] if len(call.args) > position else None
+    if program is None and module == "subprocess":
+        program = _keyword(call, "args")
+    inputs: list[tuple[str, ast.expr]] = []
+    shell = _keyword(call, "shell")
+    if style == _SHELL or (isinstance(shell, ast.Constant) and shell.value is True):
+        if program is not None:
+            inputs.append((_SHELL, program))
+    elif name.startswith("create_subprocess"):
+        inputs.append((_EXEC, ast.Tuple(elts=list(call.args), ctx=ast.Load())))
+    elif program is not None:
+        inputs.append((_EXEC if style == _EXEC else _PROGRAM, program))
+    executable = _keyword(call, "executable")
+    if (
+        executable is None
+        and name == "Popen"
+        and len(call.args) > _POPEN_EXECUTABLE_POSITION
+    ):
+        executable = call.args[_POPEN_EXECUTABLE_POSITION]
+    if executable is not None:
+        inputs.append((_PROGRAM, executable))
+    return inputs
+
+
+def _input_runtimes(style: str, expression: ast.expr, scope: _Scope) -> set[str]:
+    """Return the runtimes that one launch input selects."""
+    if style == _SHELL:
+        return _shell_runtimes(expression, scope)
+    if style == _PROGRAM:
+        name = _basename(expression, scope, frozenset())
+        return {name} if name in EXECUTABLES else set()
+    return _argv_runtimes(expression, scope, frozenset())
+
+
+@dataclass(frozen=True)
+class _Signature:
+    positional: tuple[str, ...]
+    vararg: str | None
+    keyword_only: tuple[str, ...]
+
+
+def _signature(function: Function) -> _Signature:
+    arguments = function.args
+    return _Signature(
+        tuple(argument.arg for argument in (*arguments.posonlyargs, *arguments.args)),
+        arguments.vararg.arg if arguments.vararg else None,
+        tuple(argument.arg for argument in arguments.kwonlyargs),
+    )
+
+
+_VARARGS = "*"
+
+
+def _forwarded(
+    style: str, expression: ast.expr, signature: _Signature, scope: _Scope
+) -> tuple[str, str] | None:
+    """Return ``(parameter, style)`` when a launch input comes from a parameter."""
+    parameters = {*signature.positional, *signature.keyword_only}
+
+    def parameter(node: ast.expr) -> str | None:
+        if isinstance(node, ast.Name) and node.id not in scope.locals:
+            if node.id == signature.vararg:
+                return _VARARGS
+            if node.id in parameters:
+                return node.id
+        return None
+
+    direct = parameter(expression)
+    if direct is not None:
+        return direct, style
+    if isinstance(expression, ast.List | ast.Tuple) and expression.elts:
+        head = expression.elts[0]
+        if isinstance(head, ast.Starred):
+            name = parameter(head.value)
+            return (name, _EXEC) if name else None
+        name = parameter(head)
+        return (name, _PROGRAM) if name else None
     return None
+
+
+def _arguments(
+    call: ast.Call, signature: _Signature, bound_method: bool
+) -> dict[str, ast.expr]:
+    """Map a call's statically known arguments to the callee's parameters."""
+    positional = list(signature.positional)
+    if bound_method and positional and positional[0] in {"self", "cls"}:
+        positional.pop(0)
+    mapped: dict[str, ast.expr] = {}
+    for index, argument in enumerate(call.args):
+        if isinstance(argument, ast.Starred):
+            break
+        if index < len(positional):
+            mapped[positional[index]] = argument
+    extra = call.args[len(positional) :]
+    if signature.vararg and extra:
+        mapped[_VARARGS] = ast.Tuple(elts=list(extra), ctx=ast.Load())
+    for keyword in call.keywords:
+        if keyword.arg is not None:
+            mapped[keyword.arg] = keyword.value
+    return mapped
 
 
 def _decorator_name(decorator: ast.expr) -> str | None:
@@ -400,6 +697,7 @@ class _Module:
     tree: ast.Module
     constants: dict[str, ast.expr]
     imports: _Imports
+    scopes: dict[int, _ScopeInfo]
     functions: dict[str, Function]
     runs: dict[str, set[str]]
     fixtures: dict[str, Function]
@@ -413,6 +711,37 @@ def _module_name(path: Path, relative_to: Path) -> str:
     return ".".join(parts)
 
 
+@dataclass(frozen=True)
+class _ScopeInfo:
+    """Imports, calls and nested scopes that belong to one lexical scope."""
+
+    imports: _Imports
+    calls: list[ast.Call]
+    children: list[ast.AST]
+
+
+def _scope_infos(tree: ast.Module, test_modules: set[str]) -> dict[int, _ScopeInfo]:
+    """Analyse each module, class and function scope once."""
+    infos: dict[int, _ScopeInfo] = {}
+    stack: list[tuple[ast.AST, _Imports]] = [(tree, _Imports())]
+    while stack:
+        scope, parent = stack.pop()
+        own = list(_own_nodes(scope))
+        imports = parent.bind(
+            [node for node in own if isinstance(node, ast.Import | ast.ImportFrom)],
+            test_modules,
+        )
+        children: list[ast.AST] = [
+            node
+            for node in own
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+        ]
+        calls = [node for node in own if isinstance(node, ast.Call)]
+        infos[id(scope)] = _ScopeInfo(imports, calls, children)
+        stack.extend((child, imports) for child in children)
+    return infos
+
+
 def _parse(path: Path, relative_to: Path, test_modules: set[str]) -> _Module:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     functions: dict[str, Function] = {}
@@ -421,19 +750,30 @@ def _parse(path: Path, relative_to: Path, test_modules: set[str]) -> _Module:
             functions.setdefault(node.name, node)
     fixtures: dict[str, Function] = {}
     autouse: set[str] = set()
-    for statement in tree.body:
+    candidates = [
+        *tree.body,
+        *(
+            member
+            for statement in tree.body
+            if isinstance(statement, ast.ClassDef)
+            for member in statement.body
+        ),
+    ]
+    for statement in candidates:
         if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef):
             is_fixture, is_autouse = _fixture_options(statement)
             if is_fixture:
-                fixtures[statement.name] = statement
-                if is_autouse:
+                fixtures.setdefault(statement.name, statement)
+                if is_autouse and statement in tree.body:
                     autouse.add(statement.name)
+    scopes = _scope_infos(tree, test_modules)
     return _Module(
         path,
         _module_name(path, relative_to),
         tree,
         _assignments(tree.body),
-        _imports(tree, test_modules),
+        scopes[id(tree)].imports,
+        scopes,
         functions,
         {name: set() for name in functions},
         fixtures,
@@ -441,43 +781,119 @@ def _parse(path: Path, relative_to: Path, test_modules: set[str]) -> _Module:
     )
 
 
+def _scoped_calls(
+    module: _Module, root: ScopeNode
+) -> Iterator[tuple[ast.Call, _Imports]]:
+    """Yield each call under ``root`` with the imports of its lexical scope."""
+    stack: list[ast.AST] = [root]
+    while stack:
+        info = module.scopes[id(stack.pop())]
+        for call in info.calls:
+            yield call, info.imports
+        stack.extend(info.children)
+
+
+@dataclass
+class _Summary:
+    launched: set[str]
+    callees: list[tuple[str, str]]
+    forwards: dict[str, str]
+
+
 class _Analysis:
     def __init__(self, modules: dict[str, _Module]) -> None:
         self.modules = modules
+        self._summaries: dict[int, _Summary] = {}
+        self._in_progress: set[int] = set()
 
-    def helper_runs(self, module: _Module, call: ast.Call, scope: _Scope) -> set[str]:
-        """Return runtimes executed by a call to a known helper function."""
+    def callee(
+        self, module: _Module, call: ast.Call, imports: _Imports, scope: _Scope
+    ) -> tuple[str, str] | None:
+        """Return the ``(module, function)`` identity of a test-tree helper call."""
         function = call.func
         if isinstance(function, ast.Attribute) and isinstance(function.value, ast.Name):
-            owner = self.modules.get(
-                module.imports.test_modules.get(function.value.id, "")
-            )
-            return set(owner.runs.get(function.attr, ())) if owner else set()
+            if function.value.id in {"self", "cls"}:
+                return module.name, function.attr
+            owner = imports.test_modules.get(function.value.id)
+            return (owner, function.attr) if owner else None
         if not isinstance(function, ast.Name):
-            return set()
+            return None
         name = function.id
         alias = scope.locals.get(name)
         if isinstance(alias, ast.Name):
             name = alias.id
         if name in module.runs:
-            return set(module.runs[name])
-        imported = module.imports.test_names.get(name)
-        if imported is not None:
-            owner = self.modules.get(imported[0])
-            if owner is not None:
-                return set(owner.runs.get(imported[1], ()))
-        return set()
+            return module.name, name
+        return imports.test_names.get(name)
 
-    def direct(self, module: _Module, function: Function) -> set[str]:
+    def summary(self, module: _Module, function: Function) -> _Summary:
+        """Return a function's launches, helper calls and forwarded parameters."""
+        cached = self._summaries.get(id(function))
+        if cached is not None:
+            return cached
+        if id(function) in self._in_progress:
+            return _Summary(set(), [], {})
+        self._in_progress.add(id(function))
         scope = _Scope(module.constants, _assignments(list(ast.walk(function))))
-        found: set[str] = set()
-        for node in ast.walk(function):
-            if not isinstance(node, ast.Call):
-                continue
-            argv = _process_argv(node, module.imports)
-            if argv is not None:
-                found |= _argv_runtimes(argv, scope, frozenset())
-            found |= self.helper_runs(module, node, scope)
+        scope.constants = {**self.imported_constants(module), **scope.constants}
+        signature = _signature(function)
+        summary = _Summary(set(), [], {})
+        for call, imports in _scoped_calls(module, function):
+            inputs = _launch_inputs(call, imports)
+            if inputs is None:
+                callee = self.callee(module, call, imports, scope)
+                if callee is not None:
+                    summary.callees.append(callee)
+                    inputs = self.forwarded_inputs(callee, call)
+            for style, expression in inputs or ():
+                summary.launched |= _input_runtimes(style, expression, scope)
+                forwarded = _forwarded(style, expression, signature, scope)
+                if forwarded is not None:
+                    summary.forwards.setdefault(*forwarded)
+        self._in_progress.discard(id(function))
+        self._summaries[id(function)] = summary
+        return summary
+
+    def forwarded_inputs(
+        self, callee: tuple[str, str], call: ast.Call
+    ) -> list[tuple[str, ast.expr]]:
+        """Return a helper's launch inputs supplied by this call's arguments."""
+        owner = self.modules.get(callee[0])
+        function = owner.functions.get(callee[1]) if owner else None
+        if owner is None or function is None:
+            return []
+        forwards = self.summary(owner, function).forwards
+        if not forwards:
+            return []
+        bound = isinstance(call.func, ast.Attribute)
+        arguments = _arguments(call, _signature(function), bound)
+        return [
+            (style, arguments[parameter])
+            for parameter, style in forwards.items()
+            if parameter in arguments
+        ]
+
+    def imported_constants(self, module: _Module) -> dict[str, ast.expr]:
+        """Return module-level constants imported from other test-tree modules."""
+        constants: dict[str, ast.expr] = {}
+        for bound, (source, name) in module.imports.test_names.items():
+            owner = self.modules.get(source)
+            if owner is not None and name in owner.constants:
+                constants[bound] = owner.constants[name]
+        return constants
+
+    def direct(
+        self,
+        module: _Module,
+        function: Function,
+        exempt_callees: frozenset[tuple[str, str]] = frozenset(),
+    ) -> set[str]:
+        summary = self.summary(module, function)
+        found = set(summary.launched)
+        for owner_name, name in summary.callees:
+            owner = self.modules.get(owner_name)
+            if owner is not None and (owner_name, name) not in exempt_callees:
+                found |= owner.runs.get(name, set())
         return found
 
     def resolve_helpers(self) -> None:
@@ -526,12 +942,39 @@ class _Analysis:
                 continue
             source, fixture = resolved
             found = set(source.runs[fixture.name])
-            for requested in _parameters(fixture) | _usefixtures(
-                fixture.decorator_list
+            for requested in (
+                _parameters(fixture)
+                | _usefixtures(fixture.decorator_list)
+                | _dynamic_fixtures(fixture)
             ):
                 found |= self.fixture_runs(requested, visible, seen | {name})
             return found
         return set()
+
+    def patch_present(
+        self, module: _Module, test: Function, entry: PatchedCall
+    ) -> bool:
+        """Return whether the test patches ``entry.patched`` on the callee module."""
+        callee_module = entry.callee.rpartition(".")[0]
+        for call, imports in _scoped_calls(module, test):
+            name = _call_name(call.func)
+            arguments = [
+                argument.value if isinstance(argument, ast.Constant) else argument
+                for argument in call.args
+            ]
+            if name == "patch" and arguments[:1] == [
+                f"{callee_module}.{entry.patched}"
+            ]:
+                return True
+            if (
+                name in {"object", "setattr"}
+                and len(arguments) > 1
+                and arguments[1] == entry.patched
+                and isinstance(call.args[0], ast.Name)
+                and imports.test_modules.get(call.args[0].id) == callee_module
+            ):
+                return True
+        return False
 
 
 @dataclass(frozen=True)
@@ -664,11 +1107,24 @@ def _check_markers(
         )
 
 
+def _dynamic_fixtures(function: Function) -> set[str]:
+    """Return fixtures requested through ``request.getfixturevalue("name")``."""
+    return {
+        node.args[0].value
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call)
+        and _call_name(node.func) == "getfixturevalue"
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+        and isinstance(node.args[0].value, str)
+    }
+
+
 def scan(
     tests_root: Path,
     relative_to: Path,
     broker_exemptions: Mapping[str, BrokerExemption] = BROKER_LAUNCHES_WITHOUT_PODMAN,
-    patched_calls: Mapping[str, str] = PATCHED_RUNTIME_CALLS,
+    patched_calls: Mapping[str, PatchedCall] = PATCHED_RUNTIME_CALLS,
 ) -> ScanResult:
     """Scan a tests tree and return runtime requirements and marker violations."""
     paths = sorted(tests_root.rglob("*.py"))
@@ -687,20 +1143,29 @@ def scan(
         autouse = {name for owner in visible for name in owner.autouse}
         relative = module.path.relative_to(relative_to).as_posix()
         for test in _tests(module):
+            test_id = f"{relative}::{test.name}"
+            exempt: frozenset[tuple[str, str]] = frozenset()
+            entry = patched_calls.get(test_id)
+            if entry is not None and analysis.patch_present(
+                module, test.function, entry
+            ):
+                callee_module, _, callee = entry.callee.rpartition(".")
+                exempt = frozenset({(callee_module, callee)})
+                if analysis.direct(module, test.function) != analysis.direct(
+                    module, test.function, exempt
+                ):
+                    result.patched.add(test_id)
             requested = (
                 _parameters(test.function)
                 | _usefixtures(test.function.decorator_list)
+                | _dynamic_fixtures(test.function)
                 | test.fixtures
                 | autouse
             )
-            runtimes = analysis.direct(module, test.function)
+            runtimes = analysis.direct(module, test.function, exempt)
             for fixture in requested:
                 runtimes |= analysis.fixture_runs(fixture, visible, frozenset())
             if not runtimes:
-                continue
-            test_id = f"{relative}::{test.name}"
-            if test_id in patched_calls:
-                result.patched.add(test_id)
                 continue
             result.requirements.append(Requirement(test_id, frozenset(runtimes)))
             _check_markers(test, test_id, runtimes, broker_exemptions, result)

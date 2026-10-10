@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ from tests.container_runtime_markers import (
     BROKER_LAUNCHES_WITHOUT_PODMAN,
     PATCHED_RUNTIME_CALLS,
     BrokerExemption,
+    PatchedCall,
     scan,
 )
 
@@ -112,6 +114,57 @@ def test_guard_fails_when_the_malformed_key_case_loses_its_marker(
         '    podman = shutil.which("podman")\n    subprocess.run([podman, "ps"])\n',
         "def test_x():\n    import subprocess as local\n"
         '    local.call(["podman", "ps"])\n',
+        "import subprocess\n\ndef test_x():\n"
+        '    subprocess.run(["echo", "ps"], executable="/usr/bin/podman")\n',
+        "import subprocess\n\ndef test_x():\n"
+        '    subprocess.Popen(["echo", "ps"], -1, "/usr/bin/podman")\n',
+        'import subprocess\n\ndef test_x():\n    subprocess.run("podman ps", shell=True)\n',
+        "import subprocess\n\ndef test_x():\n"
+        '    subprocess.run(["cd /tmp && env A=1 podman ps"], shell=True)\n',
+        'import subprocess\n\ndef test_x(name):\n    subprocess.run(f"podman {name}", shell=True)\n',
+        'import os\n\ndef test_x():\n    os.system("podman ps | wc -l")\n',
+        'from os import popen\n\ndef test_x():\n    popen("echo ok; podman ps")\n',
+        'import subprocess\n\ndef test_x():\n    subprocess.getoutput("podman ps")\n',
+        'from subprocess import getstatusoutput\n\ndef test_x():\n    getstatusoutput("podman ps")\n',
+        "import asyncio\n\nasync def test_x():\n"
+        '    await asyncio.create_subprocess_shell("podman ps")\n',
+        'import pty\n\ndef test_x():\n    pty.spawn(["podman", "ps"])\n',
+        "import functools, subprocess\n\ndef test_x():\n"
+        '    functools.partial(subprocess.run, ["podman", "ps"])()\n',
+        "from functools import partial\nfrom subprocess import run\n\n"
+        'def test_x():\n    launch = partial(run, ["podman"])\n    launch()\n',
+        "import subprocess\n\ndef test_x(args):\n"
+        '    subprocess.run(["podman"] + args)\n',
+        "import shlex, subprocess\n\ndef test_x():\n"
+        '    subprocess.run(shlex.split("podman ps"))\n',
+        "import subprocess\n\ndef test_x():\n"
+        '    subprocess.run(["bash", "-c", "set -e; podman ps"])\n',
+        "import subprocess\n\ndef _run(command, check=True):\n"
+        "    return subprocess.run(command, check=check)\n\n"
+        'def test_x():\n    _run(["podman", "ps"])\n',
+        "import subprocess\n\ndef _run(*command):\n"
+        "    return subprocess.run(command)\n\n"
+        'def test_x():\n    _run("podman", "ps")\n',
+        "import subprocess\n\ndef _run(*arguments, program):\n"
+        "    return subprocess.run([program, *arguments])\n\n"
+        'def test_x():\n    _run("ps", program="/usr/bin/podman")\n',
+        "import subprocess\n\ndef _inner(command):\n"
+        "    subprocess.run(command)\n\n"
+        "def _outer(command):\n    _inner(command)\n\n"
+        'def test_x():\n    _outer("podman")\n',
+        "import subprocess\n\ndef _shell(script):\n"
+        "    subprocess.run(script, shell=True)\n\n"
+        'def test_x():\n    _shell("podman ps")\n',
+        "import shutil, subprocess\n\ndef test_x():\n"
+        '    subprocess.run([shutil.which("podman") or "podman", "ps"])\n',
+        "import subprocess\n\ndef test_x(rootless):\n"
+        '    subprocess.run(["podman" if rootless else "/bin/true"])\n',
+        "import os, subprocess\n\ndef test_x():\n"
+        '    subprocess.run([os.path.join("/usr/bin", "podman")])\n',
+        "import subprocess\nfrom pathlib import Path\n\ndef test_x():\n"
+        '    subprocess.run([Path("/usr/bin/podman").as_posix(), "ps"])\n',
+        "import asyncio.subprocess\n\nasync def test_x():\n"
+        '    await asyncio.subprocess.create_subprocess_exec("podman")\n',
     ],
     ids=[
         "literal",
@@ -132,6 +185,32 @@ def test_guard_fails_when_the_malformed_key_case_loses_its_marker(
         "os-posix-spawn-alias",
         "which-variable",
         "function-local-import",
+        "executable-keyword",
+        "popen-executable-position",
+        "shell-true",
+        "shell-true-list-with-prefixes",
+        "shell-f-string",
+        "os-system-pipeline",
+        "os-popen-sequence",
+        "getoutput",
+        "getstatusoutput",
+        "create-subprocess-shell",
+        "pty-spawn",
+        "functools-partial",
+        "partial-from-import",
+        "list-concatenation",
+        "shlex-split",
+        "bash-c",
+        "forwarded-parameter",
+        "forwarded-varargs",
+        "forwarded-keyword-program",
+        "forwarded-two-levels",
+        "forwarded-shell-string",
+        "which-or-default",
+        "conditional-program",
+        "os-path-join",
+        "path-as-posix",
+        "dotted-asyncio-subprocess",
     ],
 )
 def test_guard_detects_unmarked_podman_invocations(tmp_path: Path, source: str) -> None:
@@ -148,8 +227,21 @@ def test_guard_detects_unmarked_podman_invocations(tmp_path: Path, source: str) 
         "import helpers.runtime as runtime\n\ndef test_x():\n    runtime.podman_ps()\n",
         "from helpers import runtime\n\ndef test_x():\n    runtime.podman_ps()\n",
         "from helpers.runtime import image\n\ndef test_x(image):\n    pass\n",
+        "import subprocess\nfrom helpers.runtime import PODMAN\n\n"
+        'def test_x():\n    subprocess.run([PODMAN, "ps"])\n',
+        'from helpers.runtime import run\n\ndef test_x():\n    run(["podman", "ps"])\n',
+        "from helpers.runtime import image\n\ndef test_x(request):\n"
+        '    request.getfixturevalue("image")\n',
     ],
-    ids=["helper-from-import", "module-alias", "module-from-import", "fixture"],
+    ids=[
+        "helper-from-import",
+        "module-alias",
+        "module-from-import",
+        "fixture",
+        "imported-constant",
+        "forwarding-helper",
+        "getfixturevalue",
+    ],
 )
 def test_guard_follows_helpers_and_fixtures_in_other_modules(
     tmp_path: Path, importer: str
@@ -158,8 +250,10 @@ def test_guard_follows_helpers_and_fixtures_in_other_modules(
     _write(
         tmp_path,
         "helpers/runtime.py",
-        "import pytest\nfrom subprocess import run\n\n"
-        'def podman_ps():\n    run(["podman", "ps"])\n\n'
+        "import pytest, subprocess\n\n"
+        'PODMAN = "/usr/bin/podman"\n\n'
+        'def podman_ps():\n    subprocess.run(["podman", "ps"])\n\n'
+        "def run(command):\n    subprocess.run(command, check=True)\n\n"
         "@pytest.fixture\ndef image():\n    podman_ps()\n",
     )
     _write(tmp_path, "test_sample.py", importer)
@@ -336,16 +430,150 @@ def test_broker_case_exemptions_require_marks_on_every_other_case(
     assert scan(tmp_path, tmp_path, exemptions, {}).violations == []
 
 
-def test_patched_runtime_calls_are_skipped_only_when_listed(tmp_path: Path) -> None:
+def test_guard_detects_class_level_fixtures_and_method_helpers(
+    tmp_path: Path,
+) -> None:
     _write(
         tmp_path,
         "test_sample.py",
-        'import subprocess\n\ndef _main():\n    subprocess.run(["podman"])\n\n'
-        "def test_x(mocker):\n    _main()\n",
+        "import pytest, subprocess\n\nclass TestX:\n"
+        "    @pytest.fixture\n    def image(self):\n"
+        '        subprocess.run(["podman", "build"])\n\n'
+        '    def _podman(self):\n        subprocess.run(["podman"])\n\n'
+        "    def test_fixture(self, image):\n        pass\n\n"
+        "    def test_method(self):\n        self._podman()\n",
     )
+    assert _violations(tmp_path) == [
+        "test_sample.py::TestX::test_fixture lacks pytest.mark.requires_podman",
+        "test_sample.py::TestX::test_method lacks pytest.mark.requires_podman",
+    ]
+
+
+@pytest.mark.parametrize("podman_first", [True, False], ids=["before", "after"])
+def test_function_local_imports_do_not_leak_between_functions(
+    tmp_path: Path, podman_first: bool
+) -> None:
+    podman = (
+        'def test_x():\n    from subprocess import run\n    run(["podman", "ps"])\n'
+    )
+    other = (
+        "def test_y():\n    import os\n    from os import spawnv as run\n"
+        '    run(os.P_WAIT, "/bin/echo", ["echo"])\n'
+    )
+    functions = [podman, other] if podman_first else [other, podman]
+    _write(tmp_path, "test_sample.py", "\n\n".join(functions))
     assert _violations(tmp_path) == [
         "test_sample.py::test_x lacks pytest.mark.requires_podman"
     ]
-    result = scan(tmp_path, tmp_path, {}, {"test_sample.py::test_x": "patched"})
-    assert result.violations == []
-    assert result.patched == {"test_sample.py::test_x"}
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import pytest, subprocess\n\n@pytest.mark.requires_podman\ndef test_x():\n"
+        '    subprocess.run(["echo"], executable="/usr/bin/podman")\n',
+        "import subprocess\n\ndef _run(command):\n    subprocess.run(command)\n\n"
+        'def test_x():\n    _run(["echo", "podman"])\n',
+        'import os\n\ndef test_x():\n    os.system("echo podman ps")\n',
+        'import subprocess\n\ndef test_x():\n    subprocess.run("grep podman log", shell=True)\n',
+        "import subprocess\n\ndef test_x():\n    subprocess.run(\n"
+        '        ["bash", "-c", "podman() {\\n  echo fake\\n}\\npodman ps"]\n    )\n',
+    ],
+    ids=[
+        "marked-executable",
+        "forwarding-helper-other-program",
+        "echo-mention",
+        "grep-mention",
+        "shadowing-shell-function",
+    ],
+)
+def test_guard_accepts_marked_executables_and_command_mentions(
+    tmp_path: Path, source: str
+) -> None:
+    _write(tmp_path, "test_sample.py", source)
+    assert _violations(tmp_path) == []
+
+
+HARNESS = (
+    "import subprocess\n\ndef _phase():\n"
+    '    subprocess.run(["podman", "ps"])\n\n'
+    "def main():\n    _phase()\n    return 0\n"
+)
+PATCHED = {
+    "test_sample.py::test_x": PatchedCall("harness.main", "_phase", "reason"),
+}
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        ('    mocker.patch.object(harness, "_phase")\n    harness.main()\n', []),
+        ('    mocker.patch("harness._phase")\n    harness.main()\n', []),
+        (
+            "    harness.main()\n",
+            ["test_sample.py::test_x lacks pytest.mark.requires_podman"],
+        ),
+        (
+            '    mocker.patch.object(harness, "_phase")\n    harness.main()\n'
+            '    subprocess.run(["/usr/bin/podman", "ps"])\n',
+            ["test_sample.py::test_x lacks pytest.mark.requires_podman"],
+        ),
+        (
+            '    mocker.patch.object(harness, "_phase")\n    harness.main()\n'
+            "    harness._phase()\n",
+            ["test_sample.py::test_x lacks pytest.mark.requires_podman"],
+        ),
+        (
+            '    mocker.patch.object(harness, "_other")\n    harness.main()\n',
+            ["test_sample.py::test_x lacks pytest.mark.requires_podman"],
+        ),
+    ],
+    ids=[
+        "patched-object",
+        "patched-path",
+        "patch-missing",
+        "extra-direct-launch",
+        "extra-helper-call",
+        "wrong-patch",
+    ],
+)
+def test_patched_call_exempts_only_the_reviewed_call_site(
+    tmp_path: Path, body: str, expected: list[str]
+) -> None:
+    _write(tmp_path, "harness.py", HARNESS)
+    _write(
+        tmp_path,
+        "test_sample.py",
+        "import subprocess\nimport harness\n\ndef test_x(mocker):\n" + body,
+    )
+    result = scan(tmp_path, tmp_path, {}, PATCHED)
+    assert [str(item) for item in result.violations] == expected
+
+
+@pytest.mark.parametrize("change", ["remove-patch", "add-direct-launch"])
+def test_repository_patched_call_fails_when_its_conditions_break(
+    tmp_path: Path, change: str
+) -> None:
+    # The harness and its unit tests are self-contained within these packages.
+    for package in ("tests/e2e", "tests/unit/e2e"):
+        shutil.copytree(ROOT / package, tmp_path / package)
+    path = tmp_path / "tests/unit/e2e/test_reverse_cli_workflow.py"
+    source = path.read_text(encoding="utf-8")
+    patch = (
+        '    structured = mocker.patch.object(workflow, "_exercise_structured_pptx")\n'
+    )
+    assert source.count(patch) == 1
+    if change == "remove-patch":
+        source = source.replace(patch, "    structured = mocker.Mock()\n")
+    else:
+        source = source.replace(
+            patch, patch + '    subprocess.run(["/usr/bin/podman", "ps"])\n'
+        )
+    path.write_text(source, encoding="utf-8")
+
+    result = scan(tmp_path / "tests", tmp_path)
+
+    assert [str(item) for item in result.violations] == [
+        "tests/unit/e2e/test_reverse_cli_workflow.py::"
+        "test_main_dispatches_structured_pptx_phase lacks pytest.mark.requires_podman"
+    ]

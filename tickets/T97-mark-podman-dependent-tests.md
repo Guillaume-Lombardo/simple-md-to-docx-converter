@@ -78,6 +78,28 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
   The T50 evidence document now states that its command records the T50 revision, and points
   to the current canonical command. Collected IDs for CI invocations are still unchanged apart
   from the 38 guard cases.
+- 2026-10-10: Review round 2 on PR #281 found three more guard false negatives, now fixed:
+  - `PATCHED_RUNTIME_CALLS` exempts only calls to the reviewed helper from the listed test,
+    and only while the required patch is present. Other launches, helper calls and fixtures
+    in that test are still checked.
+  - Imports now resolve per lexical scope, so function-local imports no longer leak between
+    functions.
+  - An explicit `executable` (keyword, or `Popen` position 2) now counts as the launched
+    program.
+
+  An adversarial pass then added detection for:
+  - `shell=True`, `os.system`, `os.popen`, `subprocess.getoutput`/`getstatusoutput` and
+    `asyncio.create_subprocess_shell` command strings (every command position);
+  - `pty.spawn` and `functools.partial`;
+  - `bash -c`, `shlex.split` and list concatenation;
+  - `or`/conditional alternatives, `os.path.join` and `Path.as_posix`;
+  - constants imported from other test modules;
+  - argument forwarding through helper parameters;
+  - `self` method helpers, class-level fixtures and `request.getfixturevalue`.
+
+  The remaining limits are documented in the guard module and the PR. The guard has 82 unit
+  cases. In the Podman-free sandbox, the affected suites passed (1,368 passed, 34
+  deselected). Collected IDs for CI invocations are unchanged apart from the guard cases.
 
 ## Synchronization
 
