@@ -2,7 +2,7 @@
 ticket: T98
 linear_id: G1L-630
 linear_url: https://linear.app/g1lom/issue/G1L-630/t98-make-the-local-python-test-suite-fast-enough-for-iteration
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -36,6 +36,14 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 
 - 2026-10-09: Created in Linear and mirrored here from the owner-accepted repository analysis.
   Not started.
+
+- 2026-10-10: Started a narrowly scoped CI reliability correction during T96 PR #278
+  qualification. Attempt 1 passed all 2,701 shard tests in 29:59 before cancellation prevented
+  coverage upload; attempt 2 reached 99% without failures before the same 30-minute cutoff.
+  Raise only the reviewed Python shard bound to 40 minutes with matching validator and regression
+  checks. Preserve test selection, two complementary shards, same-attempt coverage, 90% gates,
+  permissions and all other job bounds. The broader measurement, parallelism and developer-loop
+  criteria remain pending behind T97; this correction does not complete T98.
 
 ## Synchronization
 
