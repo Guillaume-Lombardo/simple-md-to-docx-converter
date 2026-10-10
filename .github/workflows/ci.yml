@@ -89,7 +89,7 @@ jobs:
           python-version-file: .python-version
           check-latest: false
       - name: Set up pinned Node for browser and frontend tests
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.19.0
           check-latest: false
@@ -106,7 +106,7 @@ jobs:
           path: ~/.local/share/pnpm/store/v11
           key: ${{ runner.os }}-node-24.19.0-pnpm-11.25.0-${{ hashFiles('pnpm-lock.yaml') }}
       - name: Set up uv with a lock-keyed cache
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.1"
           enable-cache: true
@@ -199,7 +199,7 @@ jobs:
           python-version-file: .python-version
           check-latest: false
       - name: Set up uv
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.1"
           enable-cache: true
@@ -218,7 +218,7 @@ jobs:
           -p scripts.ci.light_sharding --light-shard-count=2
           --light-shard-index="$SHARD_INDEX" --cov-fail-under=0 --cov-report=
       - name: Retain shard coverage
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: light-coverage-${{ github.run_attempt }}-${{ matrix.shard }}
           path: .coverage
@@ -276,7 +276,7 @@ jobs:
           python-version-file: .python-version
           check-latest: false
       - name: Set up uv
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.1"
           enable-cache: true
@@ -295,7 +295,7 @@ jobs:
           -p no:scripts.ci.pytest_branch_coverage
           --cov-fail-under=0 --cov-report=
       - name: Retain distributed coverage
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: distributed-coverage-${{ github.run_attempt }}
           path: .coverage
@@ -320,7 +320,7 @@ jobs:
           python-version-file: .python-version
           check-latest: false
       - name: Set up uv
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.1"
           enable-cache: true
@@ -330,17 +330,17 @@ jobs:
       - name: Synchronize locked dependencies
         run: uv sync --locked --all-groups
       - name: Download first shard coverage
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: light-coverage-${{ github.run_attempt }}-0
           path: artifacts/light-coverage/0
       - name: Download second shard coverage
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: light-coverage-${{ github.run_attempt }}-1
           path: artifacts/light-coverage/1
       - name: Download distributed coverage
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: distributed-coverage-${{ github.run_attempt }}
           path: artifacts/distributed-coverage
@@ -449,12 +449,12 @@ jobs:
           check-latest: false
       - name: Set up pinned Node for frontend smoke
         if: ${{ matrix.domain == 'frontend' }}
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.19.0
           check-latest: false
       - name: Set up uv with a lock-keyed cache
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.1"
           enable-cache: true
@@ -554,13 +554,13 @@ jobs:
             = "LibreOffice 26.2.5.2 cd7284b4cbbfeb507e630c1aac019f4157393acb"
       - name: Set up the pinned Node runtime for Mermaid tests
         if: ${{ matrix.domain == 'document-engines' }}
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22.23.1
           check-latest: false
       - name: Set up pinned Node for rootless E2E
         if: ${{ startsWith(matrix.domain, 'e2e-') }}
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.19.0
           check-latest: false
@@ -620,7 +620,7 @@ jobs:
           fi
       - name: Retain failed E2E evidence
         if: ${{ failure() && startsWith(matrix.domain, 'e2e-') }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-failure-${{ matrix.domain }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts/e2e/${{ matrix.domain == 'e2e-standalone' && 'standalone' || 'distributed' }}
@@ -628,7 +628,7 @@ jobs:
           retention-days: 30
       - name: Retain final-image verification evidence
         if: ${{ always() && matrix.domain == 'container' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: final-image-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -667,7 +667,7 @@ jobs:
           python-version-file: .python-version
           check-latest: false
       - name: Set up uv
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.1"
           enable-cache: false
@@ -684,7 +684,7 @@ jobs:
           --artifact mutation-results/report.json
       - name: Retain mutation evidence
         if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mutation-report-${{ github.run_id }}-${{ github.run_attempt }}
           path: mutation-results/report.json
