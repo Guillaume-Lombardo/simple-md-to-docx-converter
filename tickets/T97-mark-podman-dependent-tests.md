@@ -63,6 +63,21 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
   Limitations: the guard is static and cannot see Podman executed indirectly through shell
   scripts; `test_registry_transport.py` and `test_compose_configuration.py` are not selected
   by any CI pytest invocation, before or after this change.
+- 2026-10-10: The Podman-free canonical run on `2df5528` passed: 5,363 passed, 94 deselected,
+  exit 0, 94.15% coverage. On a host with Podman, the 34 `requires_podman` cases passed. The
+  independent review of PR #281 requested changes, which are now addressed. The guard moved to
+  `tests/container_runtime_markers.py` and now:
+  - checks per-parameter marks, so a broker exemption covers only the listed configuration-time
+    case IDs (a negative test removes the `malformed` case marker and the guard fails);
+  - resolves `subprocess`, `asyncio` and `os` module aliases and from-imports, including
+    `os.exec*`, `os.spawn*` and `os.posix_spawn*`;
+  - follows helpers and fixtures imported from other test-tree modules;
+  - lists one reviewed harness call with every reached runtime branch patched, and verifies
+    that this entry is still reached.
+
+  The T50 evidence document now states that its command records the T50 revision, and points
+  to the current canonical command. Collected IDs for CI invocations are still unchanged apart
+  from the 38 guard cases.
 
 ## Synchronization
 
