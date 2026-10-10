@@ -108,8 +108,8 @@ COPY --chmod=0444 toolchain/document-engines/fonts/manifest.json /opt/md-convert
 COPY --chmod=0444 toolchain/document-engines/THIRD_PARTY_NOTICES.md /opt/md-converter/THIRD_PARTY_NOTICES.md
 COPY --chmod=0444 toolchain/document-engines/LICENSE.containers-common /opt/md-converter/LICENSE.chrome-seccomp
 
-# Reviewed UBI inventory: Curl 7.76.1-40.el9_8.7 and OpenSSL 3.5.8-1.el9_8.
-ARG RPM_INVENTORY_SHA256=d35b361f72fcb13a8dd683649ba825b6c0363900105c99ded006543e07917292
+# Reviewed UBI inventory: Curl 7.76.1-40.el9_8.7 and OpenSSL 3.5.8-2.el9_8.
+ARG RPM_INVENTORY_SHA256=2b02ce10a0d8955ff1817b56323d6dd7e091c1d1316b11700e0f87d24319dc90
 RUN mkdir -p /data /work /tmp/md-converter \
     && chgrp -R 0 /data /work /tmp/md-converter \
     && chmod -R g=u /data /work /tmp/md-converter \

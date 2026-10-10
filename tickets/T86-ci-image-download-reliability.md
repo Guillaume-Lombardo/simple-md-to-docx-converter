@@ -33,6 +33,22 @@ Own bounded transient acquisition retries for immutable CI/container images, che
 
 ## Progress
 
+* 2026-10-10: PR #278 qualification exposed a new fail-closed final-image inventory mismatch.
+  Extracting the reviewed inventory from the existing T95 image reproduces
+  `d35b361f72fcb13a8dd683649ba825b6c0363900105c99ded006543e07917292`. Changing exactly
+  `openssl`, `openssl-libs`, and `openssl-devel` from `1:3.5.8-1.el9_8` to
+  `1:3.5.8-2.el9_8` reproduces the hosted build digest
+  `2b02ce10a0d8955ff1817b56323d6dd7e091c1d1316b11700e0f87d24319dc90`. All other inventory
+  rows, package names, architectures, licenses and signing-key rows are identical. The three
+  packages came from the primary Red Hat UBI BaseOS/AppStream repositories; RPM verification
+  confirms the existing `fd431d51` RSA/SHA256 signature and payload digests. Their signed changelog
+  identifies the DTLS retransmission fix for [CVE-2026-84782](https://access.redhat.com/security/cve/cve-2026-84782).
+  Refresh only the reviewed inventory digest/comment and its fail-closed contract test; base,
+  engine and public Compose pins stay unchanged. Hosted security scanning and final-image E2E
+  qualification remain pending. This maintenance follow-up preserves the previously verified
+  completion of the original T86 scope.
+
+
 * 2026-09-22: Completed after main CI `35696095409` succeeded at exact squash
   `cd229f7e8c5779b0d56f2721ba585b5ec3be0210`, including both full E2E profiles,
   document engines, coverage, frontend, storage and the required gate. PR #255 delivered bounded
