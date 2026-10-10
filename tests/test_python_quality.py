@@ -342,10 +342,31 @@ def test_canonical_pytest_hook_enforces_branch_only_threshold(
     monkeypatch.chdir(tmp_path)
     session = mocker.Mock(exitstatus=pytest.ExitCode.OK)
     session.config.getoption.return_value = False
+    del session.config.workerinput
     session.config.pluginmanager.getplugin.return_value = mocker.Mock()
     pytest_branch_coverage.pytest_sessionfinish(session)
     expected = pytest.ExitCode.TESTS_FAILED if fails else pytest.ExitCode.OK
     assert session.exitstatus == expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("report", [None, "{}"])
+def test_canonical_pytest_hook_leaves_validation_to_xdist_controller(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mocker: MockerFixture,
+    report: str | None,
+) -> None:
+    """An xdist worker never reads a missing or stale report from a shared cwd."""
+    if report is not None:
+        (tmp_path / "coverage.json").write_text(report)
+    monkeypatch.chdir(tmp_path)
+    session = mocker.Mock(exitstatus=pytest.ExitCode.OK)
+    session.config.getoption.return_value = False
+    session.config.workerinput = {"workerid": "gw0"}
+    pytest_branch_coverage.pytest_sessionfinish(session)
+    assert session.exitstatus == pytest.ExitCode.OK
+    session.config.pluginmanager.getplugin.assert_not_called()
 
 
 @pytest.mark.unit

@@ -12,6 +12,25 @@ from scripts.testing.services import distributed_services
 from tests.container_runtime_guard import ContainerRuntimeGuard
 from tests.golden.corpus import CorpusManifest, materialize_case, read_manifest
 
+DISTRIBUTED_SERVICE_MARKERS = ("requires_postgres", "requires_s3")
+DISTRIBUTED_SERVICES_GROUP = "distributed-services"
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    """Keep service-backed tests on one xdist worker under ``--dist loadgroup``.
+
+    Each worker process owns its own session fixture, so other distribution
+    modes stay isolated by starting one private service stack per worker.
+    """
+    if not config.pluginmanager.hasplugin("xdist"):
+        return
+    for item in items:
+        if any(item.get_closest_marker(name) for name in DISTRIBUTED_SERVICE_MARKERS):
+            item.add_marker(pytest.mark.xdist_group(DISTRIBUTED_SERVICES_GROUP))
+
 
 @pytest.fixture(scope="session")
 def local_distributed_services() -> Iterator[None]:
@@ -24,7 +43,7 @@ def local_distributed_services() -> Iterator[None]:
 def configure_distributed_test_services(request: pytest.FixtureRequest) -> None:
     if any(
         request.node.get_closest_marker(marker) is not None
-        for marker in ("requires_postgres", "requires_s3")
+        for marker in DISTRIBUTED_SERVICE_MARKERS
     ):
         request.getfixturevalue("local_distributed_services")
 
