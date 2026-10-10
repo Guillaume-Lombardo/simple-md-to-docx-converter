@@ -2,7 +2,7 @@
 ticket: T97
 linear_id: G1L-617
 linear_url: https://linear.app/g1lom/issue/G1L-617/t97-mark-podman-dependent-tests-and-repair-the-default-local-test
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -133,6 +133,21 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
   - The reviewed opt-out marker `container_runtime_guard_exempt(reason=...)` (reason mandatory)
     affects only the guard. It is used by the harness test whose bash script stubs `podman`; that
     test no longer carries `requires_podman`.
+
+- 2026-10-10: Completed after [PR #281](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/281)
+  squash-merged approved head `4730e0c887f5b2f48055cb4d1500a3c7457685e4` as
+  `b764b99225f3c5ae89c5fedb54728b5011952f65`; the merged tree is identical to the approved head.
+  Independent review round 6 approved the final head with no findings. Exact-head CI
+  [38059065801](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/38059065801)
+  and main CI
+  [38062285755](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/38062285755)
+  passed; the automatic release run detected no version change and published nothing. On a
+  Podman-free host the canonical default command passed at the final head (5,419 passed,
+  94 deselected, 94.14% branch coverage) with the runtime guard active, and the 34
+  `requires_podman` cases passed on a Podman host. Known limits of the runtime guard are
+  documented in `tests/container_runtime_guard.py`. Pre-existing gap, unchanged by this ticket:
+  `tests/integration/container/test_registry_transport.py` and
+  `tests/integration/test_compose_configuration.py` are not selected by any CI pytest invocation.
 
 ## Synchronization
 
