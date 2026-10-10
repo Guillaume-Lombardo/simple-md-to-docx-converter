@@ -100,6 +100,20 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
   The remaining limits are documented in the guard module and the PR. The guard has 82 unit
   cases. In the Podman-free sandbox, the affected suites passed (1,368 passed, 34
   deselected). Collected IDs for CI invocations are unchanged apart from the guard cases.
+- 2026-10-10: Review round 3 on PR #281 found further synthetic false negatives in the
+  static guard. Owner decision (2026-10-10, recorded in G1L-617): replace the static AST guard
+  with a runtime guard.
+  - `tests/container_runtime_guard.py`, registered by `tests/conftest.py`, installs a Python
+    audit hook. During each item's setup and call phases it inspects `subprocess.Popen`,
+    `os.system`, `os.exec`, `os.posix_spawn` and `pty.spawn` launches, including quote-aware
+    shell command positions.
+  - It raises before an unmarked Podman launch, or an unmarked Docker launch, starts. It also
+    records the violation, so a swallowed error still fails the test.
+  - `requires_postgres` and `requires_s3` also allow Docker, for the disposable service stack.
+  - The static guard, its tests and the patched-call allowlist were removed.
+  - Remaining limits: launches by child processes (shell scripts, the broker, `os.spawn*` and
+    `pty.spawn` children), launches outside items or during teardown, and non-Python launchers.
+    The Podman-free canonical run covers these.
 
 ## Synchronization
 

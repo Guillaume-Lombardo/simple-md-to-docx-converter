@@ -215,9 +215,11 @@ uv build --build-constraint build-constraints.txt --require-hashes
 The default local suite excludes tests marked for Pandoc, Mermaid/Chromium, LibreOffice, and
 Podman. Install the locked engines and rootless Podman to run their integration suites and the
 complete final-image tests. Tests that execute Podman carry `requires_podman`; tests that execute
-the Docker CLI carry `requires_docker` and stay in the default suite. The unit guard
-`tests/unit/test_container_runtime_markers.py` fails when a test executes either runtime without
-its marker. An unavailable
+the Docker CLI carry `requires_docker` and stay in the default suite. The runtime guard
+`tests/container_runtime_guard.py`, registered by `tests/conftest.py`, audits process launches
+during each test's setup and call phases. It fails a test that launches either runtime without its
+marker before the process starts; `requires_postgres` and `requires_s3` also allow Docker for the
+disposable service stack. An unavailable
 engine test is skipped only through its registered marker and must never be reported as passed.
 
 ### Parallel light CI
