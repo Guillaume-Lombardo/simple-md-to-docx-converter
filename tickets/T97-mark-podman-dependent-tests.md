@@ -124,6 +124,15 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
     outermost `makereport` wrapper.
   - An explicit `executable` is authoritative over `argv[0]`.
   - Thread launches during nested pytester sessions are documented as a limit.
+- 2026-10-10: Review round 5 on PR #281 found two launcher-parsing bypasses: combined shell
+  options such as `bash -ec`, and `env -u VAR` operands. The orchestrator decided to make
+  detection uniformly conservative, with no launcher, option or shell parsing. A runtime-name
+  shell word in the executable, in any argument or in a command string is a launch. The guard is
+  a developer safety net, not a security boundary: a missed launch is silent, whereas a false
+  positive fails loudly with a message naming the marker to add.
+  - The reviewed opt-out marker `container_runtime_guard_exempt(reason=...)` (reason mandatory)
+    affects only the guard. It is used by the harness test whose bash script stubs `podman`; that
+    test no longer carries `requires_podman`.
 
 ## Synchronization
 

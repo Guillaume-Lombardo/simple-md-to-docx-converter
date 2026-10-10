@@ -15,24 +15,25 @@ phase:
   reports the violation to the parent through a per-process directory, so the
   parent fails the test when it builds the report.
 
-Program rule: the launched executable is authoritative (an explicit
-``executable=`` wins over ``argv[0]``). When it is a launcher (``env``,
-``nohup``, ``sudo``), the program is the first argument vector word after
-``VAR=value`` assignments and options. When it is a shell (``sh``, ``bash``,
-``dash``, ``zsh``) the ``-c`` script is inspected.
+Detection is uniformly conservative, with no launcher, option or shell parsing.
+A launch counts as a runtime launch when the runtime name (``podman``,
+``docker``) appears as a shell word in the audited executable, in any argument
+vector element, or in a shell command string. A shell word may be inside quotes,
+``$(...)``, backticks, combined options (``bash -ec``) or launcher operands
+(``env -u VAR podman``, ``timeout 5 podman``). A path ending in the runtime name
+also counts, so ``subprocess.run(["podman", "x"], executable="/bin/echo")`` and
+``echo podman`` are flagged.
 
-Shell rule: a shell command string (``shell=True``, a shell ``-c`` script,
-``os.system``, ``os.popen``, ``asyncio.create_subprocess_shell``,
-``subprocess.getoutput``) launches a runtime if the runtime's name appears in it
-as a shell word anywhere, including inside quotes, ``$(...)`` and backticks.
-This deliberately over-approximates (``echo podman`` is flagged): a missed
-launch is silent, whereas a false positive fails loudly and is fixed by marking
-the test.
-
-``podman`` requires ``requires_podman``. ``docker`` requires ``requires_docker``;
-``requires_postgres`` and ``requires_s3`` also allow it because their fixture
-provisions disposable services with Docker Compose. Markers are the item's
-effective markers, so module, class, function and ``pytest.param`` marks count.
+Rationale: the guard is a developer safety net, not a security boundary. A
+missed launch is silent, whereas a false positive fails loudly with a message
+that names the marker to add. ``podman`` requires ``requires_podman``.
+``docker`` requires ``requires_docker``; ``requires_postgres`` and
+``requires_s3`` also allow it because their fixture provisions disposable
+services with Docker Compose. Markers are the item's effective markers, so
+module, class, function and ``pytest.param`` marks count. A test that only
+passes a runtime name to another program opts out with the reviewed marker
+``container_runtime_guard_exempt(reason="...")``. Its reason is mandatory, and
+the marker affects only this guard, never test selection.
 
 A violation raises :class:`ContainerRuntimeMarkerError` from the audit hook
 before the process starts, and is recorded on the item. A recorded violation
@@ -58,21 +59,20 @@ import shutil
 import sys
 import tempfile
 import uuid
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Iterable, Sequence
+    from collections.abc import Generator, Iterable
 
 RUNTIMES = frozenset({"podman", "docker"})
 ALLOWING_MARKERS = {
     "podman": ("requires_podman",),
     "docker": ("requires_docker", "requires_postgres", "requires_s3"),
 }
-SHELLS = frozenset({"sh", "bash", "dash", "zsh"})
-LAUNCHERS = frozenset({"env", "nohup", "sudo"})
+EXEMPT_MARKER = "container_runtime_guard_exempt"
 _SHELL_WORDS = {
     runtime: re.compile(
         rf"(?:^|[^\w.\-/])(?:[^\s'\"`;|&()<>]*/)?{runtime}(?=$|[^\w.\-])"
@@ -93,51 +93,32 @@ def _text(value: object) -> str | None:
     return None
 
 
-def shell_runtimes(command: str) -> frozenset[str]:
-    """Return runtimes whose name appears as a shell word anywhere in a command."""
+def text_runtimes(text: str) -> frozenset[str]:
+    """Return runtimes whose name appears as a shell word anywhere in ``text``."""
     return frozenset(
-        runtime for runtime, pattern in _SHELL_WORDS.items() if pattern.search(command)
+        runtime for runtime, pattern in _SHELL_WORDS.items() if pattern.search(text)
     )
 
 
-def _after_launcher(words: Sequence[str]) -> int | None:
-    """Return the index of the program a launcher runs."""
-    for index, word in enumerate(words):
-        name, separator, _ = word.partition("=")
-        if (separator and name.isidentifier()) or word.startswith("-"):
-            continue
-        return index
-    return None
-
-
 def argv_runtimes(argv: Iterable[object], executable: object = None) -> frozenset[str]:
-    """Return the runtimes started by an executable and its argument vector."""
-    words = [text for text in (_text(value) for value in argv) if text is not None]
-    program = _text(executable) or (words[0] if words else None)
-    arguments = words[1:]
-    name = PurePosixPath(program).name if program else None
-    while name in LAUNCHERS:
-        index = _after_launcher(arguments)
-        if index is None:
-            return frozenset()
-        name = PurePosixPath(arguments[index]).name
-        arguments = arguments[index + 1 :]
-    runtimes = {name} & RUNTIMES if name else set()
-    if name in SHELLS and "-c" in arguments[:-1]:
-        runtimes |= shell_runtimes(arguments[arguments.index("-c") + 1])
+    """Return runtimes named by an executable or by any argument vector element."""
+    runtimes: set[str] = set()
+    for value in (executable, *argv):
+        text = _text(value)
+        if text:
+            runtimes |= text_runtimes(text)
     return frozenset(runtimes)
 
 
 def launched_runtimes(event: str, arguments: tuple[Any, ...]) -> frozenset[str]:
-    """Return the container runtimes started by one audit event."""
+    """Return the container runtimes a launch audit event may start."""
     if event == "subprocess.Popen" and len(arguments) >= 2:
         executable, argv = arguments[0], arguments[1]
         if isinstance(argv, str | bytes | os.PathLike):
             argv = [argv]
         return argv_runtimes(argv if isinstance(argv, list | tuple) else [], executable)
     if event == "os.system" and arguments:
-        command = _text(arguments[0])
-        return shell_runtimes(command) if command else frozenset()
+        return argv_runtimes([arguments[0]])
     if event in {"os.exec", "os.posix_spawn"} and len(arguments) >= 2:
         argv = arguments[1] if isinstance(arguments[1], list | tuple) else []
         return argv_runtimes(argv, arguments[0])
@@ -156,6 +137,21 @@ _ACTIVE: list[tuple[pytest.Item | None, str]] = []
 _OWNER_PID = os.getpid()
 _CHILD_REPORTS: Path | None = None
 _HOOK_INSTALLED = False
+
+
+def exemption_reason(item: pytest.Item) -> str | None:
+    """Return the validated guard exemption reason, or ``None`` if not exempt."""
+    marker = item.get_closest_marker(EXEMPT_MARKER)
+    if marker is None:
+        return None
+    reason = marker.kwargs.get("reason", marker.args[0] if marker.args else None)
+    if not isinstance(reason, str) or not reason.strip():
+        pytest.fail(
+            f"{item.nodeid}: {EXEMPT_MARKER} requires a non-empty reason, for example "
+            f'@pytest.mark.{EXEMPT_MARKER}(reason="passes podman to a fake")',
+            pytrace=False,
+        )
+    return reason
 
 
 def missing_markers(item: pytest.Item, runtimes: Iterable[str]) -> list[str]:
@@ -197,11 +193,13 @@ def _audit(event: str, arguments: tuple[Any, ...]) -> None:
     if item is None or phase not in _ENFORCED_PHASES:
         return
     missing = missing_markers(item, launched_runtimes(event, arguments))
-    if not missing:
+    if not missing or item.get_closest_marker(EXEMPT_MARKER) is not None:
         return
     message = "; ".join(
         f"{item.nodeid} launched {runtime} without pytest.mark."
-        f"{ALLOWING_MARKERS[runtime][0]}"
+        f"{ALLOWING_MARKERS[runtime][0]}. Add that marker, or "
+        f'pytest.mark.{EXEMPT_MARKER}(reason="...") if the test only passes '
+        f"the name {runtime!r} to another program"
         for runtime in missing
     )
     if os.getpid() == _OWNER_PID:
@@ -244,6 +242,7 @@ class ContainerRuntimeGuard:
 
     @pytest.hookimpl(wrapper=True)
     def pytest_runtest_setup(self, item: pytest.Item) -> Generator[None]:
+        exemption_reason(item)
         return (yield from _within(item, "setup"))
 
     @pytest.hookimpl(wrapper=True)

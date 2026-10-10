@@ -990,15 +990,18 @@ markers = [
   "requires_s3: requires S3-compatible storage",
   "requires_podman: requires the Podman executable and a rootless Podman runtime",
   "requires_docker: requires the Docker CLI and Compose plugin",
+  "container_runtime_guard_exempt(reason): reviewed opt-out from the container runtime guard only",
 ]
 ```
 
 Every test that executes a container runtime carries the matching runtime marker. A runtime guard
 registered by the test configuration audits process launches during each test's setup and call
-phases and fails an unmarked test before the runtime starts. For shell command strings, it treats
-any runtime name used as a shell word as a launch. It deliberately over-approximates there,
-because a missed launch is silent whereas a false positive fails loudly and is fixed by marking
-the test. The default local command excludes only the document engines and Podman:
+phases and fails an unmarked test before the runtime starts. Detection is uniformly conservative:
+the runtime name as a shell word in the executable, in any argument or in a shell command string
+counts as a launch. The guard is a developer safety net, not a security boundary. A missed launch
+is silent, whereas a false positive fails loudly with a message that names the marker to add. A
+test that only passes a runtime name to another program uses the reviewed
+`container_runtime_guard_exempt(reason=...)` marker, which affects only the guard. The default local command excludes only the document engines and Podman:
 `uv run pytest -m "not requires_pandoc and not requires_mermaid and not requires_libreoffice and not requires_podman"`.
 It keeps PostgreSQL, S3, Docker, slow, integration, and E2E tests when they are runnable. CI keeps
 running Podman-marked tests in the domains that already select them.

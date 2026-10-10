@@ -40,9 +40,9 @@ def test_final_frontend_binds_and_probes_loopback_independently_of_runtime_hostn
 
 
 @pytest.mark.unit
-# The bash script stubs `podman` with a shell function. The runtime guard treats
-# any `podman` word in a shell string as a launch, so this test carries the marker.
-@pytest.mark.requires_podman
+@pytest.mark.container_runtime_guard_exempt(
+    reason="the bash script stubs podman with a shell function; no runtime starts"
+)
 @pytest.mark.parametrize(
     ("inspected_address", "expected_code", "expected_origin"),
     [

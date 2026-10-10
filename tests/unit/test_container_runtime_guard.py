@@ -7,7 +7,7 @@ import pytest
 from tests.container_runtime_guard import (
     ContainerRuntimeGuard,
     launched_runtimes,
-    shell_runtimes,
+    text_runtimes,
 )
 
 pytest_plugins = ["pytester"]
@@ -25,62 +25,50 @@ MISSING = "/nonexistent/bin/podman"
         ("x=$(docker ps)", {"docker"}),
         (f'echo "$({MISSING} ps)"', {"podman"}),
         (f"echo `{MISSING} ps`", {"podman"}),
-        # Deliberate over-approximation: any shell word counts, even when quoted.
         ("echo 'ok; podman ps'", {"podman"}),
-        ("echo ';' 'podman'", {"podman"}),
         ("echo podman", {"podman"}),
-        ("podman() { :; }; podman ps", {"podman"}),
-        ('echo "unbalanced podman', {"podman"}),
-        # Not shell words: other names, files and image references.
+        ("/opt/fake-bin/podman/", {"podman"}),
         ("podman-compose up", set()),
-        ("cat compose.podman.yaml", set()),
+        ("cat compose.podman.yaml /opt/podman.log", set()),
         ("echo docker.io/library/postgres", set()),
-        ("echo mypodman podman_x", set()),
+        ("echo mypodman podman_x run-podman.sh", set()),
     ],
 )
-def test_shell_commands_flag_runtime_words_anywhere(
+def test_runtime_names_count_as_shell_words_anywhere(
     command: str, expected: set[str]
 ) -> None:
-    assert shell_runtimes(command) == expected
+    assert text_runtimes(command) == expected
+
+
+def _popen(*argv: str, executable: str | None = None) -> tuple[object, ...]:
+    return (executable or argv[0], list(argv), None, None)
 
 
 @pytest.mark.parametrize(
     ("event", "arguments", "expected"),
     [
-        ("subprocess.Popen", ("podman", ["podman", "ps"], None, None), {"podman"}),
-        ("subprocess.Popen", (MISSING, [MISSING, "ps"], None, None), {"podman"}),
-        ("subprocess.Popen", ("/usr/bin/podman", ["echo"], None, None), {"podman"}),
-        # An explicit executable is authoritative over argv[0].
-        ("subprocess.Popen", ("/bin/echo", ["podman", "hello"], None, None), set()),
-        (
-            "subprocess.Popen",
-            ("/bin/sh", ["/bin/sh", "-c", "podman ps"], None, None),
-            {"podman"},
-        ),
-        (
-            "subprocess.Popen",
-            ("env", ["env", "A=1", "docker", "ps"], None, {}),
-            {"docker"},
-        ),
+        ("subprocess.Popen", _popen("podman", "ps"), {"podman"}),
+        ("subprocess.Popen", _popen(MISSING, "ps"), {"podman"}),
+        ("subprocess.Popen", _popen("echo", executable="/usr/bin/podman"), {"podman"}),
+        # Conservative: any argument naming a runtime counts, whatever runs it.
+        ("subprocess.Popen", _popen("podman", "x", executable="/bin/echo"), {"podman"}),
+        ("subprocess.Popen", _popen("echo", "podman"), {"podman"}),
+        ("subprocess.Popen", _popen("bash", "-ec", MISSING), {"podman"}),
+        ("subprocess.Popen", _popen("sh", "-xc", "podman ps"), {"podman"}),
+        ("subprocess.Popen", _popen("env", "-u", "T97_DUMMY", MISSING), {"podman"}),
+        ("subprocess.Popen", _popen("env", "-S", "podman ps"), {"podman"}),
+        ("subprocess.Popen", _popen("nice", "-n", "5", "podman"), {"podman"}),
+        ("subprocess.Popen", _popen("timeout", "5", "docker", "ps"), {"docker"}),
+        ("subprocess.Popen", _popen("xargs", "podman", "rm"), {"podman"}),
         (
             "subprocess.Popen",
             (b"/usr/bin/podman", [b"/usr/bin/podman"], None, None),
             {"podman"},
         ),
-        ("subprocess.Popen", ("/bin/echo", ["echo", "podman"], None, None), set()),
-        (
-            "subprocess.Popen",
-            ("/bin/sh", ["/bin/sh", "-c", "echo podman"], None, None),
-            {"podman"},
-        ),
-        (
-            "subprocess.Popen",
-            ("/usr/bin/env", ["env", "-i", "A=1", "nohup", "podman"], None, None),
-            {"podman"},
-        ),
-        ("subprocess.Popen", ("/usr/bin/env", ["env", "A=1"], None, None), set()),
+        ("subprocess.Popen", ("echo hi", "echo hi", None, None), set()),
+        ("subprocess.Popen", _popen("bash", "scripts/run-podman.sh"), set()),
+        ("subprocess.Popen", _popen("echo", "ok"), set()),
         ("os.system", (b"podman ps",), {"podman"}),
-        ("os.system", ("echo 'podman ps'",), {"podman"}),
         ("os.system", ("echo ok",), set()),
         ("os.exec", ("/usr/bin/podman", ["podman", "ps"], {}), {"podman"}),
         ("os.posix_spawn", ("/usr/bin/docker", ["docker"], {}), {"docker"}),
@@ -212,14 +200,15 @@ def test_only_the_marked_parameter_case_may_launch(inner: pytest.Pytester) -> No
 @pytest.mark.parametrize(
     "body",
     [
-        'import subprocess\n\ndef test_x():\n    subprocess.run(["echo", "podman"])\n',
-        "import subprocess\n\ndef test_x():\n"
-        '    subprocess.run(["podman", "hello"], executable="/bin/echo")\n',
+        'import subprocess\n\ndef test_x():\n    subprocess.run(["echo", "ok"])\n',
+        "import pytest, subprocess\n\n"
+        '@pytest.mark.container_runtime_guard_exempt(reason="echo only prints it")\n'
+        'def test_x():\n    subprocess.run(["echo", "podman"])\n',
         "import pytest, subprocess\n\n@pytest.mark.requires_postgres\ndef test_x():\n"
         "    with pytest.raises(FileNotFoundError):\n"
         '        subprocess.run(["/nonexistent/bin/docker"])\n',
     ],
-    ids=["argv-mention", "explicit-executable", "postgres-allows-docker"],
+    ids=["no-runtime", "exempt-mention", "postgres-allows-docker"],
 )
 def test_non_runtime_or_allowed_launches_pass(
     inner: pytest.Pytester, body: str
@@ -303,3 +292,75 @@ def test_teardown_launches_are_not_enforced(inner: pytest.Pytester) -> None:
     )
 
     result.assert_outcomes(passed=1)
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        f'["bash", "-ec", "{MISSING}"]',
+        f'["sh", "-xc", "{MISSING} ps"]',
+        f'["env", "-u", "T97_DUMMY", "{MISSING}"]',
+        f'["env", "-S", "{MISSING} ps"]',
+        f'["nice", "-n", "5", "{MISSING}"]',
+        f'["timeout", "5", "{MISSING}"]',
+        f'["xargs", "{MISSING}"]',
+        '["podman", "hello"], executable="/bin/echo"',
+    ],
+    ids=[
+        "bash-ec",
+        "sh-xc",
+        "env-u",
+        "env-S",
+        "nice",
+        "timeout",
+        "xargs",
+        "explicit-executable",
+    ],
+)
+def test_launcher_forms_are_flagged_before_they_start(
+    inner: pytest.Pytester, argv: str
+) -> None:
+    result = _run(
+        inner, f"import subprocess\n\ndef test_x():\n    subprocess.run({argv})\n"
+    )
+
+    result.assert_outcomes(failed=1)
+    result.stdout.fnmatch_lines(
+        [f"*{GUARD_ERROR}*launched podman without*container_runtime_guard_exempt*"]
+    )
+
+
+@pytest.mark.parametrize(
+    "marker",
+    [
+        "@pytest.mark.container_runtime_guard_exempt\n",
+        '@pytest.mark.container_runtime_guard_exempt(reason="  ")\n',
+    ],
+    ids=["missing-reason", "blank-reason"],
+)
+def test_exempt_marker_requires_a_reason(inner: pytest.Pytester, marker: str) -> None:
+    result = _run(
+        inner,
+        f"import pytest, subprocess\n\n{marker}"
+        'def test_x():\n    subprocess.run(["echo", "podman"])\n',
+    )
+
+    result.assert_outcomes(errors=1)
+    result.stdout.fnmatch_lines(
+        ["*container_runtime_guard_exempt requires a non-empty*"]
+    )
+
+
+def test_exempt_marker_suppresses_only_the_guard(inner: pytest.Pytester) -> None:
+    result = _run(
+        inner,
+        "import pytest, subprocess\n\n"
+        '@pytest.mark.container_runtime_guard_exempt(reason="checks the error path")\n'
+        "def test_x():\n"
+        f'    subprocess.run(["{MISSING}"])\n',
+    )
+
+    # The test is still selected and run; only the guard is silent.
+    result.assert_outcomes(failed=1)
+    result.stdout.fnmatch_lines([f"*FileNotFoundError*{NOT_FOUND}*"])
+    result.stdout.no_fnmatch_line(f"*{GUARD_ERROR}*")

@@ -142,6 +142,7 @@ markers = [
     "requires_s3: requires S3-compatible storage",
     "requires_podman: requires the Podman executable and a rootless Podman runtime",
     "requires_docker: requires the Docker CLI and Compose plugin",
+    "container_runtime_guard_exempt(reason): reviewed opt-out from the container runtime guard only",
 ]
 
 [tool.ruff]
