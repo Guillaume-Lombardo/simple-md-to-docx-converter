@@ -135,6 +135,36 @@ and maintainability rule families to source, CI helpers, and tests. Narrow per-f
 recorded only for reviewed subprocess argument vectors and for assertions and process probes in
 tests. `ty` checks `src`, `scripts`, and `tests` explicitly against Python 3.14.
 
+### Fast parallel test loop
+
+The canonical commands above stay authoritative: run them before you ask for review and report
+their results. While iterating, `pytest-xdist` (in the `dev` group) runs the same tests on several
+worker processes. Run the unit tests that are not marked `slow`, without coverage gates:
+
+```bash
+uv run pytest -n auto -m "unit and not slow" --no-cov
+```
+
+Run the default local selection in parallel with its unchanged coverage gates:
+
+```bash
+uv run pytest -n auto --dist loadgroup -m "not requires_pandoc and not requires_mermaid and not requires_libreoffice and not requires_podman"
+```
+
+pytest-cov combines every worker's coverage data on the controller process, which then writes
+`coverage.json` and applies the 90% total and branch-only thresholds exactly once; a regression
+test proves that serial and parallel runs report identical lines, branches and gate results.
+`--dist loadgroup` keeps every `requires_postgres` or `requires_s3` test on one worker, which
+starts a single disposable PostgreSQL/RustFS stack. Without it each worker that receives such a
+test starts its own private stack, which stays isolated but costs more. The container runtime
+guard runs in every worker. `slow` marks a test that alone takes several seconds; the default
+local commands and CI still run it. A unit-only selection never reaches the 90% coverage
+thresholds, so use `--no-cov` (or the full selection) rather than lowering a threshold.
+
+The shared test configuration freezes the objects that exist after collection (`gc.freeze()`),
+so the per-test `gc.collect()` that attributes leaked resources to their test traverses only
+objects created since collection instead of every imported module.
+
 ## Continuous integration
 
 `.github/workflows/ci.yml` exposes the single stable required result `CI / gate`. It runs on pull

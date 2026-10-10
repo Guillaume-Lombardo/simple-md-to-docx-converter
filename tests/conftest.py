@@ -79,6 +79,19 @@ def dispose_every_created_database_engine(
     monkeypatch.setattr(sql_persistence, "create_engine", create_tracked_engine)
 
 
+def pytest_collection_finish() -> None:
+    """Exclude long-lived collection objects from every per-test collection.
+
+    Modules, test functions and parametrization data stay reachable for the
+    whole session, yet a full ``gc.collect()`` traversed them after every test
+    and dominated the suite's wall time. Freezing them once keeps each per-test
+    collection proportional to the objects created since collection; resources
+    created by fixtures and tests remain collected and attributed as before.
+    """
+    gc.collect()
+    gc.freeze()
+
+
 @pytest.fixture(autouse=True)
 def collect_unreachable_resources() -> Iterator[None]:
     """Attribute finalizer warnings to the test that abandoned the resource."""
