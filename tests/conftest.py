@@ -9,6 +9,7 @@ import pytest
 
 from markweave.persistence import sql as sql_persistence
 from scripts.testing.services import distributed_services
+from tests.container_runtime_guard import ContainerRuntimeGuard
 from tests.golden.corpus import CorpusManifest, materialize_case, read_manifest
 
 
@@ -29,8 +30,12 @@ def configure_distributed_test_services(request: pytest.FixtureRequest) -> None:
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Fail on application resource leaks without suppressing other warnings."""
+    """Fail on resource leaks and on container runtimes launched without markers."""
 
+    if not config.pluginmanager.is_blocked("container-runtime-guard"):
+        config.pluginmanager.register(
+            ContainerRuntimeGuard(), "container-runtime-guard"
+        )
     config.addinivalue_line("filterwarnings", "error::ResourceWarning")
     config.addinivalue_line(
         "filterwarnings",

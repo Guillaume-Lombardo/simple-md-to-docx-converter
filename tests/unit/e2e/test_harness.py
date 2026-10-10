@@ -40,6 +40,9 @@ def test_final_frontend_binds_and_probes_loopback_independently_of_runtime_hostn
 
 
 @pytest.mark.unit
+@pytest.mark.container_runtime_guard_exempt(
+    reason="the bash script stubs podman with a shell function; no runtime starts"
+)
 @pytest.mark.parametrize(
     ("inspected_address", "expected_code", "expected_origin"),
     [

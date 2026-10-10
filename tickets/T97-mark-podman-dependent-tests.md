@@ -2,7 +2,7 @@
 ticket: T97
 linear_id: G1L-617
 linear_url: https://linear.app/g1lom/issue/G1L-617/t97-mark-podman-dependent-tests-and-repair-the-default-local-test
-status: Backlog
+status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -36,6 +36,103 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 
 - 2026-10-09: Created in Linear and mirrored here from the owner-accepted repository analysis.
   Not started.
+
+- 2026-10-10: Started on branch `fix/T97-mark-podman-tests` from `origin/main`
+  `d3dfe628454d62783bdc7ac8c6c9be9e1cdc837e`. Registered `requires_podman` and
+  `requires_docker` in `pyproject.toml` and specification section 10. Marked 34 Podman test
+  cases: every test in `tests/integration/broker/test_podman_runtime_integration.py` and
+  `tests/integration/container/test_registry_transport.py`, and per test (or per parameter)
+  those in `tests/integration/broker/test_broker_process_integration.py` that execute Podman
+  or launch a broker process that reaches its Podman executable check. Broker tests that are
+  rejected while loading configuration stay unmarked and are documented in the guard.
+  `tests/integration/test_compose_configuration.py` and
+  `tests/integration/test_local_test_services_lifecycle.py` execute the Docker CLI, not Podman,
+  and now carry `requires_docker`; they stay in the default command. The default command in
+  AGENTS.md, README.md, CONTRIBUTING.md, `docs/agent-workflow.md`,
+  `docs/local-development.md` and specification section 10 now also excludes
+  `requires_podman`. Three unit tests in `tests/unit/broker/test_process.py` failed on a
+  Podman-free host because the broker factory checks the host `/usr/bin/podman` and
+  `/usr/bin/systemctl`; an autouse fixture now substitutes temporary executables so these
+  unit tests are hermetic. The static unit guard `tests/unit/test_container_runtime_markers.py`
+  fails when a test, helper or fixture chain executes Podman or Docker, or launches the
+  broker, without the matching marker, and includes negative cases. Collected IDs for every
+  CI pytest invocation are unchanged apart from the new guard tests; the default command
+  drops exactly the 34 Podman-marked cases. The original `FileNotFoundError: /usr/bin/podman`
+  was reproduced on the base commit in a bubblewrap namespace without `/usr/bin/podman`.
+  The PR records the canonical-command evidence from that namespace on this branch.
+  Limitations: the guard is static and cannot see Podman executed indirectly through shell
+  scripts; `test_registry_transport.py` and `test_compose_configuration.py` are not selected
+  by any CI pytest invocation, before or after this change.
+- 2026-10-10: The Podman-free canonical run on `2df5528` passed: 5,363 passed, 94 deselected,
+  exit 0, 94.15% coverage. On a host with Podman, the 34 `requires_podman` cases passed. The
+  independent review of PR #281 requested changes, which are now addressed. The guard moved to
+  `tests/container_runtime_markers.py` and now:
+  - checks per-parameter marks, so a broker exemption covers only the listed configuration-time
+    case IDs (a negative test removes the `malformed` case marker and the guard fails);
+  - resolves `subprocess`, `asyncio` and `os` module aliases and from-imports, including
+    `os.exec*`, `os.spawn*` and `os.posix_spawn*`;
+  - follows helpers and fixtures imported from other test-tree modules;
+  - lists one reviewed harness call with every reached runtime branch patched, and verifies
+    that this entry is still reached.
+
+  The T50 evidence document now states that its command records the T50 revision, and points
+  to the current canonical command. Collected IDs for CI invocations are still unchanged apart
+  from the 38 guard cases.
+- 2026-10-10: Review round 2 on PR #281 found three more guard false negatives, now fixed:
+  - `PATCHED_RUNTIME_CALLS` exempts only calls to the reviewed helper from the listed test,
+    and only while the required patch is present. Other launches, helper calls and fixtures
+    in that test are still checked.
+  - Imports now resolve per lexical scope, so function-local imports no longer leak between
+    functions.
+  - An explicit `executable` (keyword, or `Popen` position 2) now counts as the launched
+    program.
+
+  An adversarial pass then added detection for:
+  - `shell=True`, `os.system`, `os.popen`, `subprocess.getoutput`/`getstatusoutput` and
+    `asyncio.create_subprocess_shell` command strings (every command position);
+  - `pty.spawn` and `functools.partial`;
+  - `bash -c`, `shlex.split` and list concatenation;
+  - `or`/conditional alternatives, `os.path.join` and `Path.as_posix`;
+  - constants imported from other test modules;
+  - argument forwarding through helper parameters;
+  - `self` method helpers, class-level fixtures and `request.getfixturevalue`.
+
+  The remaining limits are documented in the guard module and the PR. The guard has 82 unit
+  cases. In the Podman-free sandbox, the affected suites passed (1,368 passed, 34
+  deselected). Collected IDs for CI invocations are unchanged apart from the guard cases.
+- 2026-10-10: Review round 3 on PR #281 found further synthetic false negatives in the
+  static guard. Owner decision (2026-10-10, recorded in G1L-617): replace the static AST guard
+  with a runtime guard.
+  - `tests/container_runtime_guard.py`, registered by `tests/conftest.py`, installs a Python
+    audit hook. During each item's setup and call phases it inspects `subprocess.Popen`,
+    `os.system`, `os.exec`, `os.posix_spawn` and `pty.spawn` launches, including quote-aware
+    shell command positions.
+  - It raises before an unmarked Podman launch, or an unmarked Docker launch, starts. It also
+    records the violation, so a swallowed error still fails the test.
+  - `requires_postgres` and `requires_s3` also allow Docker, for the disposable service stack.
+  - The static guard, its tests and the patched-call allowlist were removed.
+  - Remaining limits: launches by child processes (shell scripts, the broker, `os.spawn*` and
+    `pty.spawn` children), launches outside items or during teardown, and non-Python launchers.
+    The Podman-free canonical run covers these.
+- 2026-10-10: Review round 4 on PR #281 is addressed:
+  - `os.spawn*` children report a refused exec to the parent through a per-process directory,
+    so the parent fails the test.
+  - Shell strings use a deliberately conservative rule: any runtime shell word is a launch, even
+    quoted. `tests/unit/e2e/test_harness.py`'s shell-function stub test now carries
+    `requires_podman` for that reason.
+  - A recorded violation fails the report even after `pytest.skip` or under `xfail`, through the
+    outermost `makereport` wrapper.
+  - An explicit `executable` is authoritative over `argv[0]`.
+  - Thread launches during nested pytester sessions are documented as a limit.
+- 2026-10-10: Review round 5 on PR #281 found two launcher-parsing bypasses: combined shell
+  options such as `bash -ec`, and `env -u VAR` operands. The orchestrator decided to make
+  detection uniformly conservative, with no launcher, option or shell parsing. A runtime-name
+  shell word in the executable, in any argument or in a command string is a launch. The guard is
+  a developer safety net, not a security boundary: a missed launch is silent, whereas a false
+  positive fails loudly with a message naming the marker to add.
+  - The reviewed opt-out marker `container_runtime_guard_exempt(reason=...)` (reason mandatory)
+    affects only the guard. It is used by the harness test whose bash script stubs `podman`; that
+    test no longer carries `requires_podman`.
 
 ## Synchronization
 

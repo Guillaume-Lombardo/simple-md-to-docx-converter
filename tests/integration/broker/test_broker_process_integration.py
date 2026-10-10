@@ -141,6 +141,7 @@ def _retain_fixture_image(image: str, purpose: str) -> Iterator[None]:
             _podman("rm", "--force", "--", name, check=False)
 
 
+@pytest.mark.requires_podman
 def test_retainer_removes_created_container_after_malformed_output(
     process_base_image: str,
     mocker: MockerFixture,
@@ -177,6 +178,7 @@ def test_retainer_removes_created_container_after_malformed_output(
     )
 
 
+@pytest.mark.requires_podman
 def test_retainer_removes_created_container_after_create_timeout(
     process_base_image: str,
     mocker: MockerFixture,
@@ -778,7 +780,16 @@ def _systemd_broker_diagnostics(unit: str) -> bytes:
     return completed.stdout
 
 
-@pytest.mark.parametrize("failure", ["malformed", "mode", "symlink", "fifo"])
+@pytest.mark.parametrize(
+    "failure",
+    [
+        # A malformed key is rejected only after the broker checks for Podman.
+        pytest.param("malformed", marks=pytest.mark.requires_podman),
+        "mode",
+        "symlink",
+        "fifo",
+    ],
+)
 def test_real_process_rejects_insecure_mtls_key_before_state_mutation(
     tmp_path: Path, failure: str
 ) -> None:
@@ -815,6 +826,7 @@ def test_real_process_rejects_insecure_mtls_key_before_state_mutation(
     assert list((tmp_path / "state").iterdir()) == []
 
 
+@pytest.mark.requires_podman
 def test_real_process_rejects_wrong_mtls_pin_without_inventory_mutation(
     tmp_path: Path,
 ) -> None:
@@ -845,6 +857,7 @@ def test_real_process_rejects_wrong_mtls_pin_without_inventory_mutation(
             process.wait(timeout=3)
 
 
+@pytest.mark.requires_podman
 @pytest.mark.parametrize("failure", ["ca", "uri-san", "eku"])
 def test_real_process_rejects_invalid_client_certificate_without_dispatch(
     tmp_path: Path, failure: str
@@ -997,6 +1010,7 @@ raise SystemExit(
 
 
 @pytest.mark.parametrize("requested_signal", [signal.SIGINT, signal.SIGTERM])
+@pytest.mark.requires_podman
 def test_real_process_serves_complete_lifecycle_and_stops_cleanly(
     tmp_path: Path,
     process_image: tuple[str, str],
@@ -1043,6 +1057,7 @@ def test_real_process_serves_complete_lifecycle_and_stops_cleanly(
             _cleanup_unit(unit_id)
 
 
+@pytest.mark.requires_podman
 def test_real_process_serves_complete_lifecycle_over_mtls(
     tmp_path: Path, process_image: tuple[str, str]
 ) -> None:
@@ -1080,6 +1095,7 @@ def test_real_process_serves_complete_lifecycle_over_mtls(
             _cleanup_unit(unit_id)
 
 
+@pytest.mark.requires_podman
 def test_second_mtls_process_is_refused_before_shared_state_mutation(
     tmp_path: Path, process_image: tuple[str, str]
 ) -> None:
@@ -1126,6 +1142,7 @@ def test_second_mtls_process_is_refused_before_shared_state_mutation(
             first.wait(timeout=3)
 
 
+@pytest.mark.requires_podman
 def test_real_process_workspace_pending_success_and_failure_over_mtls(  # noqa: PLR0915
     tmp_path: Path, process_workspace_image: tuple[str, str]
 ) -> None:
@@ -1261,6 +1278,7 @@ def test_real_process_workspace_pending_success_and_failure_over_mtls(  # noqa: 
             _cleanup_unit(unit_id)
 
 
+@pytest.mark.requires_podman
 def test_real_process_workspace_lost_receipt_retry_pending_success_and_failure(  # noqa: PLR0915
     tmp_path: Path, process_workspace_image: tuple[str, str]
 ) -> None:
@@ -1397,6 +1415,7 @@ def test_real_process_workspace_lost_receipt_retry_pending_success_and_failure( 
             _cleanup_unit(unit_id)
 
 
+@pytest.mark.requires_podman
 def test_second_process_is_refused_by_lifecycle_lock(
     tmp_path: Path, process_image: tuple[str, str]
 ) -> None:
@@ -1450,6 +1469,7 @@ raise SystemExit(4)
         _stop(first, signal.SIGTERM)
 
 
+@pytest.mark.requires_podman
 def test_uid_authority_lock_excludes_distinct_state_and_socket_process(
     tmp_path: Path, process_image: tuple[str, str]
 ) -> None:
@@ -1552,6 +1572,7 @@ def test_nonfinite_json_float_entrypoint_failure_is_bounded_and_content_free(
     assert completed.stderr == b"broker configuration failed\n"
 
 
+@pytest.mark.requires_podman
 def test_sigkill_live_orphan_is_reconciled_before_restarted_listener(
     tmp_path: Path, process_image: tuple[str, str]
 ) -> None:
@@ -1591,6 +1612,7 @@ def test_sigkill_live_orphan_is_reconciled_before_restarted_listener(
         _cleanup_unit(created.unit_id)
 
 
+@pytest.mark.requires_podman
 def test_mtls_sigkill_live_orphan_is_reconciled_before_restarted_listener(
     tmp_path: Path, process_image: tuple[str, str]
 ) -> None:
@@ -1634,6 +1656,7 @@ def test_mtls_sigkill_live_orphan_is_reconciled_before_restarted_listener(
 
 
 @pytest.mark.parametrize("invalid", ["key-mode", "config-mode", "malformed"])
+@pytest.mark.requires_podman
 def test_real_process_rejects_bad_config_and_key_modes_content_free(
     tmp_path: Path, process_image: tuple[str, str], invalid: str
 ) -> None:
@@ -1746,6 +1769,7 @@ def _terminate_acknowledge_systemd_unit(
 
 
 @pytest.mark.parametrize("transport_kind", ["unix", "mtls"])
+@pytest.mark.requires_podman
 def test_systemd_user_service_runs_workspace_success_and_failure(
     tmp_path: Path,
     process_workspace_image: tuple[str, str],
@@ -1830,6 +1854,7 @@ def test_systemd_user_service_runs_workspace_success_and_failure(
             _cleanup_unit(unit_id)
 
 
+@pytest.mark.requires_podman
 def test_systemd_user_service_restarts_and_sweeps_live_orphan_before_ready(
     tmp_path: Path, process_image: tuple[str, str]
 ) -> None:
@@ -1888,6 +1913,7 @@ def test_systemd_user_service_restarts_and_sweeps_live_orphan_before_ready(
             _cleanup_unit(unit_id)
 
 
+@pytest.mark.requires_podman
 def test_systemd_user_service_does_not_restart_invalid_configuration(
     tmp_path: Path, process_image: tuple[str, str]
 ) -> None:
@@ -1913,6 +1939,7 @@ def test_systemd_user_service_does_not_restart_invalid_configuration(
         _stop_systemd_broker(unit)
 
 
+@pytest.mark.requires_podman
 def test_second_systemd_user_service_is_refused_by_per_uid_authority(
     tmp_path: Path, process_image: tuple[str, str]
 ) -> None:

@@ -12,7 +12,7 @@ import pytest
 
 from markweave.config import MalwareScanningMode, Settings
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.requires_docker]
 
 ROOT = Path(__file__).resolve().parents[2]
 CANDIDATE_BACKEND = "localhost/markweave-backend:t64"
