@@ -30,6 +30,20 @@ from markweave.broker.process import (
 from markweave.broker.unix_transport import UnixBrokerServer, UnixTransportLimits
 
 
+@pytest.fixture(autouse=True)
+def hermetic_fixed_commands(
+    tmp_path_factory: pytest.TempPathFactory, mocker: MockerFixture
+) -> None:
+    """Keep unit tests independent of the host's Podman and systemctl executables."""
+
+    commands = tmp_path_factory.mktemp("fixed-commands")
+    for name, attribute in (("podman", "_PODMAN"), ("systemctl", "_SYSTEMCTL")):
+        command = commands / name
+        command.write_text("#!/bin/sh\nexit 99\n", encoding="ascii")
+        command.chmod(0o700)
+        mocker.patch(f"markweave.broker.process.{attribute}", command)
+
+
 def _directory(path: Path) -> Path:
     path.mkdir(mode=0o700)
     path.chmod(0o700)

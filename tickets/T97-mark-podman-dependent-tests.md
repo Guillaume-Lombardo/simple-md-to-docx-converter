@@ -50,7 +50,10 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
   and now carry `requires_docker`; they stay in the default command. The default command in
   AGENTS.md, README.md, CONTRIBUTING.md, `docs/agent-workflow.md`,
   `docs/local-development.md` and specification section 10 now also excludes
-  `requires_podman`. The static unit guard `tests/unit/test_container_runtime_markers.py`
+  `requires_podman`. Three unit tests in `tests/unit/broker/test_process.py` failed on a
+  Podman-free host because the broker factory checks the host `/usr/bin/podman` and
+  `/usr/bin/systemctl`; an autouse fixture now substitutes temporary executables so these
+  unit tests are hermetic. The static unit guard `tests/unit/test_container_runtime_markers.py`
   fails when a test, helper or fixture chain executes Podman or Docker, or launches the
   broker, without the matching marker, and includes negative cases. Collected IDs for every
   CI pytest invocation are unchanged apart from the new guard tests; the default command
