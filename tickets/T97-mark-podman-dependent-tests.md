@@ -114,6 +114,16 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
   - Remaining limits: launches by child processes (shell scripts, the broker, `os.spawn*` and
     `pty.spawn` children), launches outside items or during teardown, and non-Python launchers.
     The Podman-free canonical run covers these.
+- 2026-10-10: Review round 4 on PR #281 is addressed:
+  - `os.spawn*` children report a refused exec to the parent through a per-process directory,
+    so the parent fails the test.
+  - Shell strings use a deliberately conservative rule: any runtime shell word is a launch, even
+    quoted. `tests/unit/e2e/test_harness.py`'s shell-function stub test now carries
+    `requires_podman` for that reason.
+  - A recorded violation fails the report even after `pytest.skip` or under `xfail`, through the
+    outermost `makereport` wrapper.
+  - An explicit `executable` is authoritative over `argv[0]`.
+  - Thread launches during nested pytester sessions are documented as a limit.
 
 ## Synchronization
 

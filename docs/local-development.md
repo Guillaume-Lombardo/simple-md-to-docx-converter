@@ -219,7 +219,9 @@ the Docker CLI carry `requires_docker` and stay in the default suite. The runtim
 `tests/container_runtime_guard.py`, registered by `tests/conftest.py`, audits process launches
 during each test's setup and call phases. It fails a test that launches either runtime without its
 marker before the process starts; `requires_postgres` and `requires_s3` also allow Docker for the
-disposable service stack. An unavailable
+disposable service stack. In shell command strings, any `podman` or `docker` shell word counts as a
+launch, even inside quotes. This deliberate over-approximation fails loudly, and the fix is to mark
+the test. An unavailable
 engine test is skipped only through its registered marker and must never be reported as passed.
 
 ### Parallel light CI

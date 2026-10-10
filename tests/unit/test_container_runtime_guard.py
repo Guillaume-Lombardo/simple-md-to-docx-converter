@@ -22,23 +22,23 @@ MISSING = "/nonexistent/bin/podman"
         ("podman ps", {"podman"}),
         ("/usr/bin/docker compose config", {"docker"}),
         ("cd /tmp && A=1 env podman ps", {"podman"}),
-        ("echo ok; podman ps | wc -l", {"podman"}),
-        ("true || nohup podman ps &", {"podman"}),
-        ("set -e\npodman ps", {"podman"}),
         ("x=$(docker ps)", {"docker"}),
-        ("(podman ps)", {"podman"}),
-        ("sudo -n podman ps", {"podman"}),
-        ('bash -c "podman ps"', {"podman"}),
-        ("echo 'ok; podman ps'", set()),
-        ('echo "podman ps"', set()),
-        ("echo podman", set()),
-        ("grep podman log | sort", set()),
-        ("podman() { echo fake; }; podman ps", set()),
-        ("function podman { echo fake; }; podman ps", set()),
-        ('echo "unbalanced', set()),
+        (f'echo "$({MISSING} ps)"', {"podman"}),
+        (f"echo `{MISSING} ps`", {"podman"}),
+        # Deliberate over-approximation: any shell word counts, even when quoted.
+        ("echo 'ok; podman ps'", {"podman"}),
+        ("echo ';' 'podman'", {"podman"}),
+        ("echo podman", {"podman"}),
+        ("podman() { :; }; podman ps", {"podman"}),
+        ('echo "unbalanced podman', {"podman"}),
+        # Not shell words: other names, files and image references.
+        ("podman-compose up", set()),
+        ("cat compose.podman.yaml", set()),
+        ("echo docker.io/library/postgres", set()),
+        ("echo mypodman podman_x", set()),
     ],
 )
-def test_shell_commands_are_inspected_only_at_command_positions(
+def test_shell_commands_flag_runtime_words_anywhere(
     command: str, expected: set[str]
 ) -> None:
     assert shell_runtimes(command) == expected
@@ -50,7 +50,8 @@ def test_shell_commands_are_inspected_only_at_command_positions(
         ("subprocess.Popen", ("podman", ["podman", "ps"], None, None), {"podman"}),
         ("subprocess.Popen", (MISSING, [MISSING, "ps"], None, None), {"podman"}),
         ("subprocess.Popen", ("/usr/bin/podman", ["echo"], None, None), {"podman"}),
-        ("subprocess.Popen", ("/bin/echo", ["podman"], None, None), {"podman"}),
+        # An explicit executable is authoritative over argv[0].
+        ("subprocess.Popen", ("/bin/echo", ["podman", "hello"], None, None), set()),
         (
             "subprocess.Popen",
             ("/bin/sh", ["/bin/sh", "-c", "podman ps"], None, None),
@@ -70,10 +71,17 @@ def test_shell_commands_are_inspected_only_at_command_positions(
         (
             "subprocess.Popen",
             ("/bin/sh", ["/bin/sh", "-c", "echo podman"], None, None),
-            set(),
+            {"podman"},
         ),
+        (
+            "subprocess.Popen",
+            ("/usr/bin/env", ["env", "-i", "A=1", "nohup", "podman"], None, None),
+            {"podman"},
+        ),
+        ("subprocess.Popen", ("/usr/bin/env", ["env", "A=1"], None, None), set()),
         ("os.system", (b"podman ps",), {"podman"}),
-        ("os.system", ("echo 'podman ps'",), set()),
+        ("os.system", ("echo 'podman ps'",), {"podman"}),
+        ("os.system", ("echo ok",), set()),
         ("os.exec", ("/usr/bin/podman", ["podman", "ps"], {}), {"podman"}),
         ("os.posix_spawn", ("/usr/bin/docker", ["docker"], {}), {"docker"}),
         ("pty.spawn", (["podman", "ps"],), {"podman"}),
@@ -121,6 +129,9 @@ NOT_FOUND = f"No such file or directory: '{MISSING}'"
         f'    asyncio.run(asyncio.create_subprocess_exec("{MISSING}", "ps"))\n',
         "import subprocess\n\ndef test_x():\n"
         f'    subprocess.run("echo ok; {MISSING} ps", shell=True)\n',
+        "import subprocess\n\ndef test_x():\n"
+        f"    subprocess.run('echo \"$({MISSING} ps)\"', shell=True)\n",
+        f'import os\n\ndef test_x():\n    os.system("echo `{MISSING} ps`")\n',
         "import pytest, subprocess\n\n@pytest.fixture\ndef image():\n"
         f'    subprocess.run(["{MISSING}", "build"])\n\n'
         "def test_x(image):\n    pass\n",
@@ -133,6 +144,8 @@ NOT_FOUND = f"No such file or directory: '{MISSING}'"
         "os-system",
         "asyncio-exec",
         "shell-true",
+        "command-substitution",
+        "backticks",
         "fixture-setup",
     ],
 )
@@ -200,12 +213,13 @@ def test_only_the_marked_parameter_case_may_launch(inner: pytest.Pytester) -> No
     "body",
     [
         'import subprocess\n\ndef test_x():\n    subprocess.run(["echo", "podman"])\n',
-        "import os\n\ndef test_x():\n    os.system(\"echo 'ok; podman ps' >/dev/null\")\n",
+        "import subprocess\n\ndef test_x():\n"
+        '    subprocess.run(["podman", "hello"], executable="/bin/echo")\n',
         "import pytest, subprocess\n\n@pytest.mark.requires_postgres\ndef test_x():\n"
         "    with pytest.raises(FileNotFoundError):\n"
         '        subprocess.run(["/nonexistent/bin/docker"])\n',
     ],
-    ids=["echo-mention", "quoted-mention", "postgres-allows-docker"],
+    ids=["argv-mention", "explicit-executable", "postgres-allows-docker"],
 )
 def test_non_runtime_or_allowed_launches_pass(
     inner: pytest.Pytester, body: str
@@ -214,6 +228,69 @@ def test_non_runtime_or_allowed_launches_pass(
 
     result.assert_outcomes(passed=1)
     result.stdout.no_fnmatch_line(f"*{GUARD_ERROR}*")
+
+
+def test_shell_mentions_are_conservatively_flagged(inner: pytest.Pytester) -> None:
+    result = _run(
+        inner,
+        "import os\n\ndef test_x():\n    os.system(\"echo 'ok; podman ps' >/dev/null\")\n",
+    )
+
+    result.assert_outcomes(failed=1)
+    result.stdout.fnmatch_lines([f"*{GUARD_ERROR}*launched podman*"])
+
+
+def test_unmarked_spawn_fails_through_the_forked_child(
+    inner: pytest.Pytester,
+) -> None:
+    result = _run(
+        inner,
+        "import os\n\ndef test_x():\n"
+        f'    status = os.spawnv(os.P_WAIT, "{MISSING}", ["podman", "ps"])\n'
+        "    assert status == 127\n",
+    )
+
+    result.assert_outcomes(failed=1)
+    result.stdout.fnmatch_lines(
+        ["*Container runtime launched without its marker:*", "*launched podman*"]
+    )
+
+
+def test_marked_spawn_is_not_blocked(inner: pytest.Pytester) -> None:
+    result = _run(
+        inner,
+        "import os, pytest\n\n@pytest.mark.requires_podman\ndef test_x():\n"
+        f'    assert os.spawnv(os.P_WAIT, "{MISSING}", ["podman"]) == 127\n',
+    )
+
+    result.assert_outcomes(passed=1)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "import pytest, subprocess\n\ndef test_x():\n    try:\n"
+        f'        subprocess.run(["{MISSING}"])\n'
+        "    except Exception:\n        pytest.skip('hidden')\n",
+        "import pytest, subprocess\n\n@pytest.mark.xfail\ndef test_x():\n"
+        f'    subprocess.run(["{MISSING}"])\n',
+        "import pytest, subprocess\n\n@pytest.mark.xfail(strict=True)\ndef test_x():\n"
+        f'    subprocess.run(["{MISSING}"])\n',
+        "import pytest, subprocess\n\n@pytest.mark.xfail(strict=False)\ndef test_x():\n"
+        "    try:\n"
+        f'        subprocess.run(["{MISSING}"])\n'
+        "    except Exception:\n        pass\n",
+    ],
+    ids=["skip-after-catch", "xfail", "xfail-strict", "xpass-after-catch"],
+)
+def test_violation_fails_despite_skip_or_xfail(
+    inner: pytest.Pytester, body: str
+) -> None:
+    result = _run(inner, body)
+
+    result.assert_outcomes(failed=1)
+    result.stdout.fnmatch_lines(["*Container runtime launched without its marker:*"])
+    assert result.ret == pytest.ExitCode.TESTS_FAILED
 
 
 def test_teardown_launches_are_not_enforced(inner: pytest.Pytester) -> None:
