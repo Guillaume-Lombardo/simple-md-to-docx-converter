@@ -241,7 +241,15 @@ def test_final_image_pins_all_downloaded_artifacts() -> None:
     for artifact in ("PANDOC", "CHROME", "LIBREOFFICE", "UV"):
         assert f"ARG {artifact}_SHA256=" in containerfile
     assert "rpm --checksig /tmp/google-chrome.rpm" in containerfile
-    assert "RPM_INVENTORY_SHA256" in containerfile
+    assert (
+        "ARG RPM_INVENTORY_SHA256="
+        "2b02ce10a0d8955ff1817b56323d6dd7e091c1d1316b11700e0f87d24319dc90"
+        in containerfile
+    )
+    assert (
+        'echo "${RPM_INVENTORY_SHA256}  /opt/md-converter/rpm-inventory.txt" \\\n'
+        "        | sha256sum --check --strict" in containerfile
+    )
     assert "uv sync --locked --no-dev --no-editable --extra all" in containerfile
 
 
