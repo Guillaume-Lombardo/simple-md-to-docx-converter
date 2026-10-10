@@ -33,6 +33,15 @@ Own bounded transient acquisition retries for immutable CI/container images, che
 
 ## Progress
 
+* 2026-10-10: The three-row OpenSSL inventory maintenance follow-up passed complete exact-head
+  CI 38008305925 and was verified on main in PR #278 squash
+  `628fd2f310a456c6e2b94b25c071f321cbef1d6b`. Container security scanning, document engines
+  and both rootless final-image E2E storage profiles passed. The reviewed inventory
+  `2b02ce10a0d8955ff1817b56323d6dd7e091c1d1316b11700e0f87d24319dc90` remains checked
+  strictly; base, engine, signature and public image pins stay unchanged. This result supersedes
+  the pending qualification note below; the original T86 scope remains Done.
+
+
 * 2026-10-10: PR #278 qualification exposed a new fail-closed final-image inventory mismatch.
   Extracting the reviewed inventory from the existing T95 image reproduces
   `d35b361f72fcb13a8dd683649ba825b6c0363900105c99ded006543e07917292`. Changing exactly

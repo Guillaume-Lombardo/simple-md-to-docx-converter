@@ -45,6 +45,14 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
   permissions and all other job bounds. The broader measurement, parallelism and developer-loop
   criteria remain pending behind T97; this correction does not complete T98.
 
+- 2026-10-10: The bounded CI correction passed exact-head CI 38008305925 and was verified
+  on main in PR #278 squash `628fd2f310a456c6e2b94b25c071f321cbef1d6b`. Both complementary
+  Python shards and distributed coverage were combined from the same attempt; 5,106 tests passed
+  with 90.14% application branch coverage and unchanged 90% gates. The reviewed 40-minute bound
+  remains finite; no selection, permission or other job-limit change was introduced. This is
+  partial delivery only: duration measurement, parallelism, developer-loop documentation and
+  reference-host speed targets remain pending behind T97. T98 remains In Progress.
+
 ## Synchronization
 
 Keep status, scope, acceptance criteria, dependencies, and progress aligned with G1L-630.
