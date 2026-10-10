@@ -19,6 +19,39 @@ The default output is DOCX. The client sends a canonical private upload name bas
 output includes the job identifier, durable correlation identifier, and server-provided polling
 delay. Keep the correlation identifier when reporting a problem.
 
+## Markdown with local images
+
+When a Markdown source references local images, `markweave convert` collects them and uploads a
+ZIP package instead of the bare Markdown file (specification section 3.7, decision D2):
+
+```text
+markweave convert ./report/report.md --output docx
+```
+
+The client places the Markdown at the root as `document.md` and each referenced PNG, JPEG, SVG,
+GIF, or WebP image at its referenced relative path, in a deterministic uncompressed ZIP. Repeating
+the same command with the same idempotency key therefore sends the same payload. Only referenced
+images are read, and only from the Markdown file's directory tree: a symbolic link may point
+inside that tree but not outside it. Remote image URLs are never fetched; the service rejects
+them. Markdown without local image references is uploaded unchanged.
+
+Successful output reports `packaged_images` in JSON and the packaged image count in human output.
+Missing, escaping, absolute, or otherwise invalid image references fail before any upload with the
+service's stable `validation` code and message, for example:
+
+```text
+Markdown image is missing or unapproved.
+Markdown image path escapes the archive.
+Markdown image path is invalid.
+```
+
+The HTTP input contract is unchanged. The service applies every archive, path, image, SVG, size,
+count, and malware-scanning rule to the package; a package above the configured upload limit is
+refused with `conversion_request_invalid` or `conversion_request_too_large`, and image limits fail
+the job with the stable `validation` error.
+
+## Template selection
+
 Omit both template options to use Pandoc's default reference document. To pin styling, provide the
 visible template identity and its exact current immutable version together:
 

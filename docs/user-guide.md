@@ -38,7 +38,9 @@ PDF limits. Ordinary absolute HTTP(S) links are preserved as clickable document 
 they have a valid host and contain no embedded credentials or control characters. They are not
 downloaded during conversion. Remote images and other remotely loaded resources remain forbidden;
 archives may contain one Markdown source plus approved local resources, and paths escaping the
-archive are rejected. See [archives and images](archive-images.md) and [local Mermaid
+archive are rejected. The browser and `markweave convert` can build that archive for you from a
+Markdown file and its referenced local images; see
+[Markdown with local images](conversion-ui.md#markdown-with-local-images). See [archives and images](archive-images.md) and [local Mermaid
 rendering](mermaid.md).
 
 ## Revert a document to Markdown

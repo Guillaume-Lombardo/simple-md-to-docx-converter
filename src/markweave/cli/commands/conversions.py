@@ -20,6 +20,7 @@ from markweave.cli.commands.conversion_http import (
     ConversionHttpResponse,
 )
 from markweave.cli.errors import CliError
+from markweave.cli.markdown_package import PackageError, package_markdown
 from markweave.cli.output import OutputWriter
 from markweave.cli.profiles import ProfileStore, validate_profile_name
 from markweave.cli.types import CommandContext
@@ -99,7 +100,14 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
         ),
         command_handler=_convert,
     )
-    convert.add_argument("source", action=_RequestOption, help="Markdown or ZIP input.")
+    convert.add_argument(
+        "source",
+        action=_RequestOption,
+        help=(
+            "Markdown or ZIP input. Local images referenced by Markdown are "
+            "packaged into a ZIP before upload."
+        ),
+    )
     convert.add_argument(
         "--output",
         choices=("docx", "pdf", "both", "pptx", "pptx-bundle"),
@@ -220,6 +228,15 @@ def _download_command(parser: argparse.ArgumentParser, command: str, handler) ->
 def _convert(context: CommandContext, writer: OutputWriter, request: _Request) -> None:
     source_path = Path(_string(request, "source"))
     source_kind, source = _read_source(source_path)
+    packaged_images: int | None = None
+    if source_kind == "md":
+        try:
+            package = package_markdown(source_path, source)
+        except PackageError as error:
+            raise CliError(error.code, error.message) from None
+        if package is not None:
+            source_kind, source = "zip", package.content
+            packaged_images = package.image_count
     output = _string(request, "output")
     template_id = _optional_uuid(request, "template_id")
     template_version_id = _optional_uuid(request, "template_version_id")
@@ -266,8 +283,15 @@ def _convert(context: CommandContext, writer: OutputWriter, request: _Request) -
     result = {**job, "poll_after_seconds": poll_after}
     if idempotency_key is not None:
         result["idempotency_key"] = idempotency_key
+    packaged = ""
+    if packaged_images is not None:
+        result["packaged_images"] = packaged_images
+        packaged = f" with {packaged_images} packaged local image" + (
+            "" if packaged_images == 1 else "s"
+        )
     writer.success(
-        f"Submitted job {job['id']}; poll after {poll_after:g} seconds.", result
+        f"Submitted job {job['id']}{packaged}; poll after {poll_after:g} seconds.",
+        result,
     )
 
 

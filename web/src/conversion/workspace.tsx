@@ -18,11 +18,25 @@ import {
   isCancellable,
   statusPresentation,
 } from "./controller";
+import { droppedFiles, selectedFiles } from "./packaging";
 import {
   ownerStorageEpoch,
   readConversionInputs,
   writeConversionInputs,
 } from "./persistence";
+
+const SOURCE_ACCEPT = [
+  ".md",
+  ".zip",
+  "text/markdown",
+  "application/zip",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".webp",
+  ".svg",
+].join(",");
 
 export function saveDownload(
   download: { blob: Blob; filename: string },
@@ -82,6 +96,11 @@ export function ConversionWorkspace({
   const initialInputVersion = useRef(0);
   const initialQueryVersion = useRef(0);
   const fileInput = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    folderInput.current?.setAttribute("webkitdirectory", "");
+  });
 
   useEffect(() => {
     if (!ownerId) return;
@@ -249,8 +268,11 @@ export function ConversionWorkspace({
               New conversion
             </h2>
             <p>
-              Upload one Markdown file, or a ZIP package containing Markdown and
-              its local assets.
+              Upload one Markdown file, a ZIP package containing Markdown and
+              its local assets, or a Markdown file together with its images or
+              its folder. Your browser packages the Markdown file and the local
+              images it references into a ZIP before upload; the service still
+              validates every file.
             </p>
             {state.error && <Alert tone="danger">{state.error}</Alert>}
             <form
@@ -275,16 +297,25 @@ export function ConversionWorkspace({
                 onDrop={(event: DragEvent<HTMLLabelElement>) => {
                   event.preventDefault();
                   setDragging(false);
-                  controller.setSource(event.dataTransfer.files);
+                  void droppedFiles(event.dataTransfer).then(
+                    (files) => controller.selectFiles(files),
+                    () =>
+                      controller.selectFiles(
+                        selectedFiles(event.dataTransfer.files),
+                      ),
+                  );
                 }}
               >
                 Source file
                 <input
-                  accept=".md,.zip,text/markdown,application/zip"
+                  accept={SOURCE_ACCEPT}
+                  multiple
                   name="source"
                   aria-required="true"
                   onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                    controller.setSource(event.target.files)
+                    void controller.selectFiles(
+                      selectedFiles(event.target.files ?? []),
+                    )
                   }
                   ref={fileInput}
                   className="sr-only"
@@ -292,10 +323,12 @@ export function ConversionWorkspace({
                 />
                 <span className="py-4 text-center text-lg font-semibold wrap-anywhere">
                   {dragging
-                    ? "Drop the file now."
-                    : state.source
-                      ? `Selected ${state.source.name} (${state.source.size} bytes).`
-                      : `Choose or drop exactly one .md or .zip file (maximum ${state.maximumBytes} bytes).`}
+                    ? "Drop the files now."
+                    : state.packaging
+                      ? "Packaging the selected files…"
+                      : state.source
+                        ? `Selected ${state.source.name} (${state.source.size} bytes).`
+                        : `Choose or drop one .md or .zip file, or a Markdown file with its images or folder (maximum ${state.maximumBytes} bytes).`}
                 </span>
                 <span
                   aria-hidden="true"
@@ -303,6 +336,25 @@ export function ConversionWorkspace({
                 >
                   {state.source ? "Change file" : "Choose file"}
                 </span>
+              </label>
+              <label className="grid gap-2 font-medium">
+                <span>
+                  Markdown folder{" "}
+                  <span className="text-sm font-normal text-muted">
+                    The folder must contain one Markdown file, or a root
+                    document.md, and the images it references.
+                  </span>
+                </span>
+                <input
+                  name="source-folder"
+                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                    void controller.selectFiles(
+                      selectedFiles(event.target.files ?? []),
+                    )
+                  }
+                  ref={folderInput}
+                  type="file"
+                />
               </label>
               {presentation && (
                 <PresentationControls controller={controller} state={state} />
@@ -395,7 +447,7 @@ export function ConversionWorkspace({
               </section>
               <button
                 className="primary-button"
-                disabled={state.submitting}
+                disabled={state.submitting || state.packaging}
                 type="submit"
               >
                 {state.submitting

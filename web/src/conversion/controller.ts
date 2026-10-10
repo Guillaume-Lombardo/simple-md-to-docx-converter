@@ -20,6 +20,7 @@ import {
 } from "../api/generated/valibot.gen";
 import { ApiError, ApiTransport, type JsonResult } from "../api/transport";
 import type { SavedConversionInputs } from "./persistence";
+import { PackageError, prepareSelection, type SelectedFile } from "./packaging";
 
 const TERMINAL_STATES = new Set([
   "succeeded",
@@ -45,6 +46,7 @@ export type ConversionState = {
   slideLevel: number;
   plan?: PresentationPlanResponse;
   planning: boolean;
+  packaging: boolean;
   maximumBytes?: number;
   source?: File;
   output: JobOutput;
@@ -87,6 +89,7 @@ export class ConversionController {
   private inputGeneration = 0;
   private composerRequest?: AbortController;
   private composerGeneration = 0;
+  private selectionGeneration = 0;
 
   constructor(
     private readonly api: ApiTransport = new ApiTransport(),
@@ -154,13 +157,57 @@ export class ConversionController {
     return page.items;
   }
 
+  async selectFiles(entries: SelectedFile[]): Promise<void> {
+    if (entries.length < 2) {
+      this.setSource(entries.map((entry) => entry.file));
+      return;
+    }
+    this.invalidateSubmission();
+    const generation = ++this.selectionGeneration;
+    this.publish({
+      ...this.state,
+      source: undefined,
+      packaging: true,
+      submitting: false,
+      error: undefined,
+      notice: "Packaging the selected files…",
+    });
+    try {
+      const prepared = await prepareSelection(entries);
+      if (generation !== this.selectionGeneration) return;
+      this.publish({
+        ...this.state,
+        source: prepared.file,
+        packaging: false,
+        notice: prepared.markdownName
+          ? `Packaged ${prepared.markdownName} with ${prepared.imageCount} local ${
+              prepared.imageCount === 1 ? "image" : "images"
+            } as ${prepared.file.name}.`
+          : undefined,
+      });
+    } catch (error) {
+      if (generation !== this.selectionGeneration) return;
+      this.publish({
+        ...this.state,
+        packaging: false,
+        notice: undefined,
+        error:
+          error instanceof PackageError
+            ? error.message
+            : "The selected files could not be read. Choose them again.",
+      });
+    }
+  }
+
   setSource(files: FileList | File[] | null): void {
+    this.selectionGeneration += 1;
     if (!files || files.length !== 1) {
       this.invalidateSubmission();
       this.publish({
         ...this.state,
         source: undefined,
         submitting: false,
+        packaging: false,
         error:
           files && files.length > 1
             ? "Choose exactly one Markdown or ZIP file."
@@ -175,6 +222,7 @@ export class ConversionController {
       ...this.state,
       source: file,
       submitting: false,
+      packaging: false,
       error: undefined,
       notice: undefined,
     });
@@ -426,7 +474,12 @@ export class ConversionController {
   }
 
   async submit(): Promise<void> {
-    if (this.state.phase !== "ready" || this.state.submitting) return;
+    if (
+      this.state.phase !== "ready" ||
+      this.state.submitting ||
+      this.state.packaging
+    )
+      return;
     const invalid = validateSource(this.state.source, this.state.maximumBytes);
     if (invalid) {
       this.publish({ ...this.state, error: invalid, notice: undefined });
@@ -567,6 +620,7 @@ export class ConversionController {
   }
 
   dispose(): void {
+    this.selectionGeneration += 1;
     this.composerGeneration += 1;
     this.composerRequest?.abort();
     this.loadGeneration += 1;
@@ -741,6 +795,7 @@ function initialState(presentation = false): ConversionState {
     dialect: "auto",
     slideLevel: 2,
     planning: false,
+    packaging: false,
     templates: [],
     searching: false,
     recent: [],

@@ -1,0 +1,360 @@
+{
+  "markdown": [
+    {
+      "markdown": "![a](img/a.png)",
+      "destinations": [
+        "img/a.png"
+      ]
+    },
+    {
+      "markdown": "![a](<my file.png> \"t\")",
+      "destinations": [
+        "my file.png"
+      ]
+    },
+    {
+      "markdown": "![a][r]\n\n[r]: x.png",
+      "destinations": [
+        "x.png"
+      ]
+    },
+    {
+      "markdown": "![R]\n\n[r]: <y z.png>",
+      "destinations": [
+        "y z.png"
+      ]
+    },
+    {
+      "markdown": "![a][]\n\n[a]: c.png",
+      "destinations": [
+        "c.png"
+      ]
+    },
+    {
+      "markdown": "![a][missing]\n",
+      "destinations": []
+    },
+    {
+      "markdown": "`![a](no.png)`",
+      "destinations": []
+    },
+    {
+      "markdown": "text ``![x](d.png)`` more",
+      "destinations": []
+    },
+    {
+      "markdown": "```\n![a](no.png)\n```",
+      "destinations": []
+    },
+    {
+      "markdown": "````md\n```\n![a](no.png)\n````",
+      "destinations": []
+    },
+    {
+      "markdown": "~~~\n![x](t.png)\n~~~",
+      "destinations": []
+    },
+    {
+      "markdown": "- item\n  ```\n  ![a](fenced.png)\n  ```\n",
+      "destinations": []
+    },
+    {
+      "markdown": "    ![a](code.png)",
+      "destinations": []
+    },
+    {
+      "markdown": "para\n    ![a](lazy.png)",
+      "destinations": [
+        "lazy.png"
+      ]
+    },
+    {
+      "markdown": "- item\n\n    ![a](list.png)",
+      "destinations": [
+        "list.png"
+      ]
+    },
+    {
+      "markdown": "- item\n\nback\n\n    ![a](after-list.png)",
+      "destinations": []
+    },
+    {
+      "markdown": "\\![a](esc.png)",
+      "destinations": []
+    },
+    {
+      "markdown": "![a [b] c](n.png)",
+      "destinations": [
+        "n.png"
+      ]
+    },
+    {
+      "markdown": "![a](p(1).png)",
+      "destinations": [
+        "p(1).png"
+      ]
+    },
+    {
+      "markdown": "[![a](in.png)](https://example.com)",
+      "destinations": [
+        "in.png"
+      ]
+    },
+    {
+      "markdown": "![a](a\\_b.png)",
+      "destinations": [
+        "a_b.png"
+      ]
+    },
+    {
+      "markdown": "![a](a\\b.png)",
+      "destinations": [
+        "a\\b.png"
+      ]
+    },
+    {
+      "markdown": "![a](&amp;.png)",
+      "destinations": [
+        "&.png"
+      ]
+    },
+    {
+      "markdown": "![a](&#x41;&#66;.png)",
+      "destinations": [
+        "AB.png"
+      ]
+    },
+    {
+      "markdown": "> ![q](quote.png)",
+      "destinations": [
+        "quote.png"
+      ]
+    },
+    {
+      "markdown": "![a](x.png 'title')",
+      "destinations": [
+        "x.png"
+      ]
+    },
+    {
+      "markdown": "![a](x.png (title))",
+      "destinations": [
+        "x.png"
+      ]
+    },
+    {
+      "markdown": "![a]( spaced.png )",
+      "destinations": [
+        "spaced.png"
+      ]
+    },
+    {
+      "markdown": "![a](<unterminated.png)",
+      "destinations": []
+    },
+    {
+      "markdown": "![a](<a\\>b.png>)",
+      "destinations": [
+        "a>b.png"
+      ]
+    },
+    {
+      "markdown": "![a](open.png 'title)",
+      "destinations": []
+    },
+    {
+      "markdown": "![a](trailing.png junk)",
+      "destinations": []
+    },
+    {
+      "markdown": "![a](\n  next-line.png\n)",
+      "destinations": [
+        "next-line.png"
+      ]
+    },
+    {
+      "markdown": "![a](\n\nblank.png)",
+      "destinations": []
+    },
+    {
+      "markdown": "![never closed",
+      "destinations": []
+    },
+    {
+      "markdown": "![a\n\nb](split.png)",
+      "destinations": []
+    },
+    {
+      "markdown": "``unclosed ![a](unclosed-code.png)",
+      "destinations": [
+        "unclosed-code.png"
+      ]
+    },
+    {
+      "markdown": "\\`![a](after-escaped-tick.png)`",
+      "destinations": [
+        "after-escaped-tick.png"
+      ]
+    },
+    {
+      "markdown": "[r]:\n![r]",
+      "destinations": []
+    },
+    {
+      "markdown": "[r]: <broken\n![r]",
+      "destinations": []
+    },
+    {
+      "markdown": "![a](p(1.png)",
+      "destinations": []
+    },
+    {
+      "markdown": "![x](a.png\u0001)",
+      "destinations": []
+    },
+    {
+      "markdown": "![a](https://example.com/remote.png)",
+      "destinations": [
+        "https://example.com/remote.png"
+      ]
+    },
+    {
+      "markdown": "![a](café.png)",
+      "destinations": [
+        "café.png"
+      ]
+    },
+    {
+      "markdown": "line\r\n![a](crlf.png)\r\n",
+      "destinations": [
+        "crlf.png"
+      ]
+    }
+  ],
+  "resolutions": [
+    {
+      "destination": "assets/a.png",
+      "path": "assets/a.png"
+    },
+    {
+      "destination": "./assets/a.png",
+      "path": "assets/a.png"
+    },
+    {
+      "destination": "assets/../a.png",
+      "path": "a.png"
+    },
+    {
+      "destination": "assets/./b.png",
+      "path": "assets/b.png"
+    },
+    {
+      "destination": "assets//c.png",
+      "path": "assets/c.png"
+    },
+    {
+      "destination": "my%20file.png",
+      "path": "my file.png"
+    },
+    {
+      "destination": "100%.png",
+      "path": "100%.png"
+    },
+    {
+      "destination": "caf%C3%A9.png",
+      "path": "café.png"
+    },
+    {
+      "destination": "../a.png",
+      "error": "Markdown image path escapes the archive."
+    },
+    {
+      "destination": "assets/../../a.png",
+      "error": "Markdown image path escapes the archive."
+    },
+    {
+      "destination": "/etc/a.png",
+      "error": "Markdown image path is invalid."
+    },
+    {
+      "destination": "a.png?x=1",
+      "error": "Markdown image path is invalid."
+    },
+    {
+      "destination": "a.png#frag",
+      "error": "Markdown image path is invalid."
+    },
+    {
+      "destination": "a.png?",
+      "path": "a.png"
+    },
+    {
+      "destination": "%2e%2e/a.png",
+      "error": "Markdown image path is invalid."
+    },
+    {
+      "destination": "a%2fb.png",
+      "error": "Markdown image path is invalid."
+    },
+    {
+      "destination": "a%5Cb.png",
+      "error": "Markdown image path is invalid."
+    },
+    {
+      "destination": "a%2520b.png",
+      "error": "Markdown image path is invalid."
+    },
+    {
+      "destination": "a%ff.png",
+      "error": "Markdown image path is invalid."
+    },
+    {
+      "destination": "a\\b.png",
+      "error": "Markdown image path is invalid."
+    },
+    {
+      "destination": "1:a.png",
+      "error": "Markdown image path is invalid."
+    },
+    {
+      "destination": "x\u0000.png",
+      "error": "Markdown image path is invalid."
+    },
+    {
+      "destination": ".",
+      "error": "Markdown image is missing or unapproved."
+    },
+    {
+      "destination": "./",
+      "error": "Markdown image is missing or unapproved."
+    },
+    {
+      "destination": "a/..",
+      "error": "Markdown image is missing or unapproved."
+    },
+    {
+      "destination": "https://example.com/a.png",
+      "remote": true
+    },
+    {
+      "destination": "//example.com/a.png",
+      "remote": true
+    },
+    {
+      "destination": "data:image/png,x",
+      "remote": true
+    },
+    {
+      "destination": "%2f%2fx",
+      "remote": true
+    },
+    {
+      "destination": "c:/a.png",
+      "remote": true
+    },
+    {
+      "destination": "%252f%252fx",
+      "remote": true
+    }
+  ]
+}

@@ -2,7 +2,7 @@
 ticket: T104
 linear_id: G1L-623
 linear_url: https://linear.app/g1lom/issue/G1L-623/t104-accept-markdown-with-local-images-without-a-hand-built-zip
-status: Backlog
+status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -35,6 +35,15 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 
 - 2026-10-09: Created in Linear and mirrored here from the owner-accepted repository analysis.
   Not started.
+- 2026-10-10: Implementation started on branch `feat/T104-markdown-local-images`. The 2docx and
+  2pptx workspaces accept multi-file, folder, and dropped-folder selections and package the
+  Markdown file with its referenced local images in the browser; `markweave convert` packages a
+  Markdown path's referenced local images. Both build the approved layout (root `document.md`
+  plus referenced images, stored ZIP), keep the HTTP input contract unchanged, and pre-check
+  missing, escaping, and invalid references with the service's stable validation messages, which
+  a shared fixture ties to the service parser. Unit, integration, and final-image E2E coverage
+  (CLI workflow and a new browser test in both profiles) is added; documentation is updated.
+  Awaiting hosted CI, final-image E2E evidence, and independent review.
 
 ## Synchronization
 

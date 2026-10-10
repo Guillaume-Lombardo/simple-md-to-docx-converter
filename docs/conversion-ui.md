@@ -10,8 +10,9 @@ pre-removal matrix passed in both storage profiles.
 
 ## Start a conversion
 
-1. Choose or drop exactly one `.md` or `.zip` file. A standalone Markdown file cannot depend on local
-   resources; use a ZIP package for Markdown plus images or other approved local assets.
+1. Choose or drop one `.md` or `.zip` file, or a Markdown file together with its images. Use
+   **Markdown folder**, or drop a folder, to keep the images' relative paths. A standalone Markdown
+   file cannot depend on local resources; see [Markdown with local images](#markdown-with-local-images).
 2. Keep **Pandoc default**, keep the resolved preferred or system fallback template, or search active
    templates by name and choose another result. **Use Pandoc default** clears a selected template.
    The submitted job carries template identifiers only for an immutable selected version.
@@ -23,6 +24,28 @@ The browser assigns an idempotency key before submission and reuses it after an 
 server failure. Repeating that request therefore cannot enqueue a second equivalent job. Choosing a
 different file, output, or template starts a new request identity. Client-side suffix, emptiness, and
 configured-size checks provide immediate feedback, but FastAPI repeats and owns every validation.
+
+## Markdown with local images
+
+The 2docx and 2pptx workspaces accept several files, a selected folder, or a dropped folder. The
+browser packages the selection before upload (specification section 3.7, decision D2):
+
+- The Markdown entrypoint is a root `document.md`, otherwise the only `.md` file in the selection.
+  When a whole folder is selected or dropped, the folder itself is the selection root.
+- Only images referenced by that Markdown are packaged, at their referenced paths beside a root
+  `document.md`, in an uncompressed ZIP named after the Markdown file (`report.md` becomes
+  `report.zip`, so the result is still named `report.docx`). Other selected files are ignored.
+- Image paths resolve from the Markdown file's folder and must stay inside it. When files are
+  chosen without a folder, an image that is not found at its referenced path is matched by its
+  unique file name.
+- A selection whose Markdown references no local image uploads the Markdown file unchanged. A ZIP
+  cannot be combined with other files.
+
+Missing, escaping, or invalid image references are refused before upload with the service's stable
+messages, for example "Markdown image is missing or unapproved." or "Markdown image path escapes
+the archive." The packaged ZIP must also fit the configured upload limit. These checks only give
+early feedback: the HTTP input contract is unchanged, and the service applies every archive, path,
+image, SVG, size, count, and malware-scanning rule to the uploaded package.
 
 ## Status, cancellation, and downloads
 

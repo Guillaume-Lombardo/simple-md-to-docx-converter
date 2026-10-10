@@ -1531,3 +1531,34 @@ def test_reverse_broker_crash_signals_verified_child_not_uv_wrapper() -> None:
     assert 'wait "$broker_pid" || broker_exit=$?' in runner
     assert 'test "$broker_exit" = 137' in runner
     assert 'wait "$broker_pid" || test "$?" = 137' not in runner
+
+
+@pytest.mark.unit
+def test_runner_invokes_local_image_packaging_in_both_profiles() -> None:
+    """T104 browser and CLI packaging run once per final-image profile."""
+    runner = RUNNER.read_text(encoding="utf-8")
+    browser = Path("tests/e2e/browser-next-local-images.test.mjs").read_text(
+        encoding="utf-8"
+    )
+    workflow = Path("tests/e2e/conversion_cli_workflow.py").read_text(encoding="utf-8")
+    index = runner.index("/e2e/browser-next-local-images.test.mjs")
+
+    assert runner.count("/e2e/browser-next-local-images.test.mjs") == 1
+    assert runner.index("/e2e/browser-next-presentations.test.mjs") < index
+    assert 'MARKWEAVE_E2E_PROFILE="$profile"' in runner[index : index + 200]
+    for scenario in (
+        "Markdown folder",
+        "2pptx",
+        "Markdown image is missing or unapproved.",
+        "Markdown image path escapes the archive.",
+        "The selected file exceeds the configured upload limit.",
+    ):
+        assert scenario in browser
+    for scenario in (
+        "packaged_images",
+        "bypass-missing.zip",
+        "bypass-traversal.zip",
+        "conversion_request_invalid",
+        "Document image exceeds configured limits.",
+    ):
+        assert scenario in workflow
