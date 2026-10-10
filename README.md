@@ -112,7 +112,7 @@ export PATH="$PWD/.pnpm-tools/bin:$PATH"
 export COREPACK_HOME="$PWD/.pnpm-tools/corepack-home" COREPACK_ENABLE_NETWORK=0
 pnpm install --frozen-lockfile --ignore-scripts
 pnpm run test:web
-uv run pytest -m "not requires_pandoc and not requires_mermaid and not requires_libreoffice"
+uv run pytest -m "not requires_pandoc and not requires_mermaid and not requires_libreoffice and not requires_podman"
 uv run pytest
 ```
 

@@ -988,8 +988,16 @@ markers = [
   "requires_libreoffice: requires LibreOffice",
   "requires_postgres: requires PostgreSQL",
   "requires_s3: requires S3-compatible storage",
+  "requires_podman: requires the Podman executable and a rootless Podman runtime",
+  "requires_docker: requires the Docker CLI and Compose plugin",
 ]
 ```
+
+Every test that executes a container runtime carries the matching runtime marker, enforced by a
+static unit guard. The default local command excludes only the document engines and Podman:
+`uv run pytest -m "not requires_pandoc and not requires_mermaid and not requires_libreoffice and not requires_podman"`.
+It keeps PostgreSQL, S3, Docker, slow, integration, and E2E tests when they are runnable. CI keeps
+running Podman-marked tests in the domains that already select them.
 
 Local PostgreSQL/S3 integration tests may provision a disposable loopback-only PostgreSQL/RustFS
 Compose project when no external test-service configuration is supplied. Use pinned CI images,

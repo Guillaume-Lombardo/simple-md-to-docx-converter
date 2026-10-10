@@ -87,11 +87,11 @@ pnpm run workspace:check
 pnpm run test:web
 ```
 
-Run the default local suite, which excludes only tests requiring Pandoc, Mermaid/Chromium, or
-LibreOffice:
+Run the default local suite, which excludes only tests requiring Pandoc, Mermaid/Chromium,
+LibreOffice, or Podman, so it also passes on a host without Podman:
 
 ```bash
-uv run pytest -m "not requires_pandoc and not requires_mermaid and not requires_libreoffice"
+uv run pytest -m "not requires_pandoc and not requires_mermaid and not requires_libreoffice and not requires_podman"
 ```
 
 Run the complete test collection when all required engines and services are available:
@@ -212,8 +212,12 @@ uv build --build-constraint build-constraints.txt --require-hashes
 
 ## External engines
 
-The default local suite excludes tests marked for Pandoc, Mermaid/Chromium, and LibreOffice. Install
-the locked engines to run their integration suites and the complete final-image tests. An unavailable
+The default local suite excludes tests marked for Pandoc, Mermaid/Chromium, LibreOffice, and
+Podman. Install the locked engines and rootless Podman to run their integration suites and the
+complete final-image tests. Tests that execute Podman carry `requires_podman`; tests that execute
+the Docker CLI carry `requires_docker` and stay in the default suite. The unit guard
+`tests/unit/test_container_runtime_markers.py` fails when a test executes either runtime without
+its marker. An unavailable
 engine test is skipped only through its registered marker and must never be reported as passed.
 
 ### Parallel light CI

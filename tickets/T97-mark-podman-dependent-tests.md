@@ -2,7 +2,7 @@
 ticket: T97
 linear_id: G1L-617
 linear_url: https://linear.app/g1lom/issue/G1L-617/t97-mark-podman-dependent-tests-and-repair-the-default-local-test
-status: Backlog
+status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -36,6 +36,30 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 
 - 2026-10-09: Created in Linear and mirrored here from the owner-accepted repository analysis.
   Not started.
+
+- 2026-10-10: Started on branch `fix/T97-mark-podman-tests` from `origin/main`
+  `d3dfe628454d62783bdc7ac8c6c9be9e1cdc837e`. Registered `requires_podman` and
+  `requires_docker` in `pyproject.toml` and specification section 10. Marked 34 Podman test
+  cases: every test in `tests/integration/broker/test_podman_runtime_integration.py` and
+  `tests/integration/container/test_registry_transport.py`, and per test (or per parameter)
+  those in `tests/integration/broker/test_broker_process_integration.py` that execute Podman
+  or launch a broker process that reaches its Podman executable check. Broker tests that are
+  rejected while loading configuration stay unmarked and are documented in the guard.
+  `tests/integration/test_compose_configuration.py` and
+  `tests/integration/test_local_test_services_lifecycle.py` execute the Docker CLI, not Podman,
+  and now carry `requires_docker`; they stay in the default command. The default command in
+  AGENTS.md, README.md, CONTRIBUTING.md, `docs/agent-workflow.md`,
+  `docs/local-development.md` and specification section 10 now also excludes
+  `requires_podman`. The static unit guard `tests/unit/test_container_runtime_markers.py`
+  fails when a test, helper or fixture chain executes Podman or Docker, or launches the
+  broker, without the matching marker, and includes negative cases. Collected IDs for every
+  CI pytest invocation are unchanged apart from the new guard tests; the default command
+  drops exactly the 34 Podman-marked cases. The original `FileNotFoundError: /usr/bin/podman`
+  was reproduced on the base commit in a bubblewrap namespace without `/usr/bin/podman`.
+  The PR records the canonical-command evidence from that namespace on this branch.
+  Limitations: the guard is static and cannot see Podman executed indirectly through shell
+  scripts; `test_registry_transport.py` and `test_compose_configuration.py` are not selected
+  by any CI pytest invocation, before or after this change.
 
 ## Synchronization
 

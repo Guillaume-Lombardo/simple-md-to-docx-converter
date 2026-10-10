@@ -11,6 +11,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.requires_postgres,
     pytest.mark.requires_s3,
+    pytest.mark.requires_docker,
 ]
 
 

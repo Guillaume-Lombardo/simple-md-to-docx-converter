@@ -46,7 +46,7 @@ uv run ruff check .
 uv run ty check
 pnpm install --frozen-lockfile --ignore-scripts
 pnpm run test:web
-uv run pytest -m "not requires_pandoc and not requires_mermaid and not requires_libreoffice"
+uv run pytest -m "not requires_pandoc and not requires_mermaid and not requires_libreoffice and not requires_podman"
 uv run pytest
 ```
 

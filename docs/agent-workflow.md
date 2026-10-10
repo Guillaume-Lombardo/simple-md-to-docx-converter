@@ -26,7 +26,7 @@ uv sync --all-groups
 uv run ruff format .
 uv run ruff check .
 uv run ty check
-uv run pytest -m "not requires_pandoc and not requires_mermaid and not requires_libreoffice"
+uv run pytest -m "not requires_pandoc and not requires_mermaid and not requires_libreoffice and not requires_podman"
 uv run pytest
 ```
 
