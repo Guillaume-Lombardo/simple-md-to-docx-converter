@@ -20,7 +20,11 @@ from markweave.cli.commands.conversion_http import (
     ConversionHttpResponse,
 )
 from markweave.cli.errors import CliError
-from markweave.cli.markdown_package import PackageError, package_markdown
+from markweave.cli.markdown_package import (
+    PackageError,
+    open_markdown_directory,
+    package_markdown,
+)
 from markweave.cli.output import OutputWriter
 from markweave.cli.profiles import ProfileStore, validate_profile_name
 from markweave.cli.types import CommandContext
@@ -232,20 +236,9 @@ def _download_command(parser: argparse.ArgumentParser, command: str, handler) ->
 
 def _convert(context: CommandContext, writer: OutputWriter, request: _Request) -> None:
     source_path = Path(_string(request, "source"))
-    source_kind, source = _read_source(source_path)
-    packaged_images: int | None = None
-    if source_kind == "md" and not request.values.get("no_package"):
-        try:
-            package = package_markdown(
-                source_path,
-                source,
-                upload_limit=lambda: _upload_limit(context, request),
-            )
-        except PackageError as error:
-            raise CliError(error.code, error.message) from None
-        if package is not None:
-            source_kind, source = "zip", package.content
-            packaged_images = package.image_count
+    source_kind, source, packaged_images = _prepared_source(
+        context, request, source_path
+    )
     output = _string(request, "output")
     template_id = _optional_uuid(request, "template_id")
     template_version_id = _optional_uuid(request, "template_version_id")
@@ -302,6 +295,42 @@ def _convert(context: CommandContext, writer: OutputWriter, request: _Request) -
         f"Submitted job {job['id']}{packaged}; poll after {poll_after:g} seconds.",
         result,
     )
+
+
+def _prepared_source(
+    context: CommandContext, request: _Request, source_path: Path
+) -> tuple[str, bytes, int | None]:
+    """Read the source and package Markdown with its referenced local images.
+
+    For packaging, the Markdown directory is opened once, before the source is
+    read, and that descriptor anchors the source read and every image read, so
+    replacing the directory or an ancestor later cannot redirect reads outside
+    the tree the Markdown came from.
+    """
+    if source_path.suffix.lower() != ".md" or request.values.get("no_package"):
+        source_kind, source = _read_source(source_path)
+        return source_kind, source, None
+    try:
+        directory = open_markdown_directory(source_path)
+    except OSError as error:
+        raise CliError(
+            "source_unavailable", "The conversion source is unavailable."
+        ) from error
+    try:
+        source_kind, source = _read_source(source_path, directory=directory)
+        try:
+            package = package_markdown(
+                directory,
+                source,
+                upload_limit=lambda: _upload_limit(context, request),
+            )
+        except PackageError as error:
+            raise CliError(error.code, error.message) from None
+    finally:
+        os.close(directory)
+    if package is None:
+        return source_kind, source, None
+    return "zip", package.content, package.image_count
 
 
 def _conversion_options(
@@ -452,7 +481,7 @@ def _client(
     )
 
 
-def _read_source(path: Path) -> tuple[str, bytes]:
+def _read_source(path: Path, *, directory: int | None = None) -> tuple[str, bytes]:
     source_kind = path.suffix.lower().removeprefix(".")
     if source_kind not in {"md", "zip"}:
         raise CliError(
@@ -461,8 +490,9 @@ def _read_source(path: Path) -> tuple[str, bytes]:
     descriptor = -1
     try:
         descriptor = os.open(
-            path,
+            path if directory is None else path.name,
             os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
+            dir_fd=directory,
         )
         with os.fdopen(descriptor, "rb") as stream:
             descriptor = -1

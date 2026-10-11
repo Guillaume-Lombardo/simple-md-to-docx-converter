@@ -47,6 +47,7 @@ _ZIP_SYSTEM_UNIX = 3
 _IMAGE_SYNTAX = "!["
 _FRONT_MATTER = "---"
 _YAML_ESCAPE = "\\"
+_BASE_DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
 _DIRECTORY_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_DIRECTORY | os.O_CLOEXEC
 _FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
 UPLOAD_LIMIT_CODE = "conversion_request_invalid"
@@ -80,19 +81,34 @@ def load_image_references() -> ModuleType | None:
     return image_references
 
 
+def open_markdown_directory(markdown_path: Path) -> int:
+    """Open the Markdown file's directory once and return its descriptor.
+
+    The caller reads the Markdown file relative to this descriptor and passes
+    the same descriptor to :func:`package_markdown`, so the source and its
+    images always come from one anchored directory tree even if the directory,
+    or an ancestor, is renamed or replaced by a symbolic link afterwards.
+    Raises ``OSError`` when the directory cannot be opened.
+    """
+
+    return os.open(markdown_path.parent, _BASE_DIRECTORY_FLAGS)
+
+
 def package_markdown(
-    markdown_path: Path,
+    directory: int,
     markdown: bytes,
     *,
     upload_limit: Callable[[], int] | None = None,
 ) -> MarkdownPackage | None:
     """Package Markdown and referenced local images, or return ``None``.
 
-    ``None`` means the Markdown has no local image reference (or is not UTF-8)
-    and must be uploaded unchanged so the service keeps deciding its validity.
-    Images are read only from the Markdown file's directory tree, without
-    following any symbolic link. ``upload_limit`` returns the service's upload
-    limit; it is called once, only when images must be read.
+    ``directory`` is the descriptor from :func:`open_markdown_directory` that
+    the Markdown was read through; the caller keeps ownership of it. ``None``
+    means the Markdown has no local image reference (or is not UTF-8) and must
+    be uploaded unchanged so the service keeps deciding its validity. Images are
+    read only below ``directory``, without following any symbolic link.
+    ``upload_limit`` returns the service's upload limit; it is called once,
+    only when images must be read.
     """
 
     try:
@@ -108,7 +124,7 @@ def package_markdown(
     if not paths:
         return None
     limit = upload_limit() if upload_limit is not None else None
-    images = _read_images(markdown_path.parent, paths, references, len(markdown), limit)
+    images = _read_images(directory, paths, references, len(markdown), limit)
     content = build_package(markdown, images)
     if limit is not None and len(content) > limit:
         raise PackageError(UPLOAD_LIMIT, UPLOAD_LIMIT_CODE)
@@ -173,26 +189,19 @@ def _referenced_paths(references: ModuleType, text: str) -> list[PurePosixPath]:
 
 
 def _read_images(
-    directory: Path,
+    directory: int,
     paths: list[PurePosixPath],
     references: ModuleType,
     markdown_size: int,
     limit: int | None,
 ) -> dict[PurePosixPath, bytes]:
-    try:
-        base = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
-    except OSError:
-        raise PackageError(references.MISSING_IMAGE) from None
-    try:
-        images: dict[PurePosixPath, bytes] = {}
-        total = markdown_size
-        for path in paths:
-            content = _read_image(base, path, references, limit, total)
-            total += len(content)
-            images[path] = content
-        return images
-    finally:
-        os.close(base)
+    images: dict[PurePosixPath, bytes] = {}
+    total = markdown_size
+    for path in paths:
+        content = _read_image(directory, path, references, limit, total)
+        total += len(content)
+        images[path] = content
+    return images
 
 
 def _read_image(

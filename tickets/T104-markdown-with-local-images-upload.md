@@ -64,6 +64,12 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
   parser reports errors in, so multiline metadata references are packaged when selected. The
   parity fixture gains these cases. The audited pnpm package-set pin now includes the eight
   approved browser packages. Awaiting hosted CI and independent review.
+- 2026-10-11: Review round 3 fix. The CLI opens the Markdown file's directory once, before reading
+  the Markdown, reads the Markdown relative to that descriptor with `O_NOFOLLOW`, and reuses the
+  same descriptor for parsing, the upload-limit lookup, and image collection; the base directory
+  is never reopened by pathname. Regressions replace the Markdown directory and an ancestor with
+  an outward symbolic link during the upload-limit lookup and prove that only the anchored tree's
+  bytes are packaged. Awaiting hosted CI and independent review.
 
 ## Synchronization
 
