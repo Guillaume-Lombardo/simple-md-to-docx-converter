@@ -78,7 +78,7 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
   - Final-image E2E and quickstart tests: both profiles and the `compose` job passed in main CI
     run 38153540913.
   Operator note: hand-built `-f` lists must drop the removed `compose.nextjs*.yaml` files; the
-  0.8.0 upgrade guide records this. Limitation unchanged: local `podman compose` delegates to the
+  0.7.4 upgrade guide records this. Limitation unchanged: local `podman compose` delegates to the
   Docker Compose provider.
 
 ## Synchronization

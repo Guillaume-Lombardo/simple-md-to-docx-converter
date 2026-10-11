@@ -10,9 +10,9 @@ Use the [upgrade guide](docs/upgrading.md) for supported transitions and rollbac
 [release process](docs/releasing.md) for artifact evidence, the [security policy](SECURITY.md) for
 private reporting, and the [support policy](SUPPORT.md) for help with a published release.
 
-<a id="release-0-8-0"></a>
+<a id="release-0-7-4"></a>
 
-## [0.8.0] - 2026-10-11
+## [0.7.4] - 2026-10-11
 
 ### Added
 
@@ -26,13 +26,15 @@ private reporting, and the [support policy](SUPPORT.md) for help with a publishe
   folder, and remote `markweave convert` collects the local images referenced by a Markdown path.
   Both clients package the Markdown and its referenced images in the approved archive layout before
   upload; the service still applies every archive, path, image, size, count and scanning rule.
-- An optional, permission-gated Composer workspace: secure instance and personal model
+- An optional, permission-gated Composer workspace foundation: secure instance and personal model
   connections, administrator **LLM settings**, chat-driven proposals and questions with human
   accept or reject decisions, immutable Markdown and source revisions with native DOCX and PPTX
-  revision previews, permissioned author knowledge, and typed DOCX template filling. Composer model
-  access is disabled by default; enabling it requires `MARKWEAVE_COMPOSER_ENABLED=true` and the
-  documented policy settings, which an administrator policy can narrow but not expand.
-  Migrations 20 to 26 add its persistent state.
+  revision previews, permissioned author knowledge, and typed DOCX template filling. Composer ships
+  disabled by default; enabling model access requires `MARKWEAVE_COMPOSER_ENABLED=true` and the
+  documented policy settings, which an administrator policy can narrow but not expand. Composer is
+  not yet qualified as a complete product: its Office editing tools, complete cross-cutting
+  acceptance and the 0.8.0 minor release remain pending. Migrations 20 to 26 add its persistent
+  state.
 - Inline, display and malformed TeX math are documented and covered by DOCX, PDF and PowerPoint
   golden tests; the final-image smoke fails when LibreOffice Math is missing.
 
@@ -72,7 +74,7 @@ private reporting, and the [support policy](SUPPORT.md) for help with a publishe
 ### Release notes
 
 - Repository Compose and quickstart defaults remain pinned to the verified `0.7.3` backend and
-  frontend digests until the `0.8.0` images are published and their exact receipts are adopted.
+  frontend digests until the `0.7.4` images are published and their exact receipts are adopted.
 
 <a id="release-0-7-3"></a>
 

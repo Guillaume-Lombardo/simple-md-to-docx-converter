@@ -11,9 +11,9 @@ slide-oriented Markdown or Marp from edited PPTX files. It requires a separately
 [external broker](docs/reverse-broker-deployment.md). See the
 [capability matrix](docs/index.md#conversion-capabilities) for inputs, outputs, limits and guides.
 
-The project is licensed under [Apache-2.0](LICENSE). The source package version is `0.8.0`.
+The project is licensed under [Apache-2.0](LICENSE). The source package version is `0.7.4`.
 The default public quickstart remains pinned to the matched published `0.7.3` backend and Next.js
-frontend images by their verified registry digests until 0.8.0 publication completes and records
+frontend images by their verified registry digests until 0.7.4 publication completes and records
 new receipts. Do not substitute candidate or inferred digests; candidate testing may override both
 image references together with another matched immutable pair.
 
