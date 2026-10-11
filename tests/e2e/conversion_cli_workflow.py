@@ -19,6 +19,48 @@ _REVERSE_SOURCE = "/tmp/markweave-t71-source.rtf"  # noqa: S108 - container tmpf
 _REVERSE_RESULT = "/tmp/markweave-t71-result.md"  # noqa: S108 - container tmpfs
 _RESULT = "/tmp/markweave-t33-result.zip"  # noqa: S108 - container tmpfs
 _MANIFEST = "/tmp/markweave-t33-manifest.json"  # noqa: S108 - container tmpfs
+_LOCAL_IMAGES = "/tmp/markweave-t104"  # noqa: S108 - container tmpfs
+_MISSING_IMAGE = "Markdown image is missing or unapproved."
+_ESCAPING_IMAGE = "Markdown image path escapes the archive."
+_LOCAL_IMAGE_SETUP = """
+import io, zipfile
+from pathlib import Path
+from PIL import Image
+
+root = Path({root!r})
+project = root / "project"
+(project / "assets").mkdir(parents=True)
+
+def png(width, height):
+    output = io.BytesIO()
+    Image.new("RGB", (width, height), "#336699").save(output, format="PNG")
+    return output.getvalue()
+
+(project / "assets" / "pixel.png").write_bytes(png(12, 8))
+(project / "assets" / "unused.png").write_bytes(png(4, 4))
+(project / "assets" / "wide.png").write_bytes(png(2001, 1))
+(project / "assets" / "large.png").write_bytes(b"\\x89PNG" + bytes(1_000_001))
+(root / "outside.png").write_bytes(png(4, 4))
+texts = {{
+    "report.md": "# Local images\\n\\n![Pixel](assets/pixel.png)\\n",
+    "missing.md": "![Missing](assets/absent.png)\\n",
+    "escape.md": "![Escape](../outside.png)\\n",
+    "large.md": "![Large](assets/large.png)\\n",
+    "wide.md": "![Wide](assets/wide.png)\\n",
+}}
+for name, text in texts.items():
+    (project / name).write_text(text, encoding="utf-8")
+
+def stored(name, entries):
+    with zipfile.ZipFile(root / name, "w", zipfile.ZIP_STORED) as archive:
+        for member, content in entries:
+            archive.writestr(member, content)
+
+stored("bypass-missing.zip", [("document.md", texts["missing.md"]),
+                              ("assets/other.png", png(4, 4))])
+stored("bypass-traversal.zip", [("document.md", "![T](../escape.png)"),
+                                ("../escape.png", png(4, 4))])
+"""
 
 
 def main() -> int:  # noqa: PLR0911, PLR0912, PLR0915 - bounded E2E driver
@@ -172,6 +214,9 @@ def main() -> int:  # noqa: PLR0911, PLR0912, PLR0915 - bounded E2E driver
     )
     if validation.returncode != 0:
         return _failure("download validation", validation.returncode)
+    local_images = _exercise_local_images(prefix, arguments.container)
+    if local_images is not None:
+        return _failure(local_images, 1)
     logout = _run([*prefix, "logout"])
     if logout.returncode != 0:
         return _failure("logout", logout.returncode)
@@ -179,6 +224,7 @@ def main() -> int:  # noqa: PLR0911, PLR0912, PLR0915 - bounded E2E driver
         arguments.container,
         "import shutil; from pathlib import Path; "
         f"shutil.rmtree({_STATE_HOME!r}, ignore_errors=True); "
+        f"shutil.rmtree({_LOCAL_IMAGES!r}, ignore_errors=True); "
         f"[Path(path).unlink(missing_ok=True) for path in "
         f"{[_SOURCE, _REVERSE_SOURCE, _REVERSE_RESULT, _RESULT, _MANIFEST]!r}]",
     )
@@ -186,6 +232,100 @@ def main() -> int:  # noqa: PLR0911, PLR0912, PLR0915 - bounded E2E driver
         return _failure("cleanup", cleanup.returncode)
     print(f"Conversion CLI final-image E2E passed for {arguments.profile}.")
     return 0
+
+
+def _exercise_local_images(  # noqa: PLR0911 - bounded E2E assertions
+    prefix: list[str], container: str
+) -> str | None:
+    """Verify T104 client-side packaging and unchanged service validation."""
+    setup = _inside(container, _LOCAL_IMAGE_SETUP.format(root=_LOCAL_IMAGES))
+    if setup.returncode != 0:
+        return "local image setup"
+    project = f"{_LOCAL_IMAGES}/project"
+    packaged = _json_result(
+        _run([*prefix, "--json", "convert", f"{project}/report.md"])
+    )
+    if (
+        packaged is None
+        or packaged.get("packaged_images") != 1
+        or packaged.get("source_filename") != "source.zip"
+    ):
+        return "local image packaging"
+    job_id = str(packaged.get("id"))
+    if _wait(prefix, job_id).get("state") != "succeeded":
+        return "local image conversion"
+    result = f"{_LOCAL_IMAGES}/report.docx"
+    downloaded = _json_result(
+        _run([*prefix, "--json", "jobs", "download", job_id, result])
+    )
+    if downloaded is None or downloaded.get("status") != "downloaded":
+        return "local image download"
+    media = _inside(
+        container,
+        "import zipfile; "
+        f"z = zipfile.ZipFile({result!r}); "
+        "media = [n for n in z.namelist() if n.startswith('word/media/')]; "
+        "assert len(media) == 1, media; "
+        "assert z.read(media[0]).startswith(b'\\x89PNG')",
+    )
+    if media.returncode != 0:
+        return "local image media"
+    for name, code, message in (
+        ("missing.md", "validation", _MISSING_IMAGE),
+        ("escape.md", "validation", _ESCAPING_IMAGE),
+        ("large.md", "conversion_request_invalid", None),
+    ):
+        error = _json_error(_run([*prefix, "--json", "convert", f"{project}/{name}"]))
+        if (
+            error is None
+            or error.get("code") != code
+            or (message is not None and error.get("message") != message)
+        ):
+            return f"local image refusal {name}"
+    for source, message in (
+        (f"{project}/wide.md", "Document image exceeds configured limits."),
+        (f"{_LOCAL_IMAGES}/bypass-missing.zip", _MISSING_IMAGE),
+        (f"{_LOCAL_IMAGES}/bypass-traversal.zip", "Document archive is invalid."),
+    ):
+        submitted = _json_result(_run([*prefix, "--json", "convert", source]))
+        if submitted is None:
+            return f"local image service submission {source}"
+        failed = _wait(prefix, str(submitted.get("id")))
+        if (
+            failed.get("state") != "failed"
+            or failed.get("error_code") != "validation"
+            or failed.get("error_message") != message
+        ):
+            return f"local image service validation {source}"
+    return None
+
+
+def _wait(prefix: list[str], job_id: str) -> dict[str, object]:
+    _run(
+        [
+            *prefix,
+            "--timeout",
+            "180",
+            "jobs",
+            "wait",
+            job_id,
+            "--poll-interval",
+            "1",
+        ],
+        timeout=190,
+    )
+    shown = _json_result(_run([*prefix, "--json", "jobs", "show", job_id]))
+    return shown if shown is not None else {}
+
+
+def _json_error(result: subprocess.CompletedProcess[str]) -> dict[str, object] | None:
+    if result.returncode != 1:
+        return None
+    try:
+        error = json.loads(result.stderr).get("error")
+    except AttributeError, ValueError:
+        return None
+    return error if isinstance(error, dict) else None
 
 
 def _exercise_reverse_held_queue(  # noqa: PLR0911, PLR0912 - bounded E2E assertions

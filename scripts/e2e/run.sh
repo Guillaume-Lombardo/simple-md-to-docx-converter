@@ -1798,6 +1798,8 @@ run_browser_test "$application_name" /e2e/browser-next-reversion.test.mjs \
   --env MARKWEAVE_E2E_REVERSE_PHASE=structured \
   --env MARKWEAVE_E2E_STRUCTURED_PPTX_SOURCE=/evidence/markweave-t83-edited.pptx
 run_browser_test "$application_name" /e2e/browser-next-presentations.test.mjs
+run_browser_test "$application_name" /e2e/browser-next-local-images.test.mjs \
+  --env MARKWEAVE_E2E_PROFILE="$profile"
 run_browser_test "$application_name" /e2e/browser-workspace-ui.test.mjs
 
 uv run python -m tests.e2e.reverse_cli_workflow \

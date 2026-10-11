@@ -697,6 +697,10 @@ documentation.
   unchanged. The browser and CLI clients may let a user select or drop a Markdown file together
   with its images or a folder, and package them client-side into the approved archive layout before
   upload. The server applies the same archive, image, scanning, and limit rules to that archive.
+  On 2026-10-10 the owner decided how clients find references: the CLI reuses the service's own
+  reference module through the optional `markweave[packaging]` extra, so the base CLI stays
+  standard-library only, and the browser uses markdown-it (the original of the service parser)
+  with parity proved against a service-generated fixture. Clients package only referenced images.
 - **D3 – Inline HTML allowlist (T105).** Before Pandoc, the validator translates only `<br>`,
   `<sub>`, `<sup>`, `<kbd>`, and `<u>` without attributes into equivalent Pandoc constructs and
   removes HTML comments. Every other raw HTML node, every attribute, and every malformed or
@@ -783,8 +787,8 @@ can still emit raw HTML nodes with that reader, reject raw HTML in the validated
 before invoking Pandoc. Disable user and administrator filters, user includes, and remote resources; only the reviewed
 internal cross-reference and page-break filters approved in section 3.7 (D5 and D12,
 T111) may run. Translate only the inline HTML allowlist of section
-3.7 (D3). TeX-like text is
-ordinary text for this reader; no unsupported `-raw_tex` flag is added.
+3.7 (D3). Raw TeX outside `$...$` and `$$...$$` math
+delimiters is ordinary text for this reader; no unsupported `-raw_tex` flag is added.
 
 Evaluate `pandoc --sandbox` in T00 with images and `reference.docx`; do not claim it is enabled until the complete pipeline passes. Run Pandoc from the job workspace with fixed arguments, no shell, no network, deadlines, memory limits, and an unprivileged identity.
 
@@ -962,6 +966,10 @@ readiness cheap; it must not run a conversion.
   verifies stable object references before migration/readiness, and never switches production
   traffic. The quarterly exercise consumes these commands and records evidence; test-only S3
   helpers remain forbidden for production recovery.
+- Restore accepts recovery sets created at schema revision `20260829_14` (release 0.5.0, which
+  introduced `markweave backup`) or later, verifies each against the schema of its recorded
+  revision, and migrates it to the current head; earlier and unknown, including newer, revisions
+  are refused with stable errors (owner decision, 2026-10-11, T128).
 
 ## 9. Repository and autonomous development
 
@@ -1198,6 +1206,7 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T125 | Add VS Code and Obsidian integrations | T104, T114 |
 | T126 | Internationalize the browser interface (deferred by D13) | T96 |
 | T127 | Publish Linux/ARM64 images (deferred by D14) | T96 |
+| T128 | Restore recovery sets created by an older schema | — |
 
 On 2026-10-09 the owner accepted the repository analysis that created T96–T127. The owner kept
 the experimental reverse conversion and asked for its scope to be frozen (T108) rather than removed.

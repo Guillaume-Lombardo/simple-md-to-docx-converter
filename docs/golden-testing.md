@@ -39,6 +39,18 @@ than escaping as backend-specific exceptions, including corrupt Deflate, BZIP2, 
 volatile OpenXML part visible at each test call; there is no implicit ignore list. ZIP timestamps,
 member order, compression choice, and XML namespace-prefix spelling are intentionally normalized.
 
+## Math equation comparisons
+
+`tests/golden/omml.py` extracts the outermost display (`m:oMathPara`) and inline (`m:oMath`)
+equations of a DOCX `word/document.xml` or PPTX slide part, in document order, as canonical XML
+with their concatenated math text. DOCX and PPTX outputs of `tests/corpus/math/document.md` must
+both equal `tests/corpus/math/golden/omml.json`, which pins the source digest and Pandoc version.
+Regenerate it only with the approved Pandoc on `PATH`:
+
+```bash
+uv run python -m tests.golden.omml tests/corpus/math/document.md tests/corpus/math/golden/omml.json
+```
+
 ## PDF raster comparisons
 
 `compare_pdf_rasters` accepts pages already rendered as unpremultiplied 8-bit sRGB RGBA bytes. It
@@ -58,6 +70,9 @@ the approved rootless toolchain with:
 ```bash
 uv run python -m scripts.generate_t11_pdf_golden OUTPUT_DIRECTORY WORKSPACE_DIRECTORY
 ```
+
+The T103 math golden uses the same generator and toolchain with
+`--source tests/corpus/math/document.md` and the output directory `tests/corpus/math/golden/pdf`.
 
 The integration comparison is exact because the renderer, document engines, reference archive,
 font artifacts, locale, and DPI are locked. The reference DOCX ZIP metadata is normalized before

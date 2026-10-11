@@ -117,7 +117,7 @@ class DistributedTemplateProcessor:
                 "export_filter": "pdf:writer_pdf_Export",
                 "font_manifest_sha256": "5" * 64,
                 "libreoffice_version": "26.2.5.2",
-                "mermaid_version": "11.16.0",
+                "mermaid_version": "11.17.0",
                 "output_format": "pdf",
                 "output_pdf_bytes": len(content),
                 "output_pdf_sha256": hashlib.sha256(content).hexdigest(),

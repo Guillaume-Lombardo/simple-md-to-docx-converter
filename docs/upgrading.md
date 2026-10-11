@@ -64,6 +64,14 @@ target version fails after its migration starts, keep traffic stopped, restore
 the database and its matching object data into isolated targets, validate the
 restore, then return all components to the previously released version.
 
+A recovery set created before an upgrade remains restorable by the newer release. `markweave
+restore` verifies the set against the schema revision recorded in it, then migrates the restored
+database to the newer head. Supported sets come from release 0.5.0 or later, starting at schema
+revision `20260829_14`; a set from a newer release is refused. A distributed set that contains a
+retained conversion job referencing a superseded template version cannot be restored yet; this
+limitation is tracked as T132 (G1L-685). See
+[recovery sets from earlier releases](recovery.md#recovery-sets-from-earlier-releases).
+
 Do not restore a database without its corresponding object state, and do not
 point a restored database at a newer or unrelated object-store version. A
 rollback is complete only after readiness and representative stable-object

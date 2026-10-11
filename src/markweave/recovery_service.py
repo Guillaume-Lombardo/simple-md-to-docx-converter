@@ -183,6 +183,8 @@ class RecoveryService:
         else:
             database_url = _required(request.database_url)
             s3_configuration = _required(request.s3)
+            # Refuse an unsupported schema before any object reaches the target bucket.
+            self._postgresql.preflight(request.source / "database/metadata.json")
             with closing(S3RecoveryAdapter(s3_configuration, deadline)) as s3:
                 object_evidence, object_keys = s3.ensure_empty_and_restore(
                     request.source,

@@ -89,6 +89,55 @@ markweave --non-interactive --timeout 14400 restore \
   --yes
 ```
 
+### Recovery sets from earlier releases
+
+Restore accepts a recovery set created by this release or by any earlier release from 0.5.0, the
+first release that shipped `markweave backup`. The minimum supported schema revision is
+`20260829_14`, by owner decision. The set's database revision must belong to this release's
+migration history between `20260829_14` and the current head. Restore first verifies the set
+against the schema of its recorded revision: every table and column of that revision must be
+present, and every retained stable object reference must resolve. It then migrates the restored
+database to the current head and verifies the references again before reporting success. A pre-T91
+set at revision `20260923_24`, for example, restores and gains the later Composer fill-plan schema
+during this migration.
+
+Both profiles read the recorded revision from the verified set before writing to any restore
+target. A revision unknown to this release, including every revision created by a newer release, is
+refused with `Recovery set schema revision is unknown to this release`; a revision older than
+`20260829_14` is refused with `Recovery set schema revision predates supported recovery sets`. In
+those cases no standalone staging directory, destination, database row, or bucket object is
+created. To restore a set created by a newer release, use that release or a later one.
+
+Later checks run after the restore has started writing, and each failure removes what it wrote:
+
+| Profile | Failure | Error message | Cleanup |
+| --- | --- | --- | --- |
+| Standalone | A table or column of the recorded revision is missing | `Restored database schema is incomplete` | The private staging directory is deleted; no destination is published. |
+| Standalone | The schema does not migrate from its recorded revision | `Restored database migration failed` | As above. |
+| Distributed | The payload tables or columns differ from the recorded revision | `PostgreSQL backup schema is incompatible` | The database transaction rolls back, and the objects already uploaded to the target bucket are deleted. |
+| Distributed | Migration from the recorded revision fails | `PostgreSQL restore migration failed` | As above. |
+
+A distributed restore of an earlier-revision set requires a target database without tables. It
+recreates the recorded revision, inserts the rows, and migrates to the current head in one
+database transaction. A target database already migrated to the current head accepts only a set
+created at the current head, and refuses an earlier one with `Distributed database target must be
+empty for an earlier schema`. Restore inserts each template's current-version pointer after its
+template versions, and the conversion jobs that name a template pair after those pointers, so
+the integrity triggers stay enabled.
+
+**Known limitation, tracked as T132 (G1L-685).** Distributed restore currently refuses a recovery set
+that contains a retained conversion job referencing a superseded template version, that is, a
+version that is no longer its template's current version because the template was replaced after
+the job ran. The restore fails with `PostgreSQL restore failed`: the database transaction rolls
+back, and the objects uploaded to the target bucket are deleted. This applies to sets at every
+supported revision, including the current head, and predates T128. Standalone restore is not
+affected. No workaround is supported: do not edit the recovery set or disable integrity triggers.
+Keep the set and its manifest unchanged until T132 is delivered.
+
+Run `markweave backup` with the release that matches the database revision: it captures the
+model of its own release. Take the pre-upgrade backup with the release that is currently deployed,
+as the upgrade guide requires, and restore it later with the same or a newer release.
+
 For distributed restore, use `--database-url-environment` and the `--s3-*` options for distinct
 isolated targets. Supply static credentials, when needed, with
 `--s3-access-key-environment` and `--s3-secret-key-environment`. A failed database restore removes

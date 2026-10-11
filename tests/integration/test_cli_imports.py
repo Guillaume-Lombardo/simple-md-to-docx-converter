@@ -23,6 +23,10 @@ for arguments in (("--version",), ("--help",)):
         if error.code != 0:
             raise
 for forbidden in (
+    "markdown_it",
+    "yaml",
+    "PIL",
+    "markweave.conversion.image_references",
     "markweave.app",
     "markweave.config",
     "markweave.recovery",

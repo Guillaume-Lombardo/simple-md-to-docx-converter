@@ -2,7 +2,7 @@
 ticket: T99
 linear_id: G1L-618
 linear_url: https://linear.app/g1lom/issue/G1L-618/t99-consolidate-compose-variants-with-profiles
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -35,6 +35,30 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
 
 - 2026-10-09: Created in Linear and mirrored here from the owner-accepted repository analysis.
   Not started.
+- 2026-10-11: Implementation on `chore/T99-compose-profiles`. Inventory: `compose.yaml`
+  (secure base; both helpers), `compose.simple.yaml` (unbounded `/work`; simple helper),
+  `compose.simple-composer.yaml` (opt-in Composer; simple helper), `compose.podman.yaml`
+  (rootless Podman), `compose.trusted-upstream.yaml` (trusted upstream and insecure; ClamAV in the
+  inactive `local-antivirus` profile), `compose.podman-trusted-upstream.yaml` (CNI-free
+  `slirp4netns`), `compose.nextjs.yaml`, `compose.nextjs-podman.yaml` and
+  `compose.nextjs-podman-trusted-upstream.yaml` (Next.js browser tier, applied in every supported
+  helper mode), and `compose.test.yaml` (local PostgreSQL/S3 test services; unrelated to the
+  quickstarts and unchanged). Consumers: both quickstart helpers, the four Compose E2E runners, CI
+  domain selection, release public alignment, the quickstart and Compose tests, and
+  `docs/quickstart.md`. Result: the always-applied browser tier moved into `compose.yaml` and the
+  two Podman browser overlays merged into `compose.podman.yaml` and
+  `compose.podman-trusted-upstream.yaml`; ten root Compose files became seven. Compose profiles
+  gate only whole services, so the attribute-level runtime and scanner variants remain ordered,
+  documented overrides; ClamAV's existing `local-antivirus` profile is the only service-presence
+  variant. Release alignment now reads both published defaults from `compose.yaml`. Equivalence:
+  `docker compose config --format json` and `podman compose config --format json` rendered
+  13 supported modes (secure; simple Docker/Podman x ClamAV/trusted-upstream/insecure x
+  Composer off/on), each with published and candidate images and two ports (104 renders before
+  and after); all normalized renders are byte-identical. New tests derive each helper's file stack
+  from its real `compose()` function and check every rendered mode's loopback-only, scanner and
+  image posture. CI selection now also covers the two trusted-upstream overrides. Limitations:
+  local `podman compose` delegates to the same Docker Compose v5.5.1 provider; hosted CI runs the
+  real Compose E2E and final-image E2E profiles.
 
 ## Synchronization
 

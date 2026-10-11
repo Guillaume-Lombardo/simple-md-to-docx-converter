@@ -19,6 +19,56 @@ The default output is DOCX. The client sends a canonical private upload name bas
 output includes the job identifier, durable correlation identifier, and server-provided polling
 delay. Keep the correlation identifier when reporting a problem.
 
+## Markdown with local images
+
+When a Markdown source references local images, `markweave convert` collects them and uploads a
+ZIP package instead of the bare Markdown file (specification section 3.7, decision D2):
+
+```text
+uv tool install 'markweave[packaging]'
+markweave convert ./report/report.md --output docx
+```
+
+The references are found and resolved by the service's own Markdown parser module, so the client
+packages exactly what the service validates. That parser needs the optional `packaging` extra (see
+[Python distribution](python-distribution.md#installation-profiles)); the final image includes it.
+On a base installation, a Markdown source containing image syntax (`![`), or starting with YAML
+front matter and containing a backslash (a double-quoted YAML escape such as `\x21` can decode
+into image syntax), fails before upload with `packaging_unavailable` and installation guidance.
+`--no-package` uploads any Markdown source unchanged, as earlier releases did.
+
+The client places the Markdown at the root as `document.md` and each referenced PNG, JPEG, SVG,
+GIF, or WebP image at its referenced relative path, in a deterministic uncompressed ZIP. Repeating
+the same command with the same idempotency key therefore sends the same payload. Only referenced
+images are read, and only from the Markdown file's directory tree. That directory is opened once,
+before the Markdown is read, and the Markdown and every image are read through it, so renaming or
+replacing the directory or an ancestor afterwards cannot redirect reads. Each image path component
+is opened relative to its already-open parent directory without following symbolic links, so any
+symbolic link in an image path, including one swapped in during packaging, is refused with
+"Markdown image path escapes the archive." Before reading images the client reads the service's upload limit
+from `conversion-options` and refuses a package that would exceed it with the service's
+`conversion_request_invalid` error: file sizes are checked before reading, and the built archive
+is checked before upload. Remote image URLs are
+never fetched; the service rejects them. Markdown without local image references is uploaded
+unchanged.
+
+Successful output reports `packaged_images` in JSON and the packaged image count in human output.
+Missing, escaping, absolute, or otherwise invalid image references fail before any upload with the
+service's stable `validation` code and message, for example:
+
+```text
+Markdown image is missing or unapproved.
+Markdown image path escapes the archive.
+Markdown image path is invalid.
+```
+
+The HTTP input contract is unchanged. The service applies every archive, path, image, SVG, size,
+count, and malware-scanning rule to the package; a package above the configured upload limit is
+refused with `conversion_request_invalid` or `conversion_request_too_large`, and image limits fail
+the job with the stable `validation` error.
+
+## Template selection
+
 Omit both template options to use Pandoc's default reference document. To pin styling, provide the
 visible template identity and its exact current immutable version together:
 

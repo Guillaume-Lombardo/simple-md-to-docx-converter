@@ -333,9 +333,6 @@ write_runtime_env() {
 
 compose() {
   local files=(--file "$repository/compose.yaml")
-  if [[ -n "$cutover_backend_image" ]]; then
-    files+=(--file "$repository/compose.nextjs.yaml")
-  fi
   MARKWEAVE_PORT="$port" MARKWEAVE_PUBLIC_ORIGIN="$public_origin" \
     MARKWEAVE_ROUTER_PUBLIC_HOST="$(router_public_host)" \
     MARKWEAVE_CUTOVER_BACKEND_IMAGE="$cutover_backend_image" \

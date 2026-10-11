@@ -31,6 +31,7 @@ from markweave.conversion.mermaid import (
     MermaidPreprocessingConverter,
 )
 from markweave.conversion.pandoc import PandocConfig, PandocDocxConverter
+from markweave.conversion.runtime_manifest import COMPONENT_VERSIONS
 from markweave.conversion.service import DocxConversionService
 from markweave.conversion.validation import PANDOC_READER
 from markweave.jobs.errors import JobProcessingCancelled
@@ -406,7 +407,9 @@ def build_production_processor(
     except OSError:
         raise ConfigurationError("Conversion font manifest is unavailable") from None
     engines = build_document_engines(
-        settings, libreoffice_version="26.2.5.2", environment=os.environ
+        settings,
+        libreoffice_version=dict(COMPONENT_VERSIONS)["libreoffice"],
+        environment=os.environ,
     )
     return ProductionTemplateAwareProcessor(
         objects=objects,
