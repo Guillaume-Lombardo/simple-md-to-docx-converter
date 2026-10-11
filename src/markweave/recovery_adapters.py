@@ -9,7 +9,7 @@ import json
 import os
 import shutil
 import sqlite3
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import closing, contextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime
@@ -19,10 +19,11 @@ from time import monotonic
 from typing import Any, Protocol, cast
 from uuid import UUID
 
-from sqlalchemy import Connection, inspect, select, text
+from sqlalchemy import Column, Connection, MetaData, Table, inspect, select, text
 from sqlalchemy.exc import SQLAlchemyError
 
-from markweave.persistence.migrations import upgrade_database
+from markweave.persistence.errors import PersistenceError
+from markweave.persistence.migrations import upgrade_connection, upgrade_database
 from markweave.persistence.schema import Base
 from markweave.persistence.sql import create_database_engine
 from markweave.recovery_manifest import (
@@ -30,6 +31,17 @@ from markweave.recovery_manifest import (
     RecoveryMember,
     canonical_json,
     sha256_file,
+)
+from markweave.recovery_schema import (
+    AUXILIARY_TABLES,
+    SchemaShape,
+    head_revision,
+    read_reference_rows,
+    reference_shape,
+    require_complete_shape,
+    require_restorable_revision,
+    sqlite_revision,
+    sqlite_shape,
 )
 from markweave.storage import ObjectScope
 
@@ -198,15 +210,22 @@ class StandaloneRecoveryAdapter:
                 _copy_regular(source / member.path, destination)
             database = stage / "metadata.sqlite3"
             self._verify_sqlite(database)
+            # Verify against the schema the set was created with, before migration.
             self._verify_stable_references_sqlite(database, stage / "objects")
             engine = create_database_engine(f"sqlite+pysqlite:///{database}")
             try:
                 upgrade_database(engine)
                 with engine.connect() as connection:
                     connection.execute(text("SELECT 1"))
+            except PersistenceError:
+                raise RecoveryError("Restored database migration failed") from None
             finally:
                 engine.dispose()
             deadline.remaining()
+            # Prove the migrated instance reached head with every reference intact.
+            self._verify_stable_references_sqlite(
+                database, stage / "objects", expected_revision=head_revision()
+            )
             os.replace(stage, target)
             _sync_directory(target.parent)
             return hashlib.sha256(
@@ -264,12 +283,30 @@ class StandaloneRecoveryAdapter:
         yield from sorted(observed)
 
     @staticmethod
-    def _verify_stable_references_sqlite(database: Path, objects: Path) -> None:
+    def _verify_stable_references_sqlite(
+        database: Path, objects: Path, *, expected_revision: str | None = None
+    ) -> str:
+        """Verify schema completeness and references at the recorded revision."""
+
         try:
             with closing(
                 sqlite3.connect(f"file:{database}?mode=ro", uri=True)
             ) as connection:
-                _verify_database_references(connection.execute, objects)
+                recorded = sqlite_revision(connection)
+                if expected_revision is None:
+                    revision = require_restorable_revision(recorded)
+                elif recorded != expected_revision:
+                    raise RecoveryError("Restored database did not reach the head")
+                else:
+                    revision = recorded
+                shape = reference_shape(revision)
+                require_complete_shape(sqlite_shape(connection), shape)
+                _verify_database_references(
+                    lambda statement: connection.execute(statement).fetchall(),
+                    shape,
+                    lambda key: _regular_object(objects / key),
+                )
+                return revision
         except sqlite3.Error:
             raise RecoveryError(
                 "Restored stable object references are invalid"
@@ -334,8 +371,11 @@ class PostgreSQLRecoveryAdapter:
                         "SELECT pg_current_wal_lsn()::text, txid_current_snapshot()::text"
                     )
                 ).one()
+                revision = connection.scalar(
+                    text("SELECT version_num FROM alembic_version")
+                )
                 tables: list[dict[str, Any]] = []
-                for table in Base.metadata.sorted_tables:
+                for table in self._backup_tables(connection, revision):
                     deadline.remaining()
                     rows = connection.execute(select(table)).mappings()
                     tables.append(
@@ -348,9 +388,6 @@ class PostgreSQLRecoveryAdapter:
                             ],
                         }
                     )
-                revision = connection.scalar(
-                    text("SELECT version_num FROM alembic_version")
-                )
                 payload = {
                     "schema": "markweave-postgresql-logical-v1",
                     "revision": revision,
@@ -388,6 +425,8 @@ class PostgreSQLRecoveryAdapter:
         deadline: RecoveryDeadline,
     ) -> str:
         payload = _load_database_payload(payload_path)
+        revision = require_restorable_revision(payload["revision"])
+        head = head_revision()
         self._verify_payload_references(payload, object_keys)
         engine = create_database_engine(
             database_url, timeout_seconds=deadline.remaining()
@@ -407,36 +446,35 @@ class PostgreSQLRecoveryAdapter:
                     raise RecoveryError("Distributed restore target is not isolated")
                 existing = set(inspect(connection).get_table_names())
                 _verify_empty_logical_restore_target(connection, existing)
-            if not existing:
-                upgrade_database(engine)
+            if existing and revision != head:
+                raise RecoveryError(
+                    "Distributed database target must be empty for an earlier schema"
+                )
             with engine.begin() as connection:
                 self._lock(connection)
-                tables_by_name = {
-                    table.name: table for table in Base.metadata.tables.values()
-                }
-                payload_tables = payload["tables"]
-                if {item["name"] for item in payload_tables} != set(tables_by_name):
-                    raise RecoveryError("PostgreSQL backup schema is incompatible")
-                for item in payload_tables:
-                    deadline.remaining()
-                    table = tables_by_name[item["name"]]
-                    if item["columns"] != [column.name for column in table.columns]:
-                        raise RecoveryError("PostgreSQL backup schema is incompatible")
-                    rows = [
-                        {key: _decode(value) for key, value in row.items()}
-                        for row in item["rows"]
-                    ]
-                    if table.name == "composer_model_step_gate":
-                        if rows != [{"id": 1}]:
-                            raise RecoveryError(
-                                "PostgreSQL backup schema is incompatible"
-                            )
-                        continue  # Migration has already seeded the singleton lock row.
-                    if rows:
-                        connection.execute(table.insert(), rows)
+                if not existing:
+                    # Recreate the schema the set was created with, in this transaction.
+                    upgrade_connection(connection, revision)
+                self._insert_payload(
+                    connection,
+                    payload["tables"],
+                    self._restore_tables(connection, revision, head),
+                    exact_column_order=revision == head,
+                    deadline=deadline,
+                )
+                if revision != head:
+                    upgrade_connection(connection, head)
+                deadline.remaining()
+                _verify_database_references(
+                    lambda statement: connection.execute(text(statement)).fetchall(),
+                    _metadata_shape(),
+                    object_keys.__contains__,
+                )
             return target_identity
         except RecoveryError:
             raise
+        except PersistenceError:
+            raise RecoveryError("PostgreSQL restore migration failed") from None
         except SQLAlchemyError:
             raise RecoveryError("PostgreSQL restore failed") from None
         finally:
@@ -450,6 +488,70 @@ class PostgreSQLRecoveryAdapter:
         )
         if locked is not True:
             raise RecoveryError("Another recovery operation is active")
+
+    @staticmethod
+    def _insert_payload(
+        connection: Connection,
+        payload_tables: list[dict[str, Any]],
+        tables_by_name: Mapping[str, Table],
+        *,
+        exact_column_order: bool,
+        deadline: RecoveryDeadline,
+    ) -> None:
+        """Insert rows only when the payload matches the target schema exactly."""
+
+        if {item["name"] for item in payload_tables} != set(tables_by_name):
+            raise RecoveryError("PostgreSQL backup schema is incompatible")
+        for item in payload_tables:
+            deadline.remaining()
+            table = tables_by_name[item["name"]]
+            columns = [column.name for column in table.columns]
+            observed = item["columns"]
+            if any(not isinstance(name, str) for name in observed) or (
+                observed != columns
+                if exact_column_order
+                else sorted(observed) != sorted(columns)
+            ):
+                raise RecoveryError("PostgreSQL backup schema is incompatible")
+            rows = [
+                {key: _decode(value) for key, value in row.items()}
+                for row in item["rows"]
+            ]
+            if table.name == "composer_model_step_gate":
+                if rows != [{"id": 1}]:
+                    raise RecoveryError("PostgreSQL backup schema is incompatible")
+                continue  # Migration has already seeded the singleton lock row.
+            if rows:
+                connection.execute(table.insert(), rows)
+
+    @staticmethod
+    def _backup_tables(connection: Connection, revision: object) -> list[Table]:
+        """Select the model of the database revision, refusing unknown schemas."""
+
+        if require_restorable_revision(revision) == head_revision():
+            return list(Base.metadata.sorted_tables)
+        inspector = inspect(connection)
+        names = [
+            name
+            for name, _constraints in inspector.get_sorted_table_and_fkc_names()
+            if name is not None and name not in AUXILIARY_TABLES
+        ]
+        return [_reflected_table(inspector, name) for name in names]
+
+    @staticmethod
+    def _restore_tables(
+        connection: Connection, revision: str, head: str
+    ) -> dict[str, Table]:
+        """Return the model tables that the recovery-set revision defines."""
+
+        if revision == head:
+            return {table.name: table for table in Base.metadata.tables.values()}
+        inspector = inspect(connection)
+        return {
+            name: _reflected_table(inspector, name)
+            for name in inspector.get_table_names()
+            if name not in AUXILIARY_TABLES
+        }
 
     @staticmethod
     def _verify_payload_references(
@@ -816,75 +918,41 @@ def _referenced_keys_from_rows(tables: Mapping[str, Any]) -> frozenset[str]:
     return frozenset(keys)
 
 
-def _verify_database_references(execute: Any, objects: Path) -> None:
-    rows: dict[str, dict[str, Any]] = {}
+def _reflected_table(inspector: Any, name: str) -> Table:
+    """Describe one migration-defined table without the current model metadata."""
+
+    return Table(
+        name,
+        MetaData(),
+        *(
+            Column(column["name"], column["type"])
+            for column in inspector.get_columns(name)
+        ),
+    )
+
+
+def _metadata_shape() -> SchemaShape:
+    return {
+        table.name: frozenset(column.name for column in table.columns)
+        for table in Base.metadata.tables.values()
+    }
+
+
+def _regular_object(path: Path) -> bool:
+    return not path.is_symlink() and path.is_file()
+
+
+def _verify_database_references(
+    query: Callable[[str], Any],
+    shape: SchemaShape,
+    exists: Callable[[str], bool],
+) -> None:
+    """Require every retained reference at one schema revision to resolve."""
+
     try:
-        rows["template_versions"] = {
-            "rows": [
-                dict(
-                    zip(
-                        ("id", "object_owner_id", "publication_state"), row, strict=True
-                    )
-                )
-                for row in execute(
-                    "SELECT id, object_owner_id, publication_state FROM template_versions"
-                ).fetchall()
-            ]
-        }
-        rows["conversion_jobs"] = {
-            "rows": [
-                dict(
-                    zip(
-                        (
-                            "owner_id",
-                            "source_object_id",
-                            "source_ready",
-                            "state",
-                            "cleanup_completed",
-                            "result_object_id",
-                            "result_manifest_object_id",
-                        ),
-                        row,
-                        strict=True,
-                    )
-                )
-                for row in execute(
-                    "SELECT owner_id, source_object_id, source_ready, state, "
-                    "cleanup_completed, result_object_id, "
-                    "result_manifest_object_id FROM conversion_jobs"
-                ).fetchall()
-            ]
-        }
-        composer_tables = {
-            row[0]
-            for row in execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'composer_%'"
-            ).fetchall()
-        }
-        required = {
-            table_name
-            for table_name in Base.metadata.tables
-            if table_name.startswith("composer_")
-        }
-        if composer_tables and not required.issubset(composer_tables):
-            raise RecoveryError("Restored Composer schema is incomplete")
-        if required.issubset(composer_tables):
-            for table, columns in (
-                ("composer_sources", ("id", "owner_id", "publication_state")),
-                ("composer_drafts", ("id", "owner_id")),
-                ("composer_revisions", ("id", "draft_id", "publication_state")),
-                ("composer_artifacts", ("id", "revision_id")),
-            ):
-                query = f"SELECT {', '.join(columns)} FROM {table}"  # noqa: S608 - fixed internal table names
-                rows[table] = {
-                    "rows": [
-                        dict(zip(columns, row, strict=True))
-                        for row in execute(query).fetchall()
-                    ]
-                }
+        rows = read_reference_rows(query, shape)
     except Exception:
         raise RecoveryError("Restored database schema is incomplete") from None
     for key in _referenced_keys_from_rows(rows):
-        path = objects / key
-        if path.is_symlink() or not path.is_file():
+        if not exists(key):
             raise RecoveryError("Restored stable object references are incomplete")

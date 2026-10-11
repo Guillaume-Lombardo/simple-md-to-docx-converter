@@ -89,6 +89,32 @@ markweave --non-interactive --timeout 14400 restore \
   --yes
 ```
 
+### Recovery sets from earlier releases
+
+Restore accepts a recovery set created by this release or by any earlier release, starting with
+release 0.5.0, the first release that shipped `markweave backup`. Its database revision must belong
+to this release's migration history between `20260829_14` and the current head. Restore first
+verifies the set against the schema of the revision recorded in the set: every table and column
+of that revision must be present, and every retained stable object reference must resolve. It then
+migrates the restored database to the current head and verifies the references again before
+reporting success. A pre-T91 set at revision `20260923_24`, for example, restores and gains the
+later Composer fill-plan schema during this migration.
+
+Restore refuses, before any target mutation, a set whose revision is unknown to this release,
+including every set created by a newer release, with `Recovery set schema revision is unknown to
+this release`. It refuses a revision older than `20260829_14` with `Recovery set schema revision
+predates supported recovery sets`. A missing table or column of the recorded revision fails with
+`Restored database schema is incomplete`, and a set whose schema does not migrate from its
+recorded revision fails with `Restored database migration failed`. To restore a set created by a
+newer release, use that release or a later one.
+
+A distributed restore of an earlier-revision set requires a target database without tables. It
+recreates the recorded revision, inserts the rows, and migrates to the current head in one
+database transaction, so a failure leaves the target database empty. A target database already
+migrated to the current head accepts only a set created at the current head. The distributed
+`markweave backup` command also captures a database still at an earlier supported revision, for
+example before an upgrade, and refuses an unknown revision.
+
 For distributed restore, use `--database-url-environment` and the `--s3-*` options for distinct
 isolated targets. Supply static credentials, when needed, with
 `--s3-access-key-environment` and `--s3-secret-key-environment`. A failed database restore removes

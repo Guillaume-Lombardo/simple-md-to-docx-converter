@@ -1198,6 +1198,7 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T125 | Add VS Code and Obsidian integrations | T104, T114 |
 | T126 | Internationalize the browser interface (deferred by D13) | T96 |
 | T127 | Publish Linux/ARM64 images (deferred by D14) | T96 |
+| T128 | Restore recovery sets created by an older schema | — |
 
 On 2026-10-09 the owner accepted the repository analysis that created T96–T127. The owner kept
 the experimental reverse conversion and asked for its scope to be frozen (T108) rather than removed.
