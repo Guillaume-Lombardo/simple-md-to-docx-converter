@@ -125,6 +125,15 @@ empty for an earlier schema`. Restore inserts each template's current-version po
 template versions, and the conversion jobs that name a template pair after those pointers, so
 the integrity triggers stay enabled.
 
+**Known limitation, tracked as T132 (G1L-685).** Distributed restore currently refuses a recovery set
+that contains a retained conversion job referencing a superseded template version, that is, a
+version that is no longer its template's current version because the template was replaced after
+the job ran. The restore fails with `PostgreSQL restore failed`: the database transaction rolls
+back, and the objects uploaded to the target bucket are deleted. This applies to sets at every
+supported revision, including the current head, and predates T128. Standalone restore is not
+affected. No workaround is supported: do not edit the recovery set or disable integrity triggers.
+Keep the set and its manifest unchanged until T132 is delivered.
+
 Run `markweave backup` with the release that matches the database revision: it captures the
 model of its own release. Take the pre-upgrade backup with the release that is currently deployed,
 as the upgrade guide requires, and restore it later with the same or a newer release.

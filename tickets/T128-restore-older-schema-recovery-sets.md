@@ -82,6 +82,9 @@ before migrating.
     template version still cannot be restored in the distributed profile, because the
     conversion-template integrity trigger accepts only the current pair. This is unchanged from
     `main`.
+- 2026-10-11: Review round 3 approved. Documented the pre-existing superseded-template-version
+  restriction on distributed restore in the recovery and upgrade guides; it is tracked as T132
+  (G1L-685).
 
 ## Synchronization
 
