@@ -30,6 +30,7 @@ from markweave.conversion.mermaid import (
     MermaidPreprocessingConverter,
 )
 from markweave.conversion.pandoc import PandocConfig, PandocDocxConverter
+from markweave.conversion.runtime_manifest import COMPONENT_VERSIONS
 from markweave.conversion.service import DocxConversionService
 from markweave.conversion.validation import PANDOC_READER
 from markweave.jobs.errors import JobProcessingCancelled
@@ -350,7 +351,7 @@ def build_production_processor(
     pdf = LibreOfficePdfConverter(
         LibreOfficeConfig(
             settings.template_libreoffice_executable,
-            "26.2.5.2",
+            dict(COMPONENT_VERSIONS)["libreoffice"],
             settings.template_engine_timeout_seconds,
             settings.template_engine_termination_grace_seconds,
             settings.conversion_pdf_cancellation_poll_seconds,
