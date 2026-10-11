@@ -57,6 +57,9 @@ FRONTEND_IMAGE = re.compile(
     rf"{re.escape(FRONTEND_IMAGE_REPOSITORY)}:(?P<tag>[0-9A-Za-z][0-9A-Za-z._-]*)"
     r"@(?P<digest>sha256:[0-9a-f]{64})"
 )
+BACKEND_IMAGE_DEFAULT = re.compile(
+    r"\$\{MARKWEAVE_CUTOVER_BACKEND_IMAGE:-(?P<image>[^}]+)\}"
+)
 PAIRED_RELEASE_FIRST_VERSION = Version("0.6.1")
 ZERO_SHA = "0" * 40
 MAX_JSON_BYTES = 1_048_576
@@ -236,7 +239,11 @@ def parse_project_version(document: bytes, *, label: str = "pyproject.toml") -> 
 
 
 def parse_compose_identity(document: str) -> ComposeIdentity:
-    """Parse only the public image of the exact Compose markweave service."""
+    """Parse only the public image of the exact Compose markweave service.
+
+    The image is either the literal public reference or the public default of the
+    exact ``MARKWEAVE_CUTOVER_BACKEND_IMAGE`` interpolation used by quickstarts.
+    """
     try:
         compose = yaml.safe_load(document)
         image = compose["services"]["markweave"]["image"]
@@ -244,6 +251,8 @@ def parse_compose_identity(document: str) -> ComposeIdentity:
         raise AlignmentError(
             "compose.yaml has no valid services.markweave.image"
         ) from error
+    if isinstance(image, str) and (default := BACKEND_IMAGE_DEFAULT.fullmatch(image)):
+        image = default.group("image")
     if not isinstance(image, str) or (match := IMAGE.fullmatch(image)) is None:
         raise AlignmentError(
             "Compose markweave image must use the trusted repository, a version tag, "
@@ -254,7 +263,7 @@ def parse_compose_identity(document: str) -> ComposeIdentity:
 
 
 def parse_frontend_compose_identity(document: str) -> ComposeIdentity:
-    """Parse the shared published frontend default from the cutover overlay."""
+    """Parse the shared published frontend default from compose.yaml."""
     expression = re.compile(r"\$\{MARKWEAVE_CUTOVER_FRONTEND_IMAGE:-(?P<image>[^}]+)\}")
     try:
         compose = yaml.load(document, Loader=yaml.BaseLoader)  # noqa: S506
@@ -262,7 +271,7 @@ def parse_frontend_compose_identity(document: str) -> ComposeIdentity:
         configured = [services[role]["image"] for role in CUTOVER_FRONTEND_ROLES]
     except (yaml.YAMLError, KeyError, TypeError) as error:
         raise AlignmentError(
-            "cutover overlay has no valid frontend and router image defaults"
+            "compose.yaml has no valid frontend and router image defaults"
         ) from error
     if any(not isinstance(image, str) for image in configured):
         raise AlignmentError(
@@ -834,7 +843,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
         frontend = None
         if Version(compose.version) >= PAIRED_RELEASE_FIRST_VERSION:
             frontend = parse_frontend_compose_identity(
-                (options.repository / "compose.nextjs.yaml").read_text(encoding="utf-8")
+                (options.repository / "compose.yaml").read_text(encoding="utf-8")
             )
         base = None
         if project_version != compose.version:

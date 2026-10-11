@@ -7,8 +7,6 @@ readonly repository
 readonly compose_file="$repository/compose.yaml"
 readonly overlay_file="$repository/compose.simple.yaml"
 readonly podman_overlay_file="$repository/compose.podman.yaml"
-readonly nextjs_overlay_file="$repository/compose.nextjs.yaml"
-readonly nextjs_podman_overlay_file="$repository/compose.nextjs-podman.yaml"
 readonly quickstart_script="$repository/scripts/quickstart-simple.sh"
 readonly suffix="${GITHUB_RUN_ID:-local}-$$-$RANDOM"
 readonly project="markweave-simple-e2e-${suffix,,}"
@@ -37,9 +35,7 @@ case "$runtime" in
 esac
 
 if [[ ! -f "$compose_file" || ! -f "$overlay_file" || \
-  ! -f "$podman_overlay_file" || ! -f "$nextjs_overlay_file" || \
-  ! -f "$nextjs_podman_overlay_file" || \
-  ! -x "$quickstart_script" ]]; then
+  ! -f "$podman_overlay_file" || ! -x "$quickstart_script" ]]; then
   echo "Run this command from the repository root." >&2
   exit 2
 fi
@@ -89,10 +85,6 @@ compose() {
   local files=(--file "$compose_file" --file "$overlay_file")
   if [[ "$runtime" == podman ]]; then
     files+=(--file "$podman_overlay_file")
-  fi
-  files+=(--file "$nextjs_overlay_file")
-  if [[ "$runtime" == podman ]]; then
-    files+=(--file "$nextjs_podman_overlay_file")
   fi
   "${compose_command[@]}" --project-name "$project" --project-directory "$repository" \
     "${files[@]}" --env-file "$fault_env" "$@"
