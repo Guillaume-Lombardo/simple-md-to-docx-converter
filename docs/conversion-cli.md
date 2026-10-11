@@ -76,7 +76,9 @@ archive, image, Mermaid, Pandoc, and LibreOffice adapters as the service, with t
 `MARKWEAVE_*` limits, inside the same per-engine network isolation. Without `--local`, `convert`
 keeps its HTTP-only submission behavior; remote options such as `--output`, `--profile`,
 `--template-id`, and `--idempotency-key` are refused in local mode, and local options are refused
-without `--local`.
+without `--local`. Abbreviations accepted before local mode keep their remote meaning: a prefix
+shared with a remote option, such as `--out` or `--r`, still selects `--output` or `--retries`, so
+spell local options in full.
 
 ```text
 markweave convert doc.md --local --to docx,pdf --template template.docx -o out/

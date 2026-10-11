@@ -76,6 +76,7 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
             action.default = argparse.SUPPRESS
             remote_options.append((action.dest, action.option_strings[-1]))
     convert.set_defaults(local_remote_options=tuple(remote_options))
+    _keep_remote_abbreviations(convert)
     group = convert.add_argument_group(
         "local conversion (no server)",
         "Convert the operator's own file on this host with the same validation, "
@@ -125,6 +126,25 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
         action=_LocalOption,
         help="Atomically replace existing regular local output files.",
     )
+
+
+def _keep_remote_abbreviations(convert: argparse.ArgumentParser) -> None:
+    """Resolve prefixes that only local options made ambiguous to the remote option.
+
+    Before local mode, ``--out`` meant ``--output`` and ``--r`` meant ``--retries``.
+    Local options still require an unambiguous spelling of their own.
+    """
+    resolve = convert._get_option_tuples
+
+    def remote_first(option_string: str) -> list[Any]:
+        matches = resolve(option_string)
+        if len(matches) > 1:
+            remote = [match for match in matches if match[0].dest not in _LOCAL_DESTS]
+            if len(remote) == 1:
+                return remote
+        return matches
+
+    setattr(convert, "_get_option_tuples", remote_first)  # noqa: B010
 
 
 def _convert_locally(

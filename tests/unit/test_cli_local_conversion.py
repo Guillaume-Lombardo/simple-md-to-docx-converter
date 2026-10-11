@@ -12,6 +12,7 @@ from typing import Any, ClassVar
 import pytest
 
 from markweave.cli.commands import conversions, local_conversion
+from markweave.cli.commands.local_conversion import LocalInvocation
 from markweave.cli.main import build_parser, main
 from markweave.cli.output import OutputWriter
 from markweave.cli.types import CommandContext, OutputFormat
@@ -674,3 +675,80 @@ def test_invalid_positional_value_is_a_usage_error() -> None:
     assert local_conversion._formats(None) == ("docx",)
     with pytest.raises(local_conversion.CliError):
         local_conversion._formats(["docx"])
+
+
+def _remote_only_parser() -> argparse.ArgumentParser:
+    """The ``convert`` command exactly as registered before local mode existed."""
+    parser = argparse.ArgumentParser(prog="markweave")
+    conversions.register(parser.add_subparsers(dest="command"))
+    return parser
+
+
+def _parse(parser: argparse.ArgumentParser, *arguments: str) -> Any:
+    try:
+        return parser.parse_args(("convert", "doc.md", *arguments)).command_name
+    except SystemExit as error:
+        return ("exit", error.code)
+
+
+_REMOTE_VALUES = {
+    "--output": "pdf",
+    "--presentation-dialect": "marp",
+    "--slide-level": "2",
+    "--template-id": "11111111-1111-4111-8111-111111111111",
+    "--template-version-id": "22222222-2222-4222-8222-222222222222",
+    "--idempotency-key": "key",
+    "--retries": "1",
+    "--profile": "work",
+}
+
+
+@pytest.mark.parametrize(
+    ("option", "value"), sorted(_REMOTE_VALUES.items()), ids=sorted(_REMOTE_VALUES)
+)
+def test_every_remote_abbreviation_resolves_as_before_local_mode(
+    option: str, value: str, capsys
+) -> None:
+    before, after = _remote_only_parser(), build_parser()
+    for length in range(3, len(option) + 1):
+        prefix = option[:length]
+        if prefix == "--template":
+            # Previously ambiguous; it is now the exact local option, which still
+            # fails with usage status 2 without --local.
+            assert isinstance(_parse(after, prefix, value), LocalInvocation)
+            continue
+        for arguments in ((prefix, value), (f"{prefix}={value}",)):
+            expected = _parse(before, *arguments)
+            actual = _parse(after, *arguments)
+            if isinstance(expected, tuple):
+                assert actual == expected, arguments
+            else:
+                assert isinstance(actual, conversions._Request), arguments
+                assert actual.values == expected.values, arguments
+    capsys.readouterr()
+
+
+@pytest.mark.parametrize(
+    ("arguments", "values"),
+    [
+        (("--out", "pdf"), {"output": "pdf"}),
+        (("--o", "both"), {"output": "both"}),
+        (("--r", "2"), {"retries": "2"}),
+        (("--re", "0"), {"retries": "0"}),
+    ],
+)
+def test_abbreviations_shared_with_local_options_stay_remote(
+    arguments: tuple[str, ...], values: dict[str, str]
+) -> None:
+    namespace = build_parser().parse_args(("convert", "doc.md", *arguments))
+    assert namespace.command_handler is conversions._convert
+    assert values.items() <= namespace.command_name.values.items()
+
+
+def test_local_options_accept_their_own_unambiguous_prefixes() -> None:
+    namespace = build_parser().parse_args(
+        ("convert", "doc.md", "--local", "--output-d", "out", "--req", "--ov")
+    )
+    local = namespace.command_name.namespace
+    assert (local.local_output_dir, local.local_require_pinned) == ("out", True)
+    assert local.local_overwrite is True
