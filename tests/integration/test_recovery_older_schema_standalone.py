@@ -185,7 +185,9 @@ def test_standalone_refuses_unsupported_schema_revisions(
     _alter_source(data, f"UPDATE alembic_version SET version_num = '{revision}'")  # noqa: S608 - fixed test revisions
     with pytest.raises(RecoveryError, match=message):
         _restore(data, tmp_path)
+    # The revision preflight refuses before staging or publishing anything.
     assert not (tmp_path / "restored").exists()
+    assert not list(tmp_path.glob(".restored.restore-*"))
 
 
 def test_standalone_refuses_current_schema_relabelled_as_earlier(

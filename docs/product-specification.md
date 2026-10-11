@@ -962,6 +962,10 @@ readiness cheap; it must not run a conversion.
   verifies stable object references before migration/readiness, and never switches production
   traffic. The quarterly exercise consumes these commands and records evidence; test-only S3
   helpers remain forbidden for production recovery.
+- Restore accepts recovery sets created at schema revision `20260829_14` (release 0.5.0, which
+  introduced `markweave backup`) or later, verifies each against the schema of its recorded
+  revision, and migrates it to the current head; earlier and unknown, including newer, revisions
+  are refused with stable errors (owner decision, 2026-10-11, T128).
 
 ## 9. Repository and autonomous development
 

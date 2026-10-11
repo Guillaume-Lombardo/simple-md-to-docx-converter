@@ -60,6 +60,12 @@ before migrating.
   The specification does not define a minimum supported recovery-set revision; that floor is
   recorded as an owner decision point in the pull request. Release-tag checks confirmed that each
   released model schema from 0.5.0 to 0.7.3 equals the migration-defined schema at its revision.
+- 2026-10-11: Owner decision — minimum supported recovery-set revision is 20260829_14 (0.5.0).
+  Recorded in the specification's backup/restore contract. Review round 1 corrections: both
+  restore orchestrations now read the recorded revision before any target write, the recovery
+  guide documents the profile-specific errors and cleanup, and the final-image recovery CLI smoke
+  restores populated `20260923_24` sets in both profiles to head with readiness, then checks the
+  refusal and cleanup of incomplete or unknown schemas.
 
 ## Synchronization
 

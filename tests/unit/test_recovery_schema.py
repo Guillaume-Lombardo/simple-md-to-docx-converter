@@ -404,3 +404,35 @@ def test_distributed_adapter_translates_migration_failure(
         _restore(adapter, backup, payload, frozenset(records.objects))
     source.dispose()
     target.dispose()
+
+
+def test_standalone_preflight_reads_the_set_without_writing(
+    tmp_path: Path, mocker
+) -> None:
+    adapter, staging, members = _older_standalone(tmp_path)
+    before = sorted(path.name for path in (staging / "database").iterdir())
+    assert StandaloneRecoveryAdapter.preflight(staging, members) == (
+        PRE_FILL_PLAN_REVISION
+    )
+    assert sorted(path.name for path in (staging / "database").iterdir()) == before
+    database_members = tuple(
+        member for member in members if member.path.startswith("objects/")
+    )
+    with pytest.raises(RecoveryError, match="integrity"):
+        StandaloneRecoveryAdapter.preflight(staging, database_members)
+    database = staging / "database" / "metadata.sqlite3"
+    connect = mocker.patch(
+        "markweave.recovery_adapters.sqlite3.connect",
+        side_effect=sqlite3.OperationalError("unable to open"),
+    )
+    with pytest.raises(RecoveryError, match="integrity"):
+        StandaloneRecoveryAdapter.preflight(staging, members)
+    mocker.stop(connect)
+    database.write_bytes(b"not a database")
+    with pytest.raises(RecoveryError, match="schema is incomplete"):
+        StandaloneRecoveryAdapter.preflight(staging, members)
+    target = (tmp_path / "restored").resolve()
+    with pytest.raises(RecoveryError, match="schema is incomplete"):
+        adapter.restore(staging, target, members, RecoveryDeadline.after(30))
+    assert not target.exists()
+    assert not list(tmp_path.glob(".restored.restore-*"))

@@ -193,6 +193,7 @@ class StandaloneRecoveryAdapter:
         stage = target.with_name(f".{target.name}.restore-{os.getpid()}")
         if stage.exists() or stage.is_symlink():
             raise RecoveryError("Standalone restore staging path is not empty")
+        self.preflight(source, members)
         stage.mkdir(mode=0o700)
         try:
             for member in members:
@@ -234,6 +235,26 @@ class StandaloneRecoveryAdapter:
         except BaseException:
             shutil.rmtree(stage, ignore_errors=True)
             raise
+
+    @staticmethod
+    def preflight(source: Path, members: tuple[RecoveryMember, ...]) -> str:
+        """Refuse an unsupported schema revision before any destination write."""
+
+        database = source / SQLITE_PAYLOAD
+        if (
+            all(member.path != SQLITE_PAYLOAD for member in members)
+            or database.is_symlink()
+            or not database.is_file()
+        ):
+            raise RecoveryError("SQLite snapshot integrity check failed")
+        try:
+            # `immutable=1` reads the verified set without creating journal files in it.
+            with closing(
+                sqlite3.connect(f"file:{database}?mode=ro&immutable=1", uri=True)
+            ) as connection:
+                return require_restorable_revision(sqlite_revision(connection))
+        except sqlite3.Error:
+            raise RecoveryError("SQLite snapshot integrity check failed") from None
 
     @staticmethod
     def _sqlite_snapshot(
@@ -413,6 +434,14 @@ class PostgreSQLRecoveryAdapter:
         size, digest = sha256_file(target)
         return AdapterBackup(
             identity, source_identity, (RecoveryMember(DATABASE_PAYLOAD, size, digest),)
+        )
+
+    @staticmethod
+    def preflight(payload_path: Path) -> str:
+        """Refuse an unsupported schema revision before any target write."""
+
+        return require_restorable_revision(
+            _load_database_payload(payload_path)["revision"]
         )
 
     def restore(
