@@ -57,9 +57,10 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
   runner, covers the documented container invocation, PDF with template and pins, Mermaid, missing
   engine, invalid input, unpinned engine, timeout, and `podman stop` cancellation; it passed locally
   against a final image built from this branch. Docs: `docs/cli.md`, `docs/conversion-cli.md`,
-  README. Limitations: the recorded Mermaid CLI pin (11.16.0) differs from the 11.17.0 shipped in
-  the image, so Mermaid documents warn and fail with `--require-pinned` until an owner reconciles
-  the pin; host fonts are not verified; PPTX output and client-side packaging of Markdown with local
+  README. T129 (#289) aligned the recorded Mermaid CLI pin with the 11.17.0 shipped in the image, so
+  after merging `main` the final image accepts Mermaid documents with `--require-pinned` and the
+  earlier mismatch note was removed from `docs/conversion-cli.md`. Limitations: host fonts are not
+  verified; PPTX output and client-side packaging of Markdown with local
   images are out of scope for local mode.
 
 ## Synchronization
