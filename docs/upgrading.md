@@ -105,6 +105,34 @@ workflow before restoring traffic. Restore the matching database and object back
 state changed. The one-time legacy-renderer migration and its old rollback procedure are retained
 in [cutover history](evidence/release-migration-history.md#nextjs-cutover-and-legacy-rollback).
 
+### Upgrading to 0.7.4
+
+Release 0.7.4 adds Composer migrations 20 to 26. Follow the upgrade procedure above: create and
+verify the profile-consistent backup, drain every component, and let one controlled `0.7.4`
+component apply the migrations and report readiness before starting the others. There is no
+automatic downgrade; to return to `0.7.3` after the migrations start, restore the pre-upgrade
+database and object backup and the matched `0.7.3` backend/frontend images together. Composer
+model access remains disabled unless `MARKWEAVE_COMPOSER_ENABLED=true` and its policy settings are
+configured, so an upgrade needs no new setting.
+
+`markweave restore` in 0.7.4 accepts recovery sets created by release 0.5.0 or later, from schema
+revision `20260829_14`, and migrates them to the 0.7.4 head. Sets from earlier revisions, unknown
+revisions or a newer release are refused. Keep a `0.7.3` recovery set until the upgraded
+deployment is verified.
+
+The Compose quickstart files are consolidated. The Next.js browser tier is now part of
+`compose.yaml`, and the Podman browser settings are part of `compose.podman.yaml` and
+`compose.podman-trusted-upstream.yaml`. `compose.nextjs.yaml`, `compose.nextjs-podman.yaml` and
+`compose.nextjs-podman-trusted-upstream.yaml` no longer exist. The `scripts/quickstart.sh` and
+`scripts/quickstart-simple.sh` helpers need no change. If you combine Compose files by hand, remove
+the deleted files from your `-f` list; every supported mode renders the same configuration as
+before. The image override variables `MARKWEAVE_CUTOVER_BACKEND_IMAGE` and
+`MARKWEAVE_CUTOVER_FRONTEND_IMAGE` are unchanged.
+
+The repository quickstarts keep their verified `0.7.3` image pins until the `0.7.4` images are
+published and their exact receipts are adopted. Do not run a `0.7.4` package against `0.7.3`
+images or substitute an inferred `0.7.4` digest.
+
 ## Configuration compatibility
 
 ### During 0.x
@@ -129,6 +157,7 @@ required or select values for unresolved production limits.
 - [Supported transition](#supported-transition)
 - [Upgrade procedure](#upgrade-procedure)
 - [Schema changes and rollback](#schema-changes-and-rollback)
+- [Upgrading to 0.7.4](#upgrading-to-074)
 - [Configuration compatibility during 0.x](#configuration-compatibility)
 
 ## Related guidance

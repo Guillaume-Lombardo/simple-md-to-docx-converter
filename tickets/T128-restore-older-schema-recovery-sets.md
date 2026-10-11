@@ -2,7 +2,7 @@
 ticket: T128
 linear_id: G1L-681
 linear_url: https://linear.app/g1lom/issue/G1L-681/t128-restore-recovery-sets-created-by-an-older-schema
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -85,6 +85,26 @@ before migrating.
 - 2026-10-11: Review round 3 approved. Documented the pre-existing superseded-template-version
   restriction on distributed restore in the recovery and upgrade guides; it is tracked as T132
   (G1L-685).
+- 2026-10-11: Completed and verified on `main`. PR #290 was squash-merged as
+  `c3da5a5de942a7c59db92237d88c8adb96eb483a` from head `5a9b6e7`, a `main`-update merge of
+  head `78a12f5`, which independent review round 4 approved after the round 1-3 findings were
+  fixed. PR CI run 38156304669 passed at the merged head, and main CI run 38158819217 at
+  `c3da5a5` passed all 16 selected jobs, including `storage-standalone`, `storage-distributed`,
+  `container`, both final-image E2E profiles and `CI / gate`. Linear G1L-681 is Done.
+  Per-criterion evidence:
+  - Older-schema restore: both profiles verify a set against the schema of its recorded revision,
+    migrate it to head and verify references again; integrity, isolation and stable-object
+    guarantees are unchanged.
+  - Incomplete or tampered schemas are refused with a stable error, covered by regression tests
+    and the final-image recovery CLI smoke.
+  - Newer, unknown and below-floor revisions are refused with stable errors, with the target
+    database and bucket left untouched.
+  - Tests: unit tests, real standalone and PostgreSQL/S3 integration tests and the final-image
+    smoke restore populated `20260923_24` sets in both profiles to head with readiness.
+  - Documentation: the recovery and upgrade guides state the owner-approved floor, schema
+    revision `20260829_14` (release 0.5.0), and the superseded-template-version limitation.
+  Remaining limitation, outside this ticket: distributed restore of a retained conversion job that
+  names a superseded template version, tracked as T132 (G1L-685).
 
 ## Synchronization
 

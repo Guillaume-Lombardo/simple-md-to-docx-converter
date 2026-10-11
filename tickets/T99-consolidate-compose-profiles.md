@@ -2,7 +2,7 @@
 ticket: T99
 linear_id: G1L-618
 linear_url: https://linear.app/g1lom/issue/G1L-618/t99-consolidate-compose-variants-with-profiles
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -59,6 +59,27 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
   image posture. CI selection now also covers the two trusted-upstream overrides. Limitations:
   local `podman compose` delegates to the same Docker Compose v5.5.1 provider; hosted CI runs the
   real Compose E2E and final-image E2E profiles.
+- 2026-10-11: Completed and verified on `main`. PR #288 was squash-merged as
+  `a087eb5a862e5acfed7fd787e01fd5b5e3d7e8f7` from head `8c77884`, a `main`-update merge of
+  reviewed head `ac7989d`. Independent review round 1 approved it with no actionable findings and
+  independently reproduced the 104 byte-identical before/after renders. PR CI run 38150654069 and
+  push CI run 38153540913 on `main` at `a087eb5` passed all 19 jobs, including `compose`,
+  `container`, both final-image E2E profiles and `CI / gate`. Linear G1L-618 is Done.
+  Per-criterion evidence:
+  - Inventory: the 2026-10-11 progress entry above lists every Compose file, its consumers and its
+    security posture.
+  - Profiles and overrides: ten root Compose files became seven; the loopback-only,
+    ClamAV-by-default and trusted-upstream restrictions are unchanged, as the new posture tests
+    and the review confirm.
+  - Consumers: both quickstart helpers, the Compose E2E runners, CI domain selection, release
+    public alignment and `docs/quickstart.md` were updated in PR #288.
+  - Equivalence: `docker compose config` and `podman compose config` renders for 13 supported
+    modes are byte-identical before and after.
+  - Final-image E2E and quickstart tests: both profiles and the `compose` job passed in main CI
+    run 38153540913.
+  Operator note: hand-built `-f` lists must drop the removed `compose.nextjs*.yaml` files; the
+  0.7.4 upgrade guide records this. Limitation unchanged: local `podman compose` delegates to the
+  Docker Compose provider.
 
 ## Synchronization
 
