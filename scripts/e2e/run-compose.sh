@@ -5,7 +5,6 @@ umask 0077
 repository="$(pwd)"
 readonly repository
 readonly compose_file="$repository/compose.yaml"
-readonly nextjs_overlay_file="$repository/compose.nextjs.yaml"
 readonly quickstart_script="$repository/scripts/quickstart.sh"
 readonly suffix="${GITHUB_RUN_ID:-local}-$$-$RANDOM"
 readonly project="markweave-e2e-${suffix,,}"
@@ -13,8 +12,7 @@ readonly work_volume="${project}_markweave-work"
 readonly data_volume="${project}_markweave-data"
 readonly signatures_volume="${project}_clamav-signatures"
 
-if [[ ! -f "$compose_file" || ! -f "$nextjs_overlay_file" || \
-  ! -x "$quickstart_script" ]]; then
+if [[ ! -f "$compose_file" || ! -x "$quickstart_script" ]]; then
   echo "Run this command from the repository root." >&2
   exit 2
 fi
@@ -68,7 +66,7 @@ write_fault_env() {
 
 compose() {
   docker compose --project-name "$project" --project-directory "$repository" \
-    --file "$compose_file" --file "$nextjs_overlay_file" \
+    --file "$compose_file" \
     --env-file "$fault_env" "$@"
 }
 

@@ -1,5 +1,12 @@
 name: markweave
 
+# Secure local-evaluation stack: Markweave, local ClamAV, and the Next.js browser
+# tier. Only the router publishes a host port, and it binds to loopback. Overrides
+# compose the other supported quickstart modes; see docs/quickstart.md.
+#
+# CI may override the published image pair with exact locally staged identities;
+# public quickstarts use the verified release pair.
+
 # Bounded local-evaluation settings. They are intentionally not production sizing.
 x-markweave-settings: &markweave-settings
   MARKWEAVE_INITIAL_ADMIN_USERNAME: admin
@@ -80,7 +87,7 @@ x-markweave-settings: &markweave-settings
 
 services:
   markweave:
-    image: ghcr.io/guillaume-lombardo/md-converter:0.7.3@sha256:c91f97d7c299ad84811876e52ae52350d1ad3b91bd190b4fffb801634729bc83
+    image: "${MARKWEAVE_CUTOVER_BACKEND_IMAGE:-ghcr.io/guillaume-lombardo/md-converter:0.7.3@sha256:c91f97d7c299ad84811876e52ae52350d1ad3b91bd190b4fffb801634729bc83}"
     platform: linux/amd64
     command: serve
     depends_on:
@@ -88,8 +95,6 @@ services:
         condition: service_healthy
     environment:
       <<: *markweave-settings
-    ports:
-      - "127.0.0.1:${MARKWEAVE_PORT:-8080}:8080"
     networks:
       - scanner
       - frontend
@@ -160,6 +165,86 @@ services:
       timeout: 5s
       retries: 180
       start_period: 30s
+
+  frontend:
+    image: "${MARKWEAVE_CUTOVER_FRONTEND_IMAGE:-ghcr.io/guillaume-lombardo/md-converter-web:0.7.3@sha256:edee507cf70d15681bae0fe7f9d0755b607d557725fd06e6bd43771350dba9ba}"
+    platform: linux/amd64
+    depends_on:
+      markweave:
+        condition: service_healthy
+    networks:
+      - frontend
+    environment:
+      HOSTNAME: 0.0.0.0
+    read_only: true
+    user: "1001:0"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=32m,mode=1777
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 64
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:3001/_frontend/health/ready')
+          .then(response => process.exit(response.status === 200 ? 0 : 1))
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  router:
+    image: "${MARKWEAVE_CUTOVER_FRONTEND_IMAGE:-ghcr.io/guillaume-lombardo/md-converter-web:0.7.3@sha256:edee507cf70d15681bae0fe7f9d0755b607d557725fd06e6bd43771350dba9ba}"
+    platform: linux/amd64
+    command: [node, router.mjs]
+    depends_on:
+      frontend:
+        condition: service_healthy
+      markweave:
+        condition: service_healthy
+    environment:
+      BACKEND_ORIGIN: http://markweave:8080
+      FRONTEND_ORIGIN: http://frontend:3000
+      PUBLIC_HOSTS: "${MARKWEAVE_ROUTER_PUBLIC_HOST:-localhost:${MARKWEAVE_PORT:-8080},127.0.0.1:${MARKWEAVE_PORT:-8080}}"
+      ROUTER_HOST: 0.0.0.0
+      ROUTER_PORT: "8080"
+      ROUTER_REQUEST_MAX_BYTES: "1100000"
+      ROUTER_UPSTREAM_TIMEOUT_MS: "30000"
+    ports:
+      - "127.0.0.1:${MARKWEAVE_PORT:-8080}:8080"
+    networks:
+      - frontend
+    read_only: true
+    user: "1001:0"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=16m,mode=1777
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:8080/login',
+          {headers: {Host: process.env.PUBLIC_HOSTS.split(',')[0]}})
+          .then(response => process.exit(response.status === 200 ? 0 : 1))
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
 
 networks:
   scanner:

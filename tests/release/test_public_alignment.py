@@ -596,6 +596,38 @@ def test_parsers_require_canonical_version_and_exact_immutable_compose_ref() -> 
 
 
 @pytest.mark.unit
+def test_compose_parser_reads_only_the_exact_backend_override_default() -> None:
+    image = f"{public_alignment.IMAGE_REPOSITORY}:0.7.3@{REGISTRY_DIGEST}"
+    compose = (
+        "services:\n  markweave:\n"
+        f'    image: "${{MARKWEAVE_CUTOVER_BACKEND_IMAGE:-{image}}}"\n'
+    )
+
+    assert parse_compose_identity(compose) == ComposeIdentity("0.7.3", REGISTRY_DIGEST)
+    for rejected in (
+        compose.replace("MARKWEAVE_CUTOVER_BACKEND_IMAGE", "OTHER_IMAGE"),
+        compose.replace(":-", ":?"),
+        compose.replace("md-converter:", "other:"),
+        compose.replace(f"@{REGISTRY_DIGEST}", ""),
+    ):
+        with pytest.raises(AlignmentError, match="immutable"):
+            parse_compose_identity(rejected)
+
+
+@pytest.mark.unit
+def test_repository_compose_pins_one_aligned_public_pair() -> None:
+    """The release alignment reads both published images from compose.yaml."""
+    document = (Path(__file__).resolve().parents[2] / "compose.yaml").read_text(
+        encoding="utf-8"
+    )
+
+    backend = parse_compose_identity(document)
+    frontend = parse_frontend_compose_identity(document)
+
+    assert backend.version == frontend.version
+
+
+@pytest.mark.unit
 def test_frontend_compose_parser_requires_one_exact_shared_public_default() -> None:
     image = "ghcr.io/guillaume-lombardo/md-converter-web:0.6.1@sha256:" + "d" * 64
     overlay = (
@@ -1166,12 +1198,13 @@ def test_partial_072_real_git_transition_rejects_unreviewed_base(
         "head",
     )
     head = git("rev-parse", "HEAD")
-    (tmp_path / "compose.yaml").write_text(
-        f"services:\n  markweave:\n    image: {public_alignment.IMAGE_REPOSITORY}:0.7.1@{REGISTRY_DIGEST}\n"
-    )
+    backend = public_alignment.IMAGE_REPOSITORY + ":0.7.1@" + REGISTRY_DIGEST
     frontend = public_alignment.FRONTEND_IMAGE_REPOSITORY + ":0.7.1@" + REGISTRY_DIGEST
-    (tmp_path / "compose.nextjs.yaml").write_text(
-        f'services:\n  frontend:\n    image: "${{MARKWEAVE_CUTOVER_FRONTEND_IMAGE:-{frontend}}}"\n  router:\n    image: "${{MARKWEAVE_CUTOVER_FRONTEND_IMAGE:-{frontend}}}"\n'
+    (tmp_path / "compose.yaml").write_text(
+        "services:\n"
+        f'  markweave:\n    image: "${{MARKWEAVE_CUTOVER_BACKEND_IMAGE:-{backend}}}"\n'
+        f'  frontend:\n    image: "${{MARKWEAVE_CUTOVER_FRONTEND_IMAGE:-{frontend}}}"\n'
+        f'  router:\n    image: "${{MARKWEAVE_CUTOVER_FRONTEND_IMAGE:-{frontend}}}"\n'
     )
     transport = _partial_072_transport()
     mocker.patch.object(public_alignment, "UrlLibTransport", return_value=transport)
