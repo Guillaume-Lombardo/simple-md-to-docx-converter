@@ -30,19 +30,24 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
+# Client-side Markdown image packaging for the remote CLI (T104, decision D2).
+# The server extra includes it because the service uses the same shared parser.
+packaging = [
+    "markdown-it-py>=4,<5",
+    "mdit-py-plugins>=0.5,<0.7",
+    "pyyaml>=6,<7",
+]
 server = [
+    "markweave[packaging]",
     "alembic>=1.16,<2",
     "argon2-cffi>=25.1,<26",
     "cairosvg>=2.8,<3",
     "cryptography>=46,<47",
     "fastapi>=0.116,<1",
-    "markdown-it-py>=4,<5",
-    "mdit-py-plugins>=0.5,<0.7",
     "pillow>=12,<13",
     "pydantic-settings>=2.10,<3",
     "pypdf>=6.16.2,<7",
     "python-multipart>=0.0.20,<1",
-    "pyyaml>=6,<7",
     "sqlalchemy>=2.0,<3",
     "tinycss2>=1.5,<2",
     "uvicorn>=0.35,<1",

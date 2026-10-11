@@ -70,6 +70,7 @@ def test_real_build_validation_clean_install_and_tamper_failure(
             "all",
             "distributed",
             "kubernetes",
+            "packaging",
             "reverse-attempt",
             "server",
             "standalone",
@@ -78,6 +79,7 @@ def test_real_build_validation_clean_install_and_tamper_failure(
         assert "boto3<2,>=1.43.82; extra == 'distributed'" in requirements
         assert "psycopg[binary]<4,>=3.3.4; extra == 'distributed'" in requirements
         assert "firecrawl-anydoc==0.2.4; extra == 'reverse-attempt'" in requirements
+        assert "markdown-it-py<5,>=4; extra == 'packaging'" in requirements
         assert "grpcio<2,>=1.76; extra == 'kubernetes'" in requirements
         assert "kubernetes==36.0.3; extra == 'kubernetes'" in requirements
         assert "protobuf<7,>=6.33; extra == 'kubernetes'" in requirements

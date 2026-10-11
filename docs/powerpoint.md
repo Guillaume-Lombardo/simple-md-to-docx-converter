@@ -1,6 +1,8 @@
 # PowerPoint presentations
 
-Open **2pptx**, upload Markdown or a ZIP containing Markdown and local images, and
+Open **2pptx**, upload Markdown, a ZIP containing Markdown and local images, or a Markdown file
+together with its images or folder (packaged by the browser, see
+[Markdown with local images](conversion-ui.md#markdown-with-local-images)), and
 choose **PowerPoint (PPTX)** or **PowerPoint and original source (ZIP)**. No template is required:
 Markweave uses the reference presentation bundled with its pinned Pandoc version.
 Word preferences and the system Word fallback do not override this choice.
