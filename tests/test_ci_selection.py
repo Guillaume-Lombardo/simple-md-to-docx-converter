@@ -179,6 +179,7 @@ def test_anydoc_corpus_selects_real_library_integration() -> None:
     "path",
     [
         "src/markweave/cli/commands/local_conversion.py",
+        "src/markweave/cli/local_outputs.py",
         "src/markweave/conversion/engine_versions.py",
         "src/markweave/conversion/local.py",
         "src/markweave/conversion/local_settings.py",
