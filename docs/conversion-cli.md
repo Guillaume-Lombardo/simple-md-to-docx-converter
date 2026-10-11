@@ -199,10 +199,10 @@ warning on standard error (or in the JSON `warnings` list) and is recorded in th
 manifest. `--require-pinned` turns that warning into an `engine_version_unpinned` failure before
 any document engine runs.
 
-The approved pins are the qualified component versions the service records for every job: Pandoc
-3.10.2, LibreOffice 26.2.5.2, Mermaid CLI 11.16.0, and Chromium 151.0.7922.173. The current final
-image ships Mermaid CLI 11.17.0, so a document with a Mermaid diagram reports a Mermaid CLI pin
-warning and `--require-pinned` refuses it until the recorded pin and the image are reconciled.
+The approved pins are the qualified component versions the service records for every job
+(`COMPONENT_VERSIONS`): Pandoc 3.10.2, LibreOffice 26.2.5.2, Mermaid CLI 11.17.0, and Chromium
+151.0.7922.173. The final image ships exactly these engines, so `--require-pinned` accepts every
+supported document there, including documents with Mermaid diagrams.
 
 `doc.traceability.json` is canonical JSON without paths, timestamps, or document content. It
 records the application and conversion-contract versions, the Pandoc reader, the source kind, size,
