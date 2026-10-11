@@ -135,8 +135,9 @@ honoring cancellation and `--timeout`, for at most the global timeout or, withou
 touches names that still hold this run's files. If another process changed one meanwhile, that file
 is kept, the original stays in a hidden `.markweave-local-*.previous` file, and the command fails with
 `output_conflict`; if an original cannot be restored, it fails with `output_rollback_failed` and keeps
-the same copy. The lock relies on `flock`, so file systems without it (some network mounts) do not
-serialize publication.
+the same copy. The output directory's file system must support `flock` on directories. There is no
+unlocked fallback: where it is unavailable, for example on some network mounts, publication fails
+with `output_write_failed` before any file is written or published.
 
 ### Engines, approved pins, and traceability
 
