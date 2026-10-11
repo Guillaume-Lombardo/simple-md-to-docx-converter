@@ -187,6 +187,23 @@ def test_traceability_context_accepts_only_consistent_pandoc_default_mode() -> N
         replace(default, template_id="invented")
 
 
+def test_traceability_context_accepts_only_digest_bound_local_file_mode() -> None:
+    local = replace(
+        TRACE,
+        template_mode="local-file",
+        template_id=None,
+        template_version=None,
+        template_sha256="a" * 64,
+    )
+    assert local.template_sha256 == "a" * 64
+    for field in ("template_id", "template_version"):
+        with pytest.raises(ValueError, match="Invalid PDF template traceability mode"):
+            replace(local, **{field: "invented"})
+    for digest in (None, "A" * 64):
+        with pytest.raises(ValueError, match="lowercase SHA-256"):
+            replace(local, template_sha256=digest)
+
+
 def test_environment_is_allowlisted_and_workspace_scoped(tmp_path: Path) -> None:
     environment = libreoffice._environment(
         tmp_path,

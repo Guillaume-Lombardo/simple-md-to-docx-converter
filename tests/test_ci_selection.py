@@ -178,6 +178,25 @@ def test_anydoc_corpus_selects_real_library_integration() -> None:
 @pytest.mark.parametrize(
     "path",
     [
+        "src/markweave/cli/commands/local_conversion.py",
+        "src/markweave/cli/local_outputs.py",
+        "src/markweave/conversion/engine_versions.py",
+        "src/markweave/conversion/local.py",
+        "src/markweave/conversion/local_settings.py",
+        "examples/local-conversion.env",
+        "tests/e2e/local-conversion-final-image.sh",
+        "tests/e2e/fixtures/local-publication-sync/sitecustomize.py",
+    ],
+)
+def test_local_conversion_changes_select_its_final_image_e2e(path: str) -> None:
+    """T106 local mode reruns its final-image E2E in the container domain."""
+    assert "container" in select_domains([path])
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "path",
+    [
         "src/markweave/recovery.py",
         "src/markweave/recovery_service.py",
         "src/markweave/recovery_manifest.py",
