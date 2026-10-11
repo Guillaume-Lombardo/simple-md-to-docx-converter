@@ -12,6 +12,7 @@ from markweave.cli.commands import (
     authentication,
     composer,
     conversions,
+    local_conversion,
     recovery,
     runtime,
     templates,
@@ -53,6 +54,8 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")
     authentication.register(subparsers)
     conversions.register(subparsers)
+    # D1 adds the explicit serverless mode to the registered convert command.
+    local_conversion.register(subparsers)
     templates.register(subparsers)
     administration.register(subparsers)
     composer.register(subparsers)

@@ -6,6 +6,7 @@ import os
 from collections.abc import Callable
 
 from markweave.config import Settings
+from markweave.conversion.local_settings import LocalConversionSettings
 from markweave.templates.engines import (
     TemplateActivationContext,
     TemplateEngineConfig,
@@ -19,11 +20,9 @@ from markweave.templates.validation import (
 )
 
 
-def build_template_validator(
-    settings: Settings,
-) -> Callable[[bytes, TemplateFontDeclaration], ValidatedTemplate]:
-    """Build static, Pandoc, and LibreOffice validation with caller-set bounds."""
-    limits = TemplateLimits(
+def template_limits(settings: Settings | LocalConversionSettings) -> TemplateLimits:
+    """Project the configured template bounds shared by service and local mode."""
+    return TemplateLimits(
         settings.template_max_archive_bytes,
         settings.template_max_entries,
         settings.template_max_member_bytes,
@@ -35,6 +34,13 @@ def build_template_validator(
         settings.template_max_declared_fonts,
         settings.template_max_font_name_characters,
     )
+
+
+def build_template_validator(
+    settings: Settings,
+) -> Callable[[bytes, TemplateFontDeclaration], ValidatedTemplate]:
+    """Build static, Pandoc, and LibreOffice validation with caller-set bounds."""
+    limits = template_limits(settings)
     context = TemplateActivationContext(
         limits=limits,
         policy=APPROVED_FONT_POLICY,
