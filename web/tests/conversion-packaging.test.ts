@@ -354,23 +354,52 @@ test("optional metadata references are packaged when present and never block", a
   const markdown = [
     "---",
     "list:",
-    "  - ![y](item.png)",
-    "  - ![z](../escape.png)",
-    "  - ![w](absent.png)",
-    "  - ![v](ITEM.png)",
-    "  - ![t](notes.txt)",
+    "  - ![t](tagged.png)",
+    "  - '![y](item.png)'",
+    "  - '![z](../escape.png)'",
+    "  - '![w](absent.png)'",
+    "  - '![v](ITEM.png)'",
+    "  - '![u](notes.txt)'",
     "---",
     "# Title",
   ].join("\n");
-  expect(imageReferences(markdown).required).toEqual([]);
+  const references = imageReferences(markdown);
+  expect(references.required).toEqual([]);
+  expect(references.optional).toContain("item.png");
   const prepared = await prepareSelection([
     entry("doc.md", markdown),
     entry("item.png"),
     entry("ITEM.png"),
     entry("notes.txt", "text"),
   ]);
+  // Case-colliding optional images are packaged once, never as an error.
+  const packaged = Object.keys(await members(prepared.file));
+  expect(packaged).toHaveLength(2);
+  expect(packaged[0]).toBe(ENTRYPOINT);
+  expect(packaged[1]!.toLowerCase()).toBe("item.png");
+});
+
+test("multiline metadata references survive YAML errors and are packaged", async () => {
+  // Review round 2 reproduction: the service finds logo.png although the
+  // browser's YAML 1.2 parser reports an error for the unquoted tag.
+  const markdown = [
+    "---",
+    "trigger: ![x](extra.png)",
+    "logo: |",
+    "  ![l][ref]",
+    "",
+    "  [ref]: logo.png",
+    "---",
+    "",
+  ].join("\n");
+  expect(imageReferences(markdown).optional).toContain("logo.png");
+  const prepared = await prepareSelection([
+    entry("doc.md", markdown),
+    entry("logo.png"),
+  ]);
+  expect(prepared.imageCount).toBe(1);
   expect(Object.keys(await members(prepared.file))).toEqual([
     ENTRYPOINT,
-    "item.png",
+    "logo.png",
   ]);
 });

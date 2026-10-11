@@ -390,6 +390,51 @@
       "body_destinations": [
         "after-invalid.png"
       ]
+    },
+    {
+      "markdown": "---\nlogo: |\n  ![l][ref]\n\n  [ref]: logo.png\nother: ![t](tag.png)\n---\n",
+      "destinations": [
+        "logo.png"
+      ]
+    },
+    {
+      "markdown": "---\nlogo: |\n  ![l][ref]\n\n  [ref]: block-ref.png\n---\n# Title\n",
+      "destinations": [
+        "block-ref.png"
+      ]
+    },
+    {
+      "markdown": "---\nfolded: >\n  ![f](\n  folded.png)\n---\n",
+      "destinations": [
+        "folded.png"
+      ]
+    },
+    {
+      "markdown": "---\nsingle: '![s](single.png)'\ndouble: \"![d](\\\n  double.png)\"\n---\n",
+      "destinations": [
+        "double.png",
+        "single.png"
+      ]
+    },
+    {
+      "markdown": "---\nescaped: \"\\x21[e](escaped.png)\"\nunicode: \"\\u0021[u](unicode.png)\"\n---\n",
+      "destinations": [
+        "unicode.png",
+        "escaped.png"
+      ]
+    },
+    {
+      "markdown": "---\nlist:\n  - ![y](tagged-item.png)\n  - '![z](quoted-item.png)'\n---\n",
+      "destinations": [
+        "quoted-item.png"
+      ]
+    },
+    {
+      "markdown": "---\nkeep: |+\n  ![k](keep.png)\n\nstrip: >-\n  ![s](strip.png)\n---\n",
+      "destinations": [
+        "strip.png",
+        "keep.png"
+      ]
     }
   ],
   "resolutions": [

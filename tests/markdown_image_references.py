@@ -105,6 +105,15 @@ MARKDOWN_CASES = (
     "---\ntagged: !custom '![c](tag.png)'\nplain: '![p](plain.png)'\n---\n",
     "---\ndup: '![a](one.png)'\ndup: '![b](two.png)'\n'![k](key.png)': 1\n---\n",
     "---\na: [\n---\n![x](after-invalid.png)\n",
+    # Review round 2: multiline Markdown inside YAML block, folded, quoted, and
+    # escaped scalars, next to tags the browser's YAML 1.2 parser rejects.
+    "---\nlogo: |\n  ![l][ref]\n\n  [ref]: logo.png\nother: ![t](tag.png)\n---\n",
+    "---\nlogo: |\n  ![l][ref]\n\n  [ref]: block-ref.png\n---\n# Title\n",
+    "---\nfolded: >\n  ![f](\n  folded.png)\n---\n",
+    "---\nsingle: '![s](single.png)'\ndouble: \"![d](\\\n  double.png)\"\n---\n",
+    '---\nescaped: "\\x21[e](escaped.png)"\nunicode: "\\u0021[u](unicode.png)"\n---\n',
+    "---\nlist:\n  - ![y](tagged-item.png)\n  - '![z](quoted-item.png)'\n---\n",
+    "---\nkeep: |+\n  ![k](keep.png)\n\nstrip: >-\n  ![s](strip.png)\n---\n",
 )
 
 RESOLUTION_CASES = (

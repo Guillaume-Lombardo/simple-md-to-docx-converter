@@ -236,7 +236,11 @@ def _convert(context: CommandContext, writer: OutputWriter, request: _Request) -
     packaged_images: int | None = None
     if source_kind == "md" and not request.values.get("no_package"):
         try:
-            package = package_markdown(source_path, source)
+            package = package_markdown(
+                source_path,
+                source,
+                upload_limit=lambda: _upload_limit(context, request),
+            )
         except PackageError as error:
             raise CliError(error.code, error.message) from None
         if package is not None:
@@ -314,6 +318,15 @@ def _conversion_options(
         f"template selection: {selection}.",
         {"conversion_options": options},
     )
+
+
+def _upload_limit(context: CommandContext, request: _Request) -> int:
+    """Read the authoritative upload limit before reading local images."""
+    response = _client(context, request).options()
+    payload = _payload(
+        response, expected_status=_SUCCESS, fallback="conversion_options_read_failed"
+    )
+    return int(_validated_conversion_options(payload)["conversion_upload_max_bytes"])
 
 
 def _list_jobs(

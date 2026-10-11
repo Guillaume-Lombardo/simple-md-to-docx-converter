@@ -16,6 +16,7 @@ import os
 import stat
 import unicodedata
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from types import ModuleType
@@ -44,6 +45,12 @@ _ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 _REGULAR_FILE_ATTRIBUTES = (stat.S_IFREG | 0o644) << 16
 _ZIP_SYSTEM_UNIX = 3
 _IMAGE_SYNTAX = "!["
+_FRONT_MATTER = "---"
+_YAML_ESCAPE = "\\"
+_DIRECTORY_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_DIRECTORY | os.O_CLOEXEC
+_FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+UPLOAD_LIMIT_CODE = "conversion_request_invalid"
+UPLOAD_LIMIT = "The conversion request is invalid."
 
 
 class PackageError(ValueError):
@@ -73,29 +80,53 @@ def load_image_references() -> ModuleType | None:
     return image_references
 
 
-def package_markdown(markdown_path: Path, markdown: bytes) -> MarkdownPackage | None:
+def package_markdown(
+    markdown_path: Path,
+    markdown: bytes,
+    *,
+    upload_limit: Callable[[], int] | None = None,
+) -> MarkdownPackage | None:
     """Package Markdown and referenced local images, or return ``None``.
 
     ``None`` means the Markdown has no local image reference (or is not UTF-8)
     and must be uploaded unchanged so the service keeps deciding its validity.
-    Images are read only from the Markdown file's directory tree.
+    Images are read only from the Markdown file's directory tree, without
+    following any symbolic link. ``upload_limit`` returns the service's upload
+    limit; it is called once, only when images must be read.
     """
 
     try:
         text = markdown.decode("utf-8")
     except UnicodeDecodeError:
         return None
-    if _IMAGE_SYNTAX not in text:
-        return None
     references = load_image_references()
     if references is None:
-        raise PackageError(PACKAGING_UNAVAILABLE, PACKAGING_UNAVAILABLE_CODE)
+        if _may_reference_images(text):
+            raise PackageError(PACKAGING_UNAVAILABLE, PACKAGING_UNAVAILABLE_CODE)
+        return None
     paths = _referenced_paths(references, text)
     if not paths:
         return None
-    base = Path(os.path.realpath(markdown_path.parent))
-    images = {path: _read_image(base, path, references) for path in paths}
-    return MarkdownPackage(build_package(markdown, images), len(images))
+    limit = upload_limit() if upload_limit is not None else None
+    images = _read_images(markdown_path.parent, paths, references, len(markdown), limit)
+    content = build_package(markdown, images)
+    if limit is not None and len(content) > limit:
+        raise PackageError(UPLOAD_LIMIT, UPLOAD_LIMIT_CODE)
+    return MarkdownPackage(content, len(images))
+
+
+def _may_reference_images(text: str) -> bool:
+    """Conservatively detect image references without the shared parser.
+
+    Markdown image syntax is always the literal ``![``. Inside YAML front
+    matter, only double-quoted escapes (``\\x21``, ``\\u0021``, an escaped line
+    break, and so on) can decode into image syntax absent from the raw text, and
+    every such escape needs a backslash.
+    """
+
+    return _IMAGE_SYNTAX in text or (
+        text.startswith(_FRONT_MATTER) and _YAML_ESCAPE in text
+    )
 
 
 def build_package(markdown: bytes, images: dict[PurePosixPath, bytes]) -> bytes:
@@ -141,25 +172,72 @@ def _referenced_paths(references: ModuleType, text: str) -> list[PurePosixPath]:
     return paths
 
 
-def _read_image(base: Path, path: PurePosixPath, references: ModuleType) -> bytes:
+def _read_images(
+    directory: Path,
+    paths: list[PurePosixPath],
+    references: ModuleType,
+    markdown_size: int,
+    limit: int | None,
+) -> dict[PurePosixPath, bytes]:
+    try:
+        base = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    except OSError:
+        raise PackageError(references.MISSING_IMAGE) from None
+    try:
+        images: dict[PurePosixPath, bytes] = {}
+        total = markdown_size
+        for path in paths:
+            content = _read_image(base, path, references, limit, total)
+            total += len(content)
+            images[path] = content
+        return images
+    finally:
+        os.close(base)
+
+
+def _read_image(
+    base: int,
+    path: PurePosixPath,
+    references: ModuleType,
+    limit: int | None,
+    total: int,
+) -> bytes:
+    """Read one image by walking anchored directory descriptors.
+
+    Every component is opened relative to its parent's descriptor with
+    ``O_NOFOLLOW``, so a symbolic link anywhere in the path, or a directory
+    swapped for one after resolution, is refused instead of followed.
+    """
+
     missing: str = references.MISSING_IMAGE
     escaping: str = references.ESCAPING_IMAGE_PATH
     if path.suffix.casefold() not in SUPPORTED_IMAGE_SUFFIXES:
         raise PackageError(missing)
-    candidate = base.joinpath(*path.parts)
-    resolved = Path(os.path.realpath(candidate))
-    if resolved != base and base not in resolved.parents:
-        raise PackageError(escaping)
-    descriptor = -1
+    descriptors: list[int] = []
+    parent = base
     try:
-        descriptor = os.open(
-            resolved, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
-        )
-        with os.fdopen(descriptor, "rb") as stream:
-            descriptor = -1
-            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
-                raise PackageError(missing)
-            return stream.read()
+        for component in path.parts[:-1]:
+            try:
+                parent = os.open(component, _DIRECTORY_FLAGS, dir_fd=parent)
+            except OSError as error:
+                # Linux reports a symlink opened with O_NOFOLLOW | O_DIRECTORY
+                # as ENOTDIR; tell it apart from a regular file.
+                if error.errno == errno.ENOTDIR and _is_symlink(component, parent):
+                    raise PackageError(escaping) from None
+                raise
+            descriptors.append(parent)
+        descriptor = os.open(path.parts[-1], _FILE_FLAGS, dir_fd=parent)
+        descriptors.append(descriptor)
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise PackageError(missing)
+        if limit is not None and total + metadata.st_size > limit:
+            raise PackageError(UPLOAD_LIMIT, UPLOAD_LIMIT_CODE)
+        with os.fdopen(os.dup(descriptor), "rb") as stream:
+            content = stream.read(metadata.st_size + 1)
+        if len(content) != metadata.st_size:
+            raise PackageError(missing)
+        return content
     except PackageError:
         raise
     except OSError as error:
@@ -167,5 +245,14 @@ def _read_image(base: Path, path: PurePosixPath, references: ModuleType) -> byte
             raise PackageError(escaping) from None
         raise PackageError(missing) from None
     finally:
-        if descriptor >= 0:
+        for descriptor in reversed(descriptors):
             os.close(descriptor)
+
+
+def _is_symlink(name: str, directory: int) -> bool:
+    try:
+        return stat.S_ISLNK(
+            os.stat(name, dir_fd=directory, follow_symlinks=False).st_mode
+        )
+    except OSError:
+        return False

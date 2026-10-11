@@ -45,10 +45,11 @@ The `packaging` extra installs only `markdown-it-py`, `mdit-py-plugins`, and `py
 same constraints as `server`. With it, `markweave convert` finds and resolves Markdown image
 references with `markweave.conversion.image_references`, the module the service itself uses
 (owner decision A2 for T104, 2026-10-10). That module imports no image engine, database, or HTTP
-server dependency. Without the extra, a Markdown source containing image syntax fails before upload
-with installation guidance (`packaging_unavailable`) unless `--no-package` is passed; Markdown
-without image syntax is uploaded unchanged as before. The `server`, `standalone`, `distributed`,
-and `all` profiles, and therefore the final image, already include these libraries.
+server dependency. Without the extra, a Markdown source containing image syntax, or YAML front
+matter with a backslash escape that may decode into image syntax, fails before upload with
+installation guidance (`packaging_unavailable`) unless `--no-package` is passed; other Markdown is
+uploaded unchanged as before. The `server`, `standalone`, `distributed`, and `all` profiles, and
+therefore the final image, already include these libraries.
 
 Select a server or storage profile only when operating a local service. Missing optional backend
 dependencies must be reported by that selected feature with installation guidance; importing

@@ -20,9 +20,9 @@ import { isAlias, isMap, isScalar, isSeq, parseDocument } from "yaml";
  * front-matter rule. YAML metadata scalars are parsed as Markdown like the
  * service does. Intentional difference: the browser's YAML 1.2
  * parser is stricter than the service's PyYAML (for example an unquoted value
- * starting with "![" is an unseparated tag). When it rejects the metadata, image
- * references found line by line in that metadata are optional: packaged when
- * the file is selected, never an early error. The client is therefore never
+ * starting with "![" is an unseparated tag). When it reports errors, image
+ * references in the scalars it still recovers, with full YAML semantics, are
+ * optional: packaged when the file is selected, never an early error. The client is therefore never
  * stricter than the service and never omits a selected image the service may
  * need; the service stays authoritative. The shared fixture tests/fixtures/markdown-image-references.json
  * proves parity with the service parser.
@@ -147,11 +147,15 @@ function imageSources(tokens: Token[]): string[] {
 /**
  * Yield YAML scalar values in the service's traversal order. Like PyYAML's
  * compose, this reads the node graph without constructing tagged values, keeps
- * duplicate keys, and visits an aliased node once.
+ * duplicate keys, and visits an aliased node once. When the parser reports
+ * errors, the recovered nodes still carry real YAML scalar semantics (block,
+ * folded, quoted, escaped), but the result is marked incomplete.
  */
-function metadataScalars(metadata: string): string[] | undefined {
+function metadataScalars(metadata: string): {
+  scalars: string[];
+  complete: boolean;
+} {
   const document = parseDocument(metadata, { uniqueKeys: false });
-  if (document.errors.length) return undefined;
   const scalars: string[] = [];
   const pending: unknown[] = [document.contents];
   const seen = new Set<unknown>();
@@ -161,18 +165,14 @@ function metadataScalars(metadata: string): string[] | undefined {
     if (!node || seen.has(node)) continue;
     seen.add(node);
     if (isScalar(node)) {
-      scalars.push(
-        typeof node.source === "string"
-          ? node.source
-          : String(node.value ?? ""),
-      );
+      if (typeof node.value === "string") scalars.push(node.value);
     } else if (isSeq(node)) {
       pending.push(...node.items);
     } else if (isMap(node)) {
       for (const pair of node.items) pending.push(pair.key, pair.value);
     }
   }
-  return scalars;
+  return { scalars, complete: document.errors.length === 0 };
 }
 
 export class PackageError extends Error {
@@ -198,8 +198,8 @@ export function imageDestinations(markdown: string): string[] {
 /**
  * Split references into those the service certainly validates (`required`)
  * and best-effort candidates (`optional`). Optional references come only from
- * metadata the browser's YAML parser rejects although the service may accept
- * it: they are packaged when present, but never block an upload.
+ * metadata in which the browser's YAML parser reports errors although the
+ * service may accept it: they are packaged when present, never block upload.
  */
 export function imageReferences(markdown: string): {
   required: string[];
@@ -210,18 +210,11 @@ export function imageReferences(markdown: string): {
   const optional: string[] = [];
   for (const token of tokens) {
     if (token.type !== "front_matter") continue;
-    const scalars = metadataScalars(token.content);
-    if (scalars === undefined) {
-      for (const line of token.content.split("\n"))
-        optional.push(
-          ...imageSources(
-            walk(METADATA.parse(line.trim().replace(/^- /, ""), {})),
-          ),
-        );
-      continue;
-    }
+    const { scalars, complete } = metadataScalars(token.content);
     for (const scalar of scalars)
-      required.push(...imageSources(walk(METADATA.parse(scalar, {}))));
+      (complete ? required : optional).push(
+        ...imageSources(walk(METADATA.parse(scalar, {}))),
+      );
   }
   return { required, optional };
 }

@@ -146,14 +146,64 @@ def test_missing_packaging_extra_needs_guidance_only_for_image_syntax(
         {"markdown_it": None, "markweave.conversion.image_references": None},
     )
     assert load_image_references() is None
-    assert package_markdown(tmp_path / "doc.md", b"# Plain text only\n") is None
+    for markdown in (
+        b"# Plain text only\n",
+        b"---\ntitle: Report\n---\n# Title\n",
+        b"# A backslash \\ without front matter\n",
+    ):
+        assert package_markdown(tmp_path / "doc.md", markdown) is None
 
-    with pytest.raises(PackageError) as raised:
-        package_markdown(tmp_path / "doc.md", b"![x](x.png)")
-
-    assert raised.value.code == "packaging_unavailable"
-    assert raised.value.message == PACKAGING_UNAVAILABLE
+    # Image syntax, or front matter with a backslash escape that may decode into
+    # image syntax, needs the shared parser.
+    for markdown in (
+        b"![x](x.png)",
+        b'---\nimage: "\\x21[x](x.png)"\n---\n',
+        b'---\nimage: "!\\\n  [x](x.png)"\n---\n',
+    ):
+        with pytest.raises(PackageError) as raised:
+            package_markdown(tmp_path / "doc.md", markdown)
+        assert raised.value.code == "packaging_unavailable"
+        assert raised.value.message == PACKAGING_UNAVAILABLE
     assert "markweave[packaging]" in PACKAGING_UNAVAILABLE
+
+
+def test_yaml_escapes_that_decode_into_image_syntax_are_packaged(
+    tmp_path: Path,
+) -> None:
+    """Review round 2: no literal ``![`` fast path bypasses the shared parser."""
+    (tmp_path / "logo.png").write_bytes(PNG)
+    markdown = b'---\nimage: "\\x21[x](logo.png)"\n---\n# Title\n'
+    assert b"![" not in markdown
+
+    package = package_markdown(tmp_path / "doc.md", markdown)
+
+    assert package is not None
+    assert list(_members(package.content)) == [ENTRYPOINT, "logo.png"]
+
+
+def test_upload_limit_is_read_once_and_only_when_images_are_needed(
+    tmp_path: Path, mocker
+) -> None:
+    (tmp_path / "x.png").write_bytes(PNG)
+    markdown = b"![x](x.png)"
+    package = package_markdown(tmp_path / "doc.md", markdown)
+    assert package is not None
+    limit = mocker.Mock(return_value=len(package.content))
+
+    assert package_markdown(tmp_path / "doc.md", b"# None", upload_limit=limit) is None
+    limit.assert_not_called()
+    assert package_markdown(tmp_path / "doc.md", markdown, upload_limit=limit)
+    limit.assert_called_once_with()
+
+    # File sizes are checked before reading, then the built archive itself.
+    for maximum in (len(markdown) + len(PNG) - 1, len(package.content) - 1):
+        limit.return_value = maximum
+        with pytest.raises(PackageError) as raised:
+            package_markdown(tmp_path / "doc.md", markdown, upload_limit=limit)
+        assert (raised.value.code, raised.value.message) == (
+            "conversion_request_invalid",
+            "The conversion request is invalid.",
+        )
 
 
 def _members(content: bytes) -> dict[str, bytes]:
@@ -209,6 +259,7 @@ def test_markdown_without_local_images_is_uploaded_unchanged(
         (b"![a](/etc/hostname.png)", INVALID_IMAGE_PATH),
         (b"![u](notes.txt)", MISSING_IMAGE),
         (b"![d](folder.png)", MISSING_IMAGE),
+        (b"![r](./)", MISSING_IMAGE),
     ],
 )
 def test_package_rejects_missing_escaping_and_invalid_references(
@@ -242,17 +293,69 @@ def test_package_rejects_symlinks_escaping_the_markdown_directory(
         assert raised.value.message == ESCAPING_IMAGE_PATH
 
 
-def test_package_follows_symlinks_that_stay_inside_the_markdown_directory(
+def test_package_refuses_every_symlink_even_inside_the_markdown_directory(
     tmp_path: Path,
 ) -> None:
     (tmp_path / "real").mkdir()
     (tmp_path / "real" / "x.png").write_bytes(PNG)
     (tmp_path / "alias").symlink_to(tmp_path / "real", target_is_directory=True)
+    (tmp_path / "real" / "link.png").symlink_to(tmp_path / "real" / "x.png")
 
-    package = package_markdown(tmp_path / "doc.md", b"![x](alias/x.png)")
+    for markdown in (b"![x](alias/x.png)", b"![x](real/link.png)"):
+        with pytest.raises(PackageError) as raised:
+            package_markdown(tmp_path / "doc.md", markdown)
+        assert raised.value.message == ESCAPING_IMAGE_PATH
 
-    assert package is not None
-    assert _members(package.content)["alias/x.png"] == PNG
+
+def test_ancestor_swapped_for_a_symlink_after_resolution_is_refused(
+    tmp_path: Path, mocker
+) -> None:
+    """Security regression: no realpath check followed by a pathname open."""
+    root = tmp_path / "root"
+    (root / "assets").mkdir(parents=True)
+    (root / "assets" / "logo.png").write_bytes(PNG)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "logo.png").write_bytes(b"\x89PNG outside secret")
+    resolve = markdown_package._referenced_paths
+
+    def swap_after_resolution(*arguments: object) -> list[PurePosixPath]:
+        paths = resolve(*arguments)  # ty: ignore[invalid-argument-type]
+        (root / "assets").rename(root / "moved")
+        (root / "assets").symlink_to(outside, target_is_directory=True)
+        return paths
+
+    mocker.patch.object(
+        markdown_package, "_referenced_paths", side_effect=swap_after_resolution
+    )
+
+    with pytest.raises(PackageError) as raised:
+        package_markdown(root / "doc.md", b"![l](assets/logo.png)")
+
+    assert raised.value.message == ESCAPING_IMAGE_PATH
+
+
+def test_image_reads_bound_size_and_detect_concurrent_growth(
+    tmp_path: Path, mocker
+) -> None:
+    (tmp_path / "x.png").write_bytes(PNG)
+    fstat = os.fstat
+
+    def smaller(descriptor: int) -> os.stat_result:
+        values = list(fstat(descriptor))
+        values[6] = len(PNG) - 1
+        return os.stat_result(values)
+
+    mocker.patch.object(markdown_package.os, "fstat", side_effect=smaller)
+    with pytest.raises(PackageError) as raised:
+        package_markdown(tmp_path / "doc.md", b"![x](x.png)")
+    assert raised.value.message == MISSING_IMAGE
+
+
+def test_unreadable_markdown_directory_is_a_missing_image(tmp_path: Path) -> None:
+    with pytest.raises(PackageError) as raised:
+        package_markdown(tmp_path / "absent" / "doc.md", b"![x](x.png)")
+    assert raised.value.message == MISSING_IMAGE
 
 
 def test_package_rejects_case_colliding_archive_paths(tmp_path: Path) -> None:
@@ -267,12 +370,20 @@ def test_package_rejects_case_colliding_archive_paths(tmp_path: Path) -> None:
 
 def test_image_read_maps_loops_and_other_errors(tmp_path: Path, mocker) -> None:
     (tmp_path / "x.png").write_bytes(PNG)
-    opener = mocker.patch.object(markdown_package.os, "open")
+    real_open = os.open
+    failure: list[int] = []
+
+    def opener(path: object, flags: int, *args: object, **kwargs: object) -> int:
+        if kwargs.get("dir_fd") is not None:
+            raise OSError(failure[0], os.strerror(failure[0]))
+        return real_open(path, flags, *args, **kwargs)  # ty: ignore[invalid-argument-type]
+
+    mocker.patch.object(markdown_package.os, "open", side_effect=opener)
     for code, message in (
         (errno.ELOOP, ESCAPING_IMAGE_PATH),
         (errno.EACCES, MISSING_IMAGE),
     ):
-        opener.side_effect = OSError(code, os.strerror(code))
+        failure[:] = [code]
         with pytest.raises(PackageError) as raised:
             package_markdown(tmp_path / "doc.md", b"![x](x.png)")
         assert raised.value.message == message
@@ -284,6 +395,18 @@ def test_build_package_places_markdown_at_the_approved_entrypoint() -> None:
     )
 
     assert list(_members(content)) == [ENTRYPOINT, "a.png", "z.png"]
+
+
+def _options() -> ConversionHttpResponse:
+    return ConversionHttpResponse(
+        200,
+        {
+            "conversion_upload_max_bytes": 1_000_000,
+            "resolved_template": None,
+            "template_version_id": None,
+            "selection_source": "pandoc_default",
+        },
+    )
 
 
 def _accepted() -> ConversionHttpResponse:
@@ -324,6 +447,7 @@ def test_convert_uploads_a_package_for_markdown_with_local_images(
     )
     client = mocker.Mock()
     client.submit.return_value = _accepted()
+    client.options.return_value = _options()
     mocker.patch.object(conversions, "_client", return_value=client)
 
     assert main(("convert", str(source))) == 0
@@ -367,3 +491,22 @@ def test_convert_can_upload_markdown_unchanged_without_packaging(
     assert "packaged_images" not in json.loads(capsys.readouterr().out)
     assert client.submit.call_args.args[0] == b"![x](absent.png)"
     assert client.submit.call_args.kwargs["source_kind"] == "md"
+
+
+def test_a_file_used_as_a_directory_is_a_missing_image(tmp_path: Path, mocker) -> None:
+    (tmp_path / "file.png").write_bytes(PNG)
+    for markdown in (b"![x](file.png/x.png)",):
+        with pytest.raises(PackageError) as raised:
+            package_markdown(tmp_path / "doc.md", markdown)
+        assert raised.value.message == MISSING_IMAGE
+    directory = os.open(tmp_path, os.O_RDONLY)
+    try:
+        assert markdown_package._is_symlink("absent", directory) is False
+    finally:
+        os.close(directory)
+    mocker.patch.object(
+        markdown_package.os, "stat", side_effect=OSError(errno.EIO, "io")
+    )
+    with pytest.raises(PackageError) as raised:
+        package_markdown(tmp_path / "doc.md", b"![x](file.png/x.png)")
+    assert raised.value.message == MISSING_IMAGE
