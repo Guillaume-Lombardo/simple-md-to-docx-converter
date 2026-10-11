@@ -106,7 +106,8 @@ const question = {
   id: "00000000-0000-4000-8000-000000000501",
   draft_id: draft.id,
   model_step_id: "00000000-0000-4000-8000-000000000401",
-  base_version: 2,
+  // Creating a review item advances the draft from its base version.
+  base_version: draft.version - 1,
   state: "pending",
   text: "Which date should the report use?",
   answer_message_id: null,
@@ -117,7 +118,7 @@ const question = {
 const proposal = {
   id: "00000000-0000-4000-8000-000000000601",
   draft_id: draft.id,
-  base_version: 2,
+  base_version: draft.version - 1,
   state: "pending",
   proposed_value: "Model suggestion",
   decided_value: null,
@@ -674,6 +675,87 @@ test("an active reconciliation failure reports the failed refresh", async () => 
     ),
   ).toBeVisible();
   expect(api.questions).toHaveBeenCalledTimes(2);
+});
+
+const advancedDraft = {
+  ...draft,
+  version: draft.version + 1,
+  etag: '"draft-3"',
+};
+const committedProposal = { ...proposal, base_version: draft.version };
+
+test("a suggestion committed during the workspace read is decided with the advanced draft ETag", async () => {
+  const api = setup();
+  api.draft.mockResolvedValueOnce(draft).mockResolvedValue(advancedDraft);
+  api.proposals.mockResolvedValue([committedProposal]);
+  fireEvent.click(await screen.findByText(/Suggestion · pending/));
+  expect(api.draft).toHaveBeenCalledTimes(2);
+  expect(api.proposals).toHaveBeenCalledTimes(2);
+  fireEvent.click(screen.getByRole("button", { name: "Reject" }));
+  await waitFor(() =>
+    expect(api.decide).toHaveBeenCalledWith(
+      advancedDraft,
+      committedProposal.id,
+      "rejected",
+      undefined,
+    ),
+  );
+});
+
+test("a step completed after the workspace read reloads the draft with its suggestion", async () => {
+  sessionStorage.clear();
+  sessionStorage.setItem(
+    `composer:step:${user.id}:${draft.id}`,
+    question.model_step_id,
+  );
+  const api = setup({ preserveStorage: true });
+  api.draft.mockResolvedValueOnce(draft).mockResolvedValue(advancedDraft);
+  api.proposals
+    .mockResolvedValueOnce([])
+    .mockResolvedValue([committedProposal]);
+  api.step.mockResolvedValue({
+    id: question.model_step_id,
+    draft_id: draft.id,
+    connection_id: connection.id,
+    model_identity: "small-model",
+    intent: "proposal",
+    base_version: draft.version,
+    status: "completed",
+    proposal_id: committedProposal.id,
+    question_id: null,
+    answered_question_id: null,
+    error_code: null,
+    created_at: "2026-09-23T12:00:00Z",
+    updated_at: "2026-09-23T12:00:00Z",
+  });
+  fireEvent.click(await screen.findByText(/Suggestion · pending/));
+  expect(api.draft).toHaveBeenCalledTimes(2);
+  expect(api.proposals).toHaveBeenCalledTimes(2);
+  fireEvent.click(screen.getByRole("button", { name: "Accept" }));
+  await waitFor(() =>
+    expect(api.decide).toHaveBeenCalledWith(
+      advancedDraft,
+      committedProposal.id,
+      "accepted",
+      undefined,
+    ),
+  );
+});
+
+test("a persistently torn workspace read keeps the older ETag for server rejection", async () => {
+  const api = setup();
+  api.proposals.mockResolvedValue([committedProposal]);
+  fireEvent.click(await screen.findByText(/Suggestion · pending/));
+  expect(api.proposals).toHaveBeenCalledTimes(3);
+  fireEvent.click(screen.getByRole("button", { name: "Reject" }));
+  await waitFor(() =>
+    expect(api.decide).toHaveBeenCalledWith(
+      draft,
+      committedProposal.id,
+      "rejected",
+      undefined,
+    ),
+  );
 });
 
 test("an unsent question purpose and reviewed text survive a browser remount", async () => {

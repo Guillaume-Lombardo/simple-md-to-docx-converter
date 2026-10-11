@@ -58,3 +58,23 @@ T80 removed the migration-specific CI steps; current installations use the revie
 Historical release-evidence recovery selects `pnpm-lock.yaml` when present at the release source
 SHA and otherwise binds the old `web/package-lock.json`. Retained npm-era releases remain
 recoverable without changing the current workspace or rebuilding their images.
+
+## Browser Markdown packaging dependencies
+
+T104 (owner decision B2, 2026-10-10) adds these exact production dependencies to `web/` so the
+2docx and 2pptx workspaces find Markdown image references the way the service does:
+
+| Package | Version | Licence | Reason |
+| --- | --- | --- | --- |
+| `markdown-it` | 15.0.2 | MIT | JavaScript original of the service's markdown-it-py parser. 15.0.2 is the first release whose entity decoding matches the service (14.x decodes legacy entity prefixes such as `&not` inside `&notanentity;`). Ships its own types. |
+| `markdown-it-footnote` | 4.0.0 | MIT | Original of the service's footnote plugin; images inside footnote definitions are validated by the service. |
+| `yaml` | 2.9.0 | ISC | Reads front-matter metadata as a node graph without constructing tagged values, like PyYAML's `compose`, so images in metadata scalars are found. |
+
+The service's front-matter rule (mdit-py-plugins) is ported in `web/src/conversion/packaging.ts`
+instead of adding `markdown-it-front-matter`, whose unclosed-block handling differs from the
+service. markdown-it's own transitive dependencies are `argparse` 3.0.2 (PSF-2.0, used only by its
+command-line entry point), `entities` 8.0.0 (BSD-2-Clause), `linkify-it` 6.1.0, `mdurl` 2.1.0,
+`punycode.js` 2.3.1, and `uc.micro` 3.0.0 (MIT). Every version was published at least two weeks
+before adoption. Parity is enforced by `web/tests/conversion-packaging.test.ts` against
+`tests/fixtures/markdown-image-references.json`, which `tests/markdown_image_references.py`
+generates from the service parser.
