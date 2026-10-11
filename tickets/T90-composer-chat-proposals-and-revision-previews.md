@@ -107,6 +107,16 @@ T89.
     by PR #269 (`57521ed62eb19558b945e1109934bcc6bb967ac8`) after independent focused reviews.
     PR CI run 35961177550 and main CI run 35964148193 passed, including both final
     rootless-image E2E profiles and `container`.
+  - The Composer decision flows were requalified on `main` after the T104 merge. Main CI run
+    38142225187 on `d1049e8` had failed `e2e-standalone` twice in the Composer accept/reject
+    steps. The cause was a Composer workspace race that predates T104: the workspace read the
+    draft, proposals, and questions in parallel, so it could show a new proposal with an older
+    draft ETag, and the decision request returned HTTP 412. PR #292 fixed the race, so the
+    workspace reads one consistent draft snapshot before any decision; it was squash-merged as
+    `6ee903b6df9b7db2968ad9d24a53ef3346bcf5ac` after independent review approved it with no
+    findings. Full-suite main CI run 38150642257 at `6ee903b` passed, including both final
+    rootless-image E2E profiles, `container`, `compose`, `document-engines`, and both storage
+    profiles.
   - Measured fidelity, DOCX pagination limits, complete-file download/parse behavior, hostile-
     document containment, no egress, and same-source visual comparisons are documented in
     `docs/composer-preview.md`. That document keeps varied document fidelity, true process peak
@@ -141,10 +151,15 @@ T89.
     returning 200, and running image IDs independently confirmed.
   - Limitations and follow-ups: restoring the pre-cutover schema-24 recovery set with the new
     image is refused, a known defect tracked by T128 / G1L-681 (PR #290), so a real rollback
-    uses the cold copy, as the docker-box deployment notes document. The broker certificates
-    expire on 2026-10-19 at 14:36 UTC and were not renewed; renewal is an owner follow-up.
-    Interactive browser login was not exercised on the live instance; API login was.
-    Intermittent final-image E2E scanner-outage timeouts are tracked by T130 / G1L-683.
+    uses the cold copy, as the docker-box deployment notes document. The owner set the rollback
+    window to 2026-10-18. The broker mTLS certificates were renewed on 2026-10-11 and now expire
+    on 2027-10-11 at 14:02 UTC. The owner then checked the browser UI. One Composer generation
+    was refused at validation with "Markdown input contains raw HTML." because the draft
+    contained `<stack>` outside a code span; the refusal is correct, but the UI does not show
+    the failure reason, which follow-up T131 / G1L-684 covers. Distributed restore also refuses
+    recovery sets that contain jobs on superseded template versions; this defect predates the
+    deployment and is tracked by T132 / G1L-685. Intermittent final-image E2E scanner-outage
+    timeouts are tracked by T130 / G1L-683.
 
 ## Synchronization
 

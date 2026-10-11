@@ -188,10 +188,15 @@ T88.
     returning 200, and running image IDs independently confirmed.
   - Limitations and follow-ups: restoring the pre-cutover schema-24 recovery set with the new
     image is refused, a known defect tracked by T128 / G1L-681 (PR #290), so a real rollback
-    uses the cold copy, as the docker-box deployment notes document. The broker certificates
-    expire on 2026-10-19 at 14:36 UTC and were not renewed; renewal is an owner follow-up.
-    Interactive browser login was not exercised on the live instance; API login was.
-    Intermittent final-image E2E scanner-outage timeouts are tracked by T130 / G1L-683.
+    uses the cold copy, as the docker-box deployment notes document. The owner set the rollback
+    window to 2026-10-18. The broker mTLS certificates were renewed on 2026-10-11 and now expire
+    on 2027-10-11 at 14:02 UTC. The owner then checked the browser UI. One Composer generation
+    was refused at validation with "Markdown input contains raw HTML." because the draft
+    contained `<stack>` outside a code span; the refusal is correct, but the UI does not show
+    the failure reason, which follow-up T131 / G1L-684 covers. Distributed restore also refuses
+    recovery sets that contain jobs on superseded template versions; this defect predates the
+    deployment and is tracked by T132 / G1L-685. Intermittent final-image E2E scanner-outage
+    timeouts are tracked by T130 / G1L-683.
   - Real LiteLLM and provider qualification remains assigned to T93, as recorded on 2026-09-23
     and in T93's acceptance criteria; it is not a T89 criterion.
 

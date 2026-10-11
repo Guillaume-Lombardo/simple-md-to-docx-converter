@@ -2,7 +2,7 @@
 ticket: T104
 linear_id: G1L-623
 linear_url: https://linear.app/g1lom/issue/G1L-623/t104-accept-markdown-with-local-images-without-a-hand-built-zip
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -84,7 +84,16 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
   failures, but three of the four `e2e-standalone` attempts on T104-containing heads failed this
   way, so a regression is not excluded. Remaining: diagnose or stabilize the Composer
   `e2e-standalone` failures and obtain a passing main CI run that includes `d1049e8`. T104 stays
-  In Progress in this mirror, although Linear G1L-623 is already Done.
+  In Progress, matching Linear G1L-623.
+- 2026-10-11: Completed and verified on `main`. The `e2e-standalone` failures came from a
+  Composer workspace race that predates T104 and was only exposed by a timing change. The
+  workspace read the draft, proposals, and questions in parallel, so a new proposal could appear
+  alongside an older draft ETag, and the decision request returned HTTP 412. PR #292 makes the
+  workspace read one consistent draft snapshot before any decision; it was squash-merged as
+  `6ee903b6df9b7db2968ad9d24a53ef3346bcf5ac` after independent review approved it with no
+  findings. Full-suite main CI run 38150642257 (`workflow_dispatch`) at `6ee903b`, which
+  contains PR #283 and PR #292, passed every job, including both final-image E2E profiles,
+  `container`, `compose`, `document-engines`, and both storage profiles. Linear G1L-623 is Done.
 
 ## Synchronization
 
