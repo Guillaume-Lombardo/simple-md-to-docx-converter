@@ -2,7 +2,7 @@
 ticket: T103
 linear_id: G1L-622
 linear_url: https://linear.app/g1lom/issue/G1L-622/t103-document-and-test-math-rendering
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -61,6 +61,15 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
     environment reproduces the committed T11 golden byte for byte. Hosted CI (document-engines
     and container domains) remains the authoritative confirmation. Pandoc's malformed-math
     warning is not surfaced to users because the adapter discards engine output.
+- 2026-10-11: Completed and verified on `main`. PR #286 was squash-merged as
+  `7e4f81ab84aa665857bb58326092fcf572f2e43c` from head `ba2dcc1` after independent review
+  round 1 approved it with no findings. Main CI run 38132219791 passed on attempt 2, including
+  `document-engines`, `container`, and both final-image E2E profiles, which confirms the
+  locally generated PDF goldens and the LibreOffice Math smoke check on hosted runners.
+  Attempt 1 failed only in `e2e-distributed` on the intermittent scanner-outage timeouts
+  tracked by T130 / G1L-683. Linear G1L-622 is Done. Documented limitations: Pandoc
+  malformed-math warnings are discarded, so the literal fallback is silent to users, and PPTX
+  math uses `a14:m` without an `mc:Fallback`.
 
 ## Synchronization
 

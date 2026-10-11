@@ -2,7 +2,7 @@
 ticket: T104
 linear_id: G1L-623
 linear_url: https://linear.app/g1lom/issue/G1L-623/t104-accept-markdown-with-local-images-without-a-hand-built-zip
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -70,6 +70,30 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
   is never reopened by pathname. Regressions replace the Markdown directory and an ancestor with
   an outward symbolic link during the upload-limit lookup and prove that only the anchored tree's
   bytes are packaged. Awaiting hosted CI and independent review.
+- 2026-10-11: Merged; verification on `main` is incomplete. PR #283 was squash-merged as
+  `d1049e8a077e3a661ad7915723d6084bd421e7fa` from head `f53c245`, a `main`-update merge of
+  reviewed head `47362c9`. Independent review round 4 approved it with no findings after the
+  round 1-3 findings were fixed and verified, and all review threads were resolved. All 20 PR
+  checks passed in CI run 38134826813 on attempt 2. In attempt 1, both final-image E2E
+  profiles failed on intermittent timeouts. Main CI run 38142225187 on `d1049e8` failed
+  `e2e-standalone`, and so the gate, on both attempt 1 and attempt 2; every other job passed.
+  Both failures are in the Composer browser test `browser-next-composer-real.test.mjs`, not in
+  the local-image tests. Attempt 1 timed out waiting for `Suggestion rejected`, the same failure
+  seen in the PR's first `e2e-standalone` attempt. Attempt 2 timed out waiting for `Your decision
+  was saved`. The T104 change itself (local-image packaging) has not been shown to cause these
+  failures, but three of the four `e2e-standalone` attempts on T104-containing heads failed this
+  way, so a regression is not excluded. Remaining: diagnose or stabilize the Composer
+  `e2e-standalone` failures and obtain a passing main CI run that includes `d1049e8`. T104 stays
+  In Progress, matching Linear G1L-623.
+- 2026-10-11: Completed and verified on `main`. The `e2e-standalone` failures came from a
+  Composer workspace race that predates T104 and was only exposed by a timing change. The
+  workspace read the draft, proposals, and questions in parallel, so a new proposal could appear
+  alongside an older draft ETag, and the decision request returned HTTP 412. PR #292 makes the
+  workspace read one consistent draft snapshot before any decision; it was squash-merged as
+  `6ee903b6df9b7db2968ad9d24a53ef3346bcf5ac` after independent review approved it with no
+  findings. Full-suite main CI run 38150642257 (`workflow_dispatch`) at `6ee903b`, which
+  contains PR #283 and PR #292, passed every job, including both final-image E2E profiles,
+  `container`, `compose`, `document-engines`, and both storage profiles. Linear G1L-623 is Done.
 
 ## Synchronization
 
