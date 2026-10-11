@@ -70,6 +70,7 @@ DOMAIN_PATTERNS: Mapping[str, tuple[str, ...]] = {
         "src/markweave/conversion/local_settings.py",
         "examples/local-conversion.env",
         "tests/e2e/local-conversion-final-image.sh",
+        "tests/e2e/fixtures/local-publication-sync/**",
         "src/markweave/recovery*.py",
         "src/markweave/reversions/**",
         "src/markweave/broker/**",
