@@ -61,6 +61,20 @@
       "provenance": {"generator": "project-authored Markdown", "license": "CC0-1.0"}
     },
     {
+      "id": "math-equations", "categories": ["math"], "kind": "file",
+      "purpose": "Cover inline and display TeX math rendered as native Office equations, next to literal raw TeX.", "future_owner": "T103",
+      "entrypoint": "math/document.md", "files": ["math/document.md"],
+      "expected": {"inline_equations": 2, "display_equations": 2, "literal_raw_tex": ["\\textbf{bold}", "\\emph{text},"]},
+      "provenance": {"generator": "project-authored Markdown", "license": "CC0-1.0"}
+    },
+    {
+      "id": "math-malformed-tex", "categories": ["math"], "kind": "file",
+      "purpose": "Cover malformed TeX math that Pandoc keeps as literal source text without failing.", "future_owner": "T103",
+      "entrypoint": "math/malformed.md", "files": ["math/malformed.md"],
+      "expected": {"inline_equations": 1, "display_equations": 0, "literal_fallbacks": ["$x^$", "$\\undefinedmacro{x}$", "$$\\begin{matrix} a$$"]},
+      "provenance": {"generator": "project-authored Markdown", "license": "CC0-1.0"}
+    },
+    {
       "id": "mermaid-basic", "categories": ["mermaid"], "kind": "file",
       "purpose": "Provide a small offline Mermaid diagram for later renderer tests.", "future_owner": "T09",
       "entrypoint": "mermaid/diagram.md", "files": ["mermaid/diagram.md"],

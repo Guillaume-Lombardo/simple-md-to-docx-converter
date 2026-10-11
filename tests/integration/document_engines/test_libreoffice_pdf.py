@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from pathlib import Path
 
+import pypdfium2 as pdfium
 import pytest
 from PIL import Image
 
@@ -183,15 +184,26 @@ def test_concurrent_real_conversions_use_unique_profiles(tmp_path: Path) -> None
 
 @pytest.mark.requires_pandoc
 @pytest.mark.requires_libreoffice
-def test_real_pdf_matches_locked_structural_raster_golden(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("markdown_path", "golden_root"),
+    (
+        (Path("tests/corpus/pdf/document.md"), Path("tests/corpus/pdf/golden")),
+        (
+            Path("tests/corpus/math/document.md"),
+            Path("tests/corpus/math/golden/pdf"),
+        ),
+    ),
+    ids=("structures", "math"),
+)
+def test_real_pdf_matches_locked_structural_raster_golden(
+    tmp_path: Path, markdown_path: Path, golden_root: Path
+) -> None:
     workspace = _workspace(tmp_path)
     reference = _reference_docx()
-    markdown_path = Path("tests/corpus/pdf/document.md")
     markdown = markdown_path.read_bytes()
     artifact = _converter(workspace).convert(
         _docx(workspace, reference, markdown.decode("utf-8")), _trace(reference)
     )
-    golden_root = Path("tests/corpus/pdf/golden")
     manifest = json.loads((golden_root / "manifest.json").read_text(encoding="utf-8"))
     assert set(manifest) == {
         "dpi",
@@ -241,6 +253,60 @@ def test_real_pdf_matches_locked_structural_raster_golden(tmp_path: Path) -> Non
         GOLDEN_RASTER_LIMITS,
     )
     assert comparison.matches, comparison
+
+
+def _pdf_text(pdf: bytes) -> str:
+    document = pdfium.PdfDocument(pdf)
+    try:
+        pages = [document[index] for index in range(len(document))]
+        text_pages = [page.get_textpage() for page in pages]
+        try:
+            return "\n".join(text.get_text_range() for text in text_pages)
+        finally:
+            for text in text_pages:
+                text.close()
+            for page in pages:
+                page.close()
+    finally:
+        document.close()
+
+
+@pytest.mark.requires_pandoc
+@pytest.mark.requires_libreoffice
+@pytest.mark.parametrize(
+    ("markdown_path", "expected_fragments"),
+    (
+        (
+            Path("tests/corpus/math/document.md"),
+            (
+                "\N{GREEK SMALL LETTER ALPHA}",
+                "\N{GREEK SMALL LETTER BETA}",
+                "\N{INTEGRAL}",
+                "\N{N-ARY SUMMATION}",
+                "\\textbf{bold}",
+            ),
+        ),
+        (
+            Path("tests/corpus/math/malformed.md"),
+            ("$x^$", "$\\undefinedmacro{x}$", "$$\\begin{matrix} a$$"),
+        ),
+    ),
+    ids=("equations", "malformed-literal-fallback"),
+)
+def test_real_pdf_keeps_equations_and_malformed_tex_literals(
+    tmp_path: Path, markdown_path: Path, expected_fragments: tuple[str, ...]
+) -> None:
+    """Equations disappear from the PDF when LibreOffice Math is missing (T103)."""
+
+    workspace = _workspace(tmp_path)
+    reference = _reference_docx()
+    artifact = _converter(workspace).convert(
+        _docx(workspace, reference, markdown_path.read_text(encoding="utf-8")),
+        _trace(reference),
+    )
+    text = _pdf_text(artifact.pdf)
+    for fragment in expected_fragments:
+        assert fragment in text
 
 
 @pytest.mark.parametrize(
