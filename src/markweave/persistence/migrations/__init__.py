@@ -6,6 +6,7 @@ from typing import Any
 
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from alembic.util.exc import CommandError
 from sqlalchemy import Connection, Engine, text
 from sqlalchemy.exc import SQLAlchemyError
@@ -63,14 +64,37 @@ def run_migration_environment(context: Any) -> None:
         context.run_migrations()
 
 
+def _configuration() -> Config:
+    configuration = Config()
+    configuration.set_main_option("script_location", str(Path(__file__).parent))
+    return configuration
+
+
+def migration_lineage() -> tuple[str, ...]:
+    """Return every known revision from the base to the single current head."""
+
+    try:
+        script = ScriptDirectory.from_config(_configuration())
+        if len(script.get_heads()) != 1:
+            raise PersistenceError
+        return tuple(
+            reversed(
+                [
+                    revision.revision
+                    for revision in script.walk_revisions("base", "heads")
+                ]
+            )
+        )
+    except CommandError:
+        raise PersistenceError from None
+
+
 def _migrate_database(
     engine: Engine, revision: str, *, downgrade: bool, observe: bool = False
 ) -> MigrationResult | None:
     """Run one application-managed Alembic direction under the profile lock."""
 
-    script_location = Path(__file__).parent
-    configuration = Config()
-    configuration.set_main_option("script_location", str(script_location))
+    configuration = _configuration()
     try:
         with engine.begin() as connection:
             if connection.dialect.name == "sqlite":
@@ -97,6 +121,32 @@ def upgrade_database(engine: Engine) -> None:
     _migrate_database(engine, "head", downgrade=False)
 
 
+def upgrade_database_to(engine: Engine, revision: str) -> None:
+    """Upgrade to one explicit known revision, never beyond it."""
+
+    if not revision.strip():
+        raise ValueError("Migration revision must not be blank")
+    _migrate_database(engine, revision, downgrade=False)
+
+
+def upgrade_connection(connection: Connection, revision: str) -> None:
+    """Upgrade inside a caller-owned transaction so the caller decides atomicity."""
+
+    if not revision.strip():
+        raise ValueError("Migration revision must not be blank")
+    configuration = _configuration()
+    try:
+        if connection.dialect.name == "postgresql":
+            connection.execute(
+                text("SELECT pg_advisory_xact_lock(:lock_id)"),
+                {"lock_id": POSTGRES_MIGRATION_LOCK},
+            )
+        configuration.attributes["connection"] = connection
+        command.upgrade(configuration, revision)
+    except CommandError, SQLAlchemyError:
+        raise PersistenceError from None
+
+
 def upgrade_database_observed(engine: Engine) -> MigrationResult:
     """Upgrade and report the locked revision transition for operator output."""
     result = _migrate_database(engine, "head", downgrade=False, observe=True)
@@ -116,7 +166,10 @@ def downgrade_database(engine: Engine, revision: str) -> None:
 __all__ = [
     "MigrationResult",
     "downgrade_database",
+    "migration_lineage",
     "run_migration_environment",
+    "upgrade_connection",
     "upgrade_database",
     "upgrade_database_observed",
+    "upgrade_database_to",
 ]

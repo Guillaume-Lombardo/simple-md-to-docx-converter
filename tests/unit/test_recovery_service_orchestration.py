@@ -86,6 +86,7 @@ def test_distributed_service_binds_identities_and_restores_with_cleanup(
         "object-evidence",
         frozenset({"uploads/a/b"}),
     )
+    mocker.patch.object(service._postgresql, "preflight", return_value="head")
     pg_restore = mocker.patch.object(
         service._postgresql, "restore", return_value="db-evidence"
     )
@@ -119,6 +120,47 @@ def test_distributed_service_binds_identities_and_restores_with_cleanup(
             )
         )
     s3.remove.assert_called_with(frozenset({"uploads/a/b"}))
+
+
+def test_distributed_restore_refuses_unknown_schema_before_bucket_writes(
+    tmp_path: Path, mocker
+) -> None:
+    service = RecoveryService()
+    manifest, s3_type = _distributed_backup(service, tmp_path, mocker)
+    s3_type.reset_mock()
+    pg_restore = mocker.patch.object(service._postgresql, "restore")
+    with pytest.raises(RecoveryError, match="payload is invalid"):
+        service.restore(
+            RestoreRequest(
+                StorageProfile.DISTRIBUTED,
+                (tmp_path / "sets" / manifest.backup_id).resolve(),
+                30,
+                "isolated-window",
+                database_url="postgresql://target",
+                s3=S3Configuration("target", None, None),
+            )
+        )
+    preflight = mocker.patch.object(
+        service._postgresql,
+        "preflight",
+        side_effect=RecoveryError(
+            "Recovery set schema revision is unknown to this release"
+        ),
+    )
+    with pytest.raises(RecoveryError, match="unknown to this release"):
+        service.restore(
+            RestoreRequest(
+                StorageProfile.DISTRIBUTED,
+                (tmp_path / "sets" / manifest.backup_id).resolve(),
+                30,
+                "isolated-window",
+                database_url="postgresql://target",
+                s3=S3Configuration("target", None, None),
+            )
+        )
+    preflight.assert_called_once()
+    s3_type.assert_not_called()
+    pg_restore.assert_not_called()
 
 
 @pytest.mark.parametrize(

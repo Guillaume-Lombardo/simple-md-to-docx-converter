@@ -49,7 +49,7 @@ and never reopens the path. Pandoc revalidates the manifest before materializati
 The Python adapter does not claim to create network isolation. The runtime must deny network access,
 keep Chrome's sandbox enabled, and provide the checksum-locked T00 seccomp profile. `--no-sandbox`
 and equivalent relaxations are never used. T09 integration runs exercise the real Mermaid CLI
-11.16.0, Chrome 151.0.7922.173, Pillow normalization, Pandoc, and OpenXML media path. The rootless
+11.17.0, Chrome 151.0.7922.173, Pillow normalization, Pandoc, and OpenXML media path. The rootless
 Podman proof uses an arbitrary UID, read-only root, no network, no capabilities, no-new-privileges,
 bounded PID/memory/CPU/tmpfs resources, and the T00 profile. OpenShift proof remains deferred.
 
