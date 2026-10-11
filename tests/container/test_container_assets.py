@@ -602,6 +602,24 @@ def test_smoke_enforces_rootless_read_only_bounded_runtime() -> None:
         assert contract in smoke
 
 
+def test_smoke_fails_when_libreoffice_math_drops_equations_from_pdf() -> None:
+    smoke = Path("scripts/container/smoke.sh").read_text(encoding="utf-8")
+    math_check = smoke[smoke.index("/work/math.md") :]
+
+    assert (
+        "--from=commonmark_x+pipe_tables+footnotes+attributes+yaml_metadata_block-raw_html"
+        in math_check
+    )
+    assert "--convert-to pdf:writer_pdf_Export --outdir /work /work/math.docx" in (
+        math_check
+    )
+    assert 'if b"<m:oMath" not in archive.read("word/document.xml"):' in math_check
+    assert 'PdfReader("/work/math.pdf")' in math_check
+    assert '("\\u03b1", "\\u03b2", "\\u222b")' in math_check
+    assert "the LibreOffice Math module is required." in math_check
+    assert "PYTHON\n  ! touch /opt/md-converter/forbidden" in math_check
+
+
 @pytest.mark.parametrize(
     ("manifest", "mode"),
     [

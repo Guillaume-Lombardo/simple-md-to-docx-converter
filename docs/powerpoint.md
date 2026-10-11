@@ -19,6 +19,12 @@ preview warnings identify ignored styling. The PowerPoint reference controls app
 Raw HTML and remote images are rejected. Mermaid uses the existing local renderer.
 Pandoc `notes`, `columns` and `column` fenced blocks are supported.
 
+Inline `$...$` and display `$$...$$` math become native, editable PowerPoint equations (OMML).
+Raw TeX outside dollar delimiters stays ordinary text. Malformed TeX, such as `$x^$`, does not fail
+the conversion: the original source, including its dollar delimiters, stays on the slide as literal
+text. Pandoc writes a slide body that contains math as Office 2010 drawing content without a
+fallback, so an application that does not support that extension may omit the whole text box.
+
 ```markdown
 ---
 marp: true

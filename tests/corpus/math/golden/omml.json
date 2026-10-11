@@ -1,0 +1,27 @@
+{
+  "equations": [
+    {
+      "display": false,
+      "text": "E=mc2",
+      "xml": "<n0:oMath xmlns:n0=\"http://schemas.openxmlformats.org/officeDocument/2006/math\"><n0:r><n0:t>E</n0:t></n0:r><n0:r><n0:rPr><n0:sty n0:val=\"p\"></n0:sty></n0:rPr><n0:t>=</n0:t></n0:r><n0:r><n0:t>m</n0:t></n0:r><n0:sSup><n0:e><n0:r><n0:t>c</n0:t></n0:r></n0:e><n0:sup><n0:r><n0:t>2</n0:t></n0:r></n0:sup></n0:sSup></n0:oMath>"
+    },
+    {
+      "display": false,
+      "text": "\u03b11+\u03b22\u2264x",
+      "xml": "<n0:oMath xmlns:n0=\"http://schemas.openxmlformats.org/officeDocument/2006/math\"><n0:sSub><n0:e><n0:r><n0:t>\u03b1</n0:t></n0:r></n0:e><n0:sub><n0:r><n0:t>1</n0:t></n0:r></n0:sub></n0:sSub><n0:r><n0:rPr><n0:sty n0:val=\"p\"></n0:sty></n0:rPr><n0:t>+</n0:t></n0:r><n0:sSup><n0:e><n0:r><n0:t>\u03b2</n0:t></n0:r></n0:e><n0:sup><n0:r><n0:t>2</n0:t></n0:r></n0:sup></n0:sSup><n0:r><n0:rPr><n0:sty n0:val=\"p\"></n0:sty></n0:rPr><n0:t>\u2264</n0:t></n0:r><n0:rad><n0:radPr><n0:degHide n0:val=\"on\"></n0:degHide></n0:radPr><n0:deg></n0:deg><n0:e><n0:r><n0:t>x</n0:t></n0:r></n0:e></n0:rad></n0:oMath>"
+    },
+    {
+      "display": true,
+      "text": "01x\u2009dx=12",
+      "xml": "<n0:oMathPara xmlns:n0=\"http://schemas.openxmlformats.org/officeDocument/2006/math\"><n0:oMathParaPr><n0:jc n0:val=\"center\"></n0:jc></n0:oMathParaPr><n0:oMath><n0:nary><n0:naryPr><n0:chr n0:val=\"\u222b\"></n0:chr><n0:limLoc n0:val=\"subSup\"></n0:limLoc><n0:subHide n0:val=\"off\"></n0:subHide><n0:supHide n0:val=\"off\"></n0:supHide></n0:naryPr><n0:sub><n0:r><n0:t>0</n0:t></n0:r></n0:sub><n0:sup><n0:r><n0:t>1</n0:t></n0:r></n0:sup><n0:e><n0:r><n0:t>x</n0:t></n0:r></n0:e></n0:nary><n0:r><n0:t>\u2009</n0:t></n0:r><n0:r><n0:t>d</n0:t></n0:r><n0:r><n0:t>x</n0:t></n0:r><n0:r><n0:rPr><n0:sty n0:val=\"p\"></n0:sty></n0:rPr><n0:t>=</n0:t></n0:r><n0:f><n0:fPr><n0:type n0:val=\"bar\"></n0:type></n0:fPr><n0:num><n0:r><n0:t>1</n0:t></n0:r></n0:num><n0:den><n0:r><n0:t>2</n0:t></n0:r></n0:den></n0:f></n0:oMath></n0:oMathPara>"
+    },
+    {
+      "display": true,
+      "text": "k=1nk=n(n+1)2",
+      "xml": "<n0:oMathPara xmlns:n0=\"http://schemas.openxmlformats.org/officeDocument/2006/math\"><n0:oMathParaPr><n0:jc n0:val=\"center\"></n0:jc></n0:oMathParaPr><n0:oMath><n0:nary><n0:naryPr><n0:chr n0:val=\"\u2211\"></n0:chr><n0:limLoc n0:val=\"undOvr\"></n0:limLoc><n0:subHide n0:val=\"off\"></n0:subHide><n0:supHide n0:val=\"off\"></n0:supHide></n0:naryPr><n0:sub><n0:r><n0:t>k</n0:t></n0:r><n0:r><n0:rPr><n0:sty n0:val=\"p\"></n0:sty></n0:rPr><n0:t>=</n0:t></n0:r><n0:r><n0:t>1</n0:t></n0:r></n0:sub><n0:sup><n0:r><n0:t>n</n0:t></n0:r></n0:sup><n0:e><n0:r><n0:t>k</n0:t></n0:r></n0:e></n0:nary><n0:r><n0:rPr><n0:sty n0:val=\"p\"></n0:sty></n0:rPr><n0:t>=</n0:t></n0:r><n0:f><n0:fPr><n0:type n0:val=\"bar\"></n0:type></n0:fPr><n0:num><n0:r><n0:t>n</n0:t></n0:r><n0:r><n0:rPr><n0:sty n0:val=\"p\"></n0:sty></n0:rPr><n0:t>(</n0:t></n0:r><n0:r><n0:t>n</n0:t></n0:r><n0:r><n0:rPr><n0:sty n0:val=\"p\"></n0:sty></n0:rPr><n0:t>+</n0:t></n0:r><n0:r><n0:t>1</n0:t></n0:r><n0:r><n0:rPr><n0:sty n0:val=\"p\"></n0:sty></n0:rPr><n0:t>)</n0:t></n0:r></n0:num><n0:den><n0:r><n0:t>2</n0:t></n0:r></n0:den></n0:f></n0:oMath></n0:oMathPara>"
+    }
+  ],
+  "pandoc_version": "3.10.2",
+  "schema_version": 1,
+  "source_markdown_sha256": "3918fea6628e40a40526abeaf5adfe9becafbd5782f0d48701a117666515bbda"
+}

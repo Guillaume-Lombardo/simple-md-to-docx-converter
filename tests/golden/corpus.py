@@ -33,9 +33,10 @@ CORPUS_CATEGORIES = frozenset(
         "malicious_svg",
         "timeouts",
         "concurrency",
+        "math",
     }
 )
-FUTURE_OWNERS = frozenset({"T07", "T08", "T09", "T10", "T11", "T13", "T18"})
+FUTURE_OWNERS = frozenset({"T07", "T08", "T09", "T10", "T11", "T13", "T18", "T103"})
 
 
 class CorpusManifestError(ValueError):
