@@ -2,7 +2,7 @@
 ticket: T89
 linear_id: G1L-588
 linear_url: https://linear.app/g1lom/issue/G1L-588/t89-implement-secure-composer-connections-and-durable-revision
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -147,6 +147,53 @@ T88.
   they retain real browser-to-router routing and all scanner/revision assertions. The next hosted
   run must pass both profiles and the light job; matched docker-box deployment/rollback remains
   pending. T89 stays In Progress.
+- 2026-10-11: Completed and verified on `main`. Every acceptance criterion is evidenced:
+  - Connection permissions, identity modes, model discovery/selection/test, write-only
+    credentials, mTLS and internal CA, destination/TLS policy, redaction, bounded calls, safe
+    errors, browser configuration, durable drafts/revisions in both profiles, egress separation,
+    readiness states, API/CLI parity, migrations, and English guides were delivered by PR #267
+    (`8b6dc3af46f5c45da46cdd1a50c4676cd8e8d7e0`); the Administration hub, standalone LLM setup,
+    ETag-fenced policy, envelope-key identity checks, bounded policy audit, and private
+    document-engine network namespaces by PR #268 (`9b1828dd159dfcfe58ee8ca1ee87a485a0bffd29`).
+    Both received independent review. PR CI runs
+    35826556272 and 35865408040 (attempt 2) and main CI runs 35829579577 and 35871945081
+    (attempt 2) passed, including Python coverage, `container`, and both final rootless-image
+    E2E profiles.
+  - Owner-authorized docker-box test-instance deployment completed on 2026-10-11 with matched
+    images built from `main` `00a98ec1dc49cdc82f383dbf0e2cd05724a8d37b`, which contains T89,
+    T90, T91, and later fixes: backend
+    `sha256:96fef52ab721dc91cdd5d73c7c92b6f112e7f2fdbc31a13f30149f9b96825f87`, frontend/router
+    `sha256:cc1584ca7ee0d70960061aa1c81fb5e73b0ed75bb1a5dc62c8341bf5850e9820`, and
+    reverse-attempt
+    `sha256:eb2542a813f1aa161bafd043fbbb7f6c427261df25863928eac5a69d91979208`.
+    Qualification: a passing local standalone final-image E2E run on those exact bytes, hosted
+    CI run 38062285755 passing `e2e-standalone`, `e2e-distributed`, and `container` on
+    code-identical `b764b99`, and scheduled CI run 38130312124 passing the same jobs on
+    `00a98ec`. No local distributed E2E run used the exact deployed bytes.
+  - Before cutover, a verified recovery set was taken with the previous image and the stopped
+    data volume was copied cold and byte-verified (schema `20260923_24`, SQLite `quick_check`
+    ok, one account). The cutover migrated to `20260924_26`; account identity, password hash,
+    and Composer key were unchanged. The public HTTPS smoke passed: readiness, API version,
+    login with the existing administrator password, account listing, Composer
+    policy/drafts/capabilities/authors/fill-templates APIs, the `/convert`, `/templates`,
+    `/composer`, `/composer/authors`, `/composer/fill-templates`, `/composer/connections`, and
+    `/admin/llm` pages, template upload and scan, DOCX, PDF, PPTX-to-Markdown through the mTLS
+    broker, and logout.
+  - Rollback rehearsal: the exact previous T90 image set started against an isolated copy of
+    the cold pre-cutover volume was healthy at schema 24 with `quick_check` ok; public
+    readiness, login, listing, and logout passed and row counts were unchanged. The instance was
+    then rolled forward, re-verified, and passed the full public smoke with zero failures. A
+    post-cutover backup taken with the new image was verified and restored into an isolated
+    directory. Final state: four services healthy, broker active, public `/health/ready`
+    returning 200, and running image IDs independently confirmed.
+  - Limitations and follow-ups: restoring the pre-cutover schema-24 recovery set with the new
+    image is refused, a known defect tracked by T128 / G1L-681 (PR #290), so a real rollback
+    uses the cold copy, as the docker-box deployment notes document. The broker certificates
+    expire on 2026-10-19 at 14:36 UTC and were not renewed; renewal is an owner follow-up.
+    Interactive browser login was not exercised on the live instance; API login was.
+    Intermittent final-image E2E scanner-outage timeouts are tracked by T130 / G1L-683.
+  - Real LiteLLM and provider qualification remains assigned to T93, as recorded on 2026-09-23
+    and in T93's acceptance criteria; it is not a T89 criterion.
 
 ## Synchronization
 
