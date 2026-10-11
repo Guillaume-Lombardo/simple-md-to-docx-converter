@@ -24,6 +24,12 @@ from markweave.conversion.runtime_manifest import COMPONENT_VERSIONS
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def terminate(mocker):
+    """Never signal a real process group for a mocked process identifier."""
+    return mocker.patch("markweave.conversion.engine_versions.terminate_process_group")
+
+
 def probe(tmp_path: Path, **overrides: float) -> EngineVersionProbe:
     values = {
         "timeout_seconds": 5.0,
@@ -205,15 +211,11 @@ def test_unreadable_output_is_unavailable(tmp_path: Path, mocker) -> None:
         probe(tmp_path).observe("pandoc", "pandoc")
 
 
-def test_probe_timeout_terminates_then_kills_the_process_group(
-    tmp_path: Path, mocker
+def test_probe_timeout_terminates_the_whole_process_group(
+    tmp_path: Path, mocker, terminate
 ) -> None:
     process = mocker.Mock(pid=4321)
-    process.wait.side_effect = [
-        subprocess.TimeoutExpired("probe", 0.1),
-        subprocess.TimeoutExpired("probe", 0.5),
-        0,
-    ]
+    process.wait.side_effect = [subprocess.TimeoutExpired("probe", 0.1)]
     mocker.patch(
         "markweave.conversion.engine_versions.subprocess.Popen", return_value=process
     )
@@ -222,18 +224,15 @@ def test_probe_timeout_terminates_then_kills_the_process_group(
         "markweave.conversion.engine_versions.time.monotonic",
         side_effect=lambda: next(clock),
     )
-    killpg = mocker.patch("markweave.conversion.engine_versions.os.killpg")
 
     with pytest.raises(EngineProbeError) as captured:
         probe(tmp_path, timeout_seconds=1.0).observe("chromium", "chrome")
 
     assert captured.value.reason == "timeout"
-    assert killpg.call_args_list == [mocker.call(4321, 15), mocker.call(4321, 9)]
+    terminate.assert_called_once_with(process, 0.5)
 
 
-def test_probe_honours_overall_deadline_and_vanished_group(
-    tmp_path: Path, mocker
-) -> None:
+def test_probe_honours_overall_deadline(tmp_path: Path, mocker, terminate) -> None:
     process = mocker.Mock(pid=4321)
     mocker.patch(
         "markweave.conversion.engine_versions.subprocess.Popen", return_value=process
@@ -241,27 +240,22 @@ def test_probe_honours_overall_deadline_and_vanished_group(
     mocker.patch(
         "markweave.conversion.engine_versions.time.monotonic", return_value=10.0
     )
-    killpg = mocker.patch(
-        "markweave.conversion.engine_versions.os.killpg",
-        side_effect=ProcessLookupError,
-    )
 
     with pytest.raises(EngineProbeError, match="timeout"):
         probe(tmp_path).observe("pandoc", "pandoc", deadline_monotonic=9.0)
 
-    killpg.assert_called_once_with(4321, 15)
-    process.wait.assert_called_once_with()
+    terminate.assert_called_once_with(process, 0.5)
+    process.wait.assert_not_called()
 
 
 def test_probe_cancellation_terminates_the_process_group(
-    tmp_path: Path, mocker
+    tmp_path: Path, mocker, terminate
 ) -> None:
     process = mocker.Mock(pid=4321)
-    process.wait.side_effect = [subprocess.TimeoutExpired("probe", 0.1), 0]
+    process.wait.side_effect = [subprocess.TimeoutExpired("probe", 0.1)]
     mocker.patch(
         "markweave.conversion.engine_versions.subprocess.Popen", return_value=process
     )
-    killpg = mocker.patch("markweave.conversion.engine_versions.os.killpg")
 
     with pytest.raises(EngineProbeError) as captured:
         probe(tmp_path).observe(
@@ -271,28 +265,38 @@ def test_probe_cancellation_terminates_the_process_group(
         )
 
     assert captured.value.reason == "cancelled"
-    killpg.assert_called_once_with(4321, 15)
+    terminate.assert_called_once_with(process, 0.5)
 
 
 @pytest.mark.parametrize("failure", ["probe", "wait"])
 def test_unexpected_interruption_still_terminates_the_process_group(
-    tmp_path: Path, mocker, failure: str
+    tmp_path: Path, mocker, terminate, failure: str
 ) -> None:
     process = mocker.Mock(pid=4321)
     if failure == "wait":
-        process.wait.side_effect = [KeyboardInterrupt, 0]
+        process.wait.side_effect = [KeyboardInterrupt]
         cancelled = mocker.Mock(return_value=False)
     else:
         cancelled = mocker.Mock(side_effect=RuntimeError("probe failed"))
     mocker.patch(
         "markweave.conversion.engine_versions.subprocess.Popen", return_value=process
     )
-    killpg = mocker.patch("markweave.conversion.engine_versions.os.killpg")
 
     with pytest.raises((KeyboardInterrupt, RuntimeError)):
         probe(tmp_path).observe("pandoc", "pandoc", cancellation_requested=cancelled)
 
-    killpg.assert_called_once_with(4321, 15)
+    terminate.assert_called_once_with(process, 0.5)
+
+
+def test_completed_probe_still_reaps_leftover_descendants(
+    tmp_path: Path, mocker, terminate
+) -> None:
+    process, start = fake_process(mocker, b"pandoc 3.10.2\n")
+    mocker.patch(
+        "markweave.conversion.engine_versions.subprocess.Popen", side_effect=start
+    )
+    assert probe(tmp_path).observe("pandoc", "pandoc").pinned
+    terminate.assert_called_once_with(process, 0.5)
 
 
 def test_probe_without_host_path_has_minimal_environment(

@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import contextlib
 import math
-import os
 import re
-import signal
 import subprocess
 import tempfile
 import time
@@ -16,6 +13,9 @@ from enum import StrEnum
 from pathlib import Path
 
 from markweave.conversion.engine_launcher import isolated_engine_command
+from markweave.conversion.libreoffice import (
+    _terminate_group as terminate_process_group,
+)
 from markweave.conversion.runtime_manifest import COMPONENT_VERSIONS
 
 _MAX_VERSION_OUTPUT_BYTES = 4096
@@ -244,24 +244,19 @@ class EngineVersionProbe:
                 self._terminate_group(process)
                 raise EngineProbeError(name, "timeout")
             try:
-                return process.wait(timeout=min(self._config.poll_seconds, remaining))
+                return_code = process.wait(
+                    timeout=min(self._config.poll_seconds, remaining)
+                )
             except subprocess.TimeoutExpired:
                 continue
             except BaseException:
                 self._terminate_group(process)
                 raise
+            # A probe that exits must not leave descendants behind either.
+            self._terminate_group(process)
+            return return_code
 
     def _terminate_group(self, process: subprocess.Popen[bytes]) -> None:
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            process.wait()
-            return
-        try:
-            process.wait(timeout=self._config.termination_grace_seconds)
-            return
-        except subprocess.TimeoutExpired:
-            pass
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(process.pid, signal.SIGKILL)
-        process.wait()
+        # Shared with the LibreOffice adapter: wait for the whole process group,
+        # not just its leader, and escalate any survivor to SIGKILL.
+        terminate_process_group(process, self._config.termination_grace_seconds)
