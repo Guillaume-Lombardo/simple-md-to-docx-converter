@@ -62,6 +62,16 @@ has no physical capacity cap. Do not expose it as a production service. The
 Docker/Podman selection, custom ports and HTTPS proxy origins, Word templates, recovery,
 and the explicit trusted-upstream and insecure SSH-tunnel modes with their restrictions.
 
+## Convert a file without a server
+
+With the bundled engines of the final image, or Pandoc and LibreOffice installed on your host,
+`markweave convert doc.md --local --to docx,pdf -o out/` converts your own file through the same
+validation, limits, and engines as the service, without an account or upload. It records the engine
+versions in `out/doc.traceability.json`, warns when one differs from the approved pin, and
+`--require-pinned` makes that a failure. See
+[local conversion](docs/conversion-cli.md#convert-locally-without-a-server) for its settings and
+the container command.
+
 ## Use and operate Markweave
 
 - [Command-line interface](docs/cli.md)

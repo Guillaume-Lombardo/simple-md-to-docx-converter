@@ -44,6 +44,7 @@ uv run python -m scripts.container.verify_oci_export \
   | tee "$evidence_directory/frontend-oci-identity.txt"
 bash scripts/container/smoke.sh "$final_image"
 bash tests/e2e/runtime-operations-final-image.sh "$final_image"
+bash tests/e2e/local-conversion-final-image.sh "$final_image"
 bash scripts/container/api-smoke.sh "$final_image"
 bash scripts/container/distributed-api-smoke.sh "$final_image"
 bash scripts/container/recovery-cli-smoke.sh "$final_image"

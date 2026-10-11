@@ -1,0 +1,213 @@
+#!/usr/bin/env bash
+# Final rootless image E2E for `markweave convert --local` (T106, decision D1).
+# Covers the documented container invocation, approved-pin enforcement, Mermaid,
+# missing engines, invalid input, global timeout, and SIGTERM cancellation.
+set -euo pipefail
+
+readonly image="${1:-localhost/md-converter:t20-ci}"
+readonly runtime_uid="${T106_RUNTIME_UID:-54000}"
+repository="$(pwd)"
+readonly repository
+readonly seccomp_profile="$repository/toolchain/document-engines/chrome-seccomp.json"
+readonly env_file="$repository/examples/local-conversion.env"
+readonly cancel_name="markweave-t106-local-cancel-$$"
+
+work="$(mktemp -d "${TMPDIR:-/tmp}/markweave-t106-local.XXXXXX")"
+readonly work
+cleanup() {
+  podman rm --force --ignore "$cancel_name" >/dev/null 2>&1 || true
+  podman unshare rm -rf -- "$work"
+}
+trap cleanup EXIT
+
+fail() {
+  echo "Local conversion final-image E2E failed: $*" >&2
+  exit 1
+}
+
+mkdir -- "$work/input"
+printf '# Local final image\n\nReal **conversion** without a server.\n' \
+  >"$work/input/document.md"
+cat >"$work/input/diagram.md" <<'MARKDOWN'
+# Diagram
+
+```mermaid
+flowchart LR
+  A --> B
+```
+MARKDOWN
+printf '<b>raw</b>\n' >"$work/input/invalid.md"
+base64 --decode "$repository/examples/quickstart-template.docx.base64" \
+  >"$work/input/template.docx"
+cat >"$work/input/slow-pandoc" <<'ENGINE'
+#!/bin/sh
+if [ "$1" = --version ]; then echo "pandoc 3.10.2"; exit 0; fi
+exec sleep 300
+ENGINE
+cat >"$work/input/older-pandoc" <<'ENGINE'
+#!/bin/sh
+if [ "$1" = --version ]; then echo "pandoc 3.9.0"; exit 0; fi
+exec pandoc "$@"
+ENGINE
+chmod 0755 "$work/input" "$work/input/slow-pandoc" "$work/input/older-pandoc"
+chmod 0644 "$work/input/"*.md "$work/input/template.docx"
+
+# One private output directory per scenario, writable by the arbitrary runtime UID.
+new_output() {
+  local directory="$work/output-$1"
+  mkdir -- "$directory"
+  chmod 0770 -- "$directory"
+  podman unshare chown "$runtime_uid:0" "$directory"
+  printf '%s\n' "$directory"
+}
+
+# Make an output directory readable by the host user for inspection.
+reclaim() {
+  podman unshare chown -R 0:0 "$1"
+}
+
+local_run() {
+  local output="$1"
+  shift
+  podman run --rm \
+    --user "$runtime_uid:0" \
+    --read-only \
+    --cap-drop=all \
+    --security-opt=no-new-privileges \
+    --security-opt="seccomp=$seccomp_profile" \
+    --network=none \
+    --memory=1g \
+    --cpus=2 \
+    --pids-limit=256 \
+    --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777 \
+    --tmpfs /work:rw,nosuid,nodev,size=256m,mode=0770 \
+    --shm-size=256m \
+    --env-file "$env_file" \
+    --volume "$work/input:/work/input:ro,Z" \
+    --volume "$output:/work/output:Z" \
+    "$@"
+}
+
+expect_failure() {
+  local name="$1" code="$2" output
+  shift 2
+  output="$(new_output "$name")"
+  if local_run "$output" "$@" >"$work/$name.out" 2>"$work/$name.err"; then
+    fail "$name unexpectedly succeeded"
+  fi
+  test ! -s "$work/$name.out" || fail "$name wrote to stdout"
+  cat -- "$work/$name.err"
+  uv run python - "$work/$name.err" "$code" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+error = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))["error"]
+assert error["code"] == sys.argv[2], error
+PY
+  reclaim "$output"
+  test -z "$(ls -A -- "$output")" || fail "$name left outputs"
+}
+
+# Primary path: documented invocation, template, DOCX and PDF, pinned engines.
+success_output="$(new_output success)"
+local_run "$success_output" "$image" --json convert /work/input/document.md \
+  --local --to docx,pdf --template /work/input/template.docx --require-pinned \
+  -o /work/output >"$work/success.json"
+reclaim "$success_output"
+uv run python - "$work/success.json" "$success_output" <<'PY'
+import io
+import json
+import sys
+import zipfile
+from pathlib import Path
+
+result = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+output = Path(sys.argv[2])
+assert result["status"] == "succeeded", result
+assert result["engines_pinned"] is True, result
+assert result["warnings"] == [], result
+assert sorted(path.name for path in output.iterdir()) == [
+    "document.docx",
+    "document.pdf",
+    "document.traceability.json",
+]
+with zipfile.ZipFile(io.BytesIO((output / "document.docx").read_bytes())) as docx:
+    assert b"without a server" in docx.read("word/document.xml")
+assert (output / "document.pdf").read_bytes().startswith(b"%PDF-")
+manifest = json.loads((output / "document.traceability.json").read_bytes())
+assert manifest["mode"] == "local"
+assert manifest["template"]["mode"] == "local-file"
+assert [engine["name"] for engine in manifest["engines"]] == ["pandoc", "libreoffice"]
+assert all(engine["status"] == "pinned" for engine in manifest["engines"])
+assert manifest["pdf"]["libreoffice_version"] == manifest["engines"][1]["actual_version"]
+assert manifest["pdf"]["template_mode"] == "local-file"
+assert "/work" not in json.dumps(manifest)
+PY
+
+# Mermaid path: the diagram engines are required and their versions recorded.
+mermaid_output="$(new_output mermaid)"
+local_run "$mermaid_output" "$image" --json convert /work/input/diagram.md \
+  --local -o /work/output >"$work/mermaid.json"
+reclaim "$mermaid_output"
+mmdc_version="$(local_run "$mermaid_output" --entrypoint mmdc "$image" --version)"
+uv run python - "$mermaid_output" "$mmdc_version" <<'PY'
+import json
+import sys
+import zipfile
+from pathlib import Path
+
+output = Path(sys.argv[1])
+with zipfile.ZipFile(output / "diagram.docx") as docx:
+    assert any(name.startswith("word/media/") for name in docx.namelist())
+manifest = json.loads((output / "diagram.traceability.json").read_bytes())
+engines = {engine["name"]: engine for engine in manifest["engines"]}
+assert set(engines) == {"pandoc", "mermaid-cli", "chromium"}, engines
+assert engines["mermaid-cli"]["actual_version"] == sys.argv[2].strip(), engines
+assert engines["chromium"]["actual_version"], engines
+PY
+
+# Failure paths leave no outputs and keep stable, content-free errors.
+expect_failure missing-engine engine_missing \
+  --env MARKWEAVE_TEMPLATE_LIBREOFFICE_EXECUTABLE=/nonexistent/soffice \
+  "$image" --json convert /work/input/document.md --local --to pdf -o /work/output
+expect_failure invalid-input validation \
+  "$image" --json convert /work/input/invalid.md --local -o /work/output
+expect_failure unpinned engine_version_unpinned \
+  --env MARKWEAVE_TEMPLATE_PANDOC_EXECUTABLE=/work/input/older-pandoc \
+  "$image" --json convert /work/input/document.md --local --require-pinned \
+  -o /work/output
+started="$(date +%s)"
+expect_failure timeout conversion_timeout \
+  --env MARKWEAVE_TEMPLATE_PANDOC_EXECUTABLE=/work/input/slow-pandoc \
+  "$image" --json --timeout 5 convert /work/input/document.md --local -o /work/output
+test "$(($(date +%s) - started))" -lt 120 || fail "timeout was not bounded"
+
+# Cancellation: SIGTERM to the container's markweave process stops the engine.
+cancel_output="$(new_output cancel)"
+podman run --detach --name "$cancel_name" \
+  --user "$runtime_uid:0" --read-only --cap-drop=all \
+  --security-opt=no-new-privileges --security-opt="seccomp=$seccomp_profile" \
+  --network=none --memory=1g --cpus=2 --pids-limit=256 \
+  --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777 \
+  --tmpfs /work:rw,nosuid,nodev,size=256m,mode=0770 --shm-size=256m \
+  --env-file "$env_file" \
+  --env MARKWEAVE_TEMPLATE_PANDOC_EXECUTABLE=/work/input/slow-pandoc \
+  --volume "$work/input:/work/input:ro,Z" --volume "$cancel_output:/work/output:Z" \
+  "$image" --json convert /work/input/document.md --local -o /work/output >/dev/null
+for _ in $(seq 1 120); do
+  if podman top "$cancel_name" args 2>/dev/null | grep -Fq 'sleep 300'; then
+    break
+  fi
+  sleep 0.5
+done
+podman top "$cancel_name" args | grep -Fq 'sleep 300' || fail "engine never started"
+podman stop --time 30 "$cancel_name" >/dev/null
+test "$(podman inspect "$cancel_name" --format '{{.State.ExitCode}}')" = 1 \
+  || fail "cancellation did not exit with status 1"
+podman logs "$cancel_name" 2>&1 | grep -Fq '"code":"conversion_cancelled"' \
+  || fail "cancellation error was not reported"
+reclaim "$cancel_output"
+test -z "$(ls -A -- "$cancel_output")" || fail "cancellation left outputs"
+
+echo "Final-image local conversion E2E passed for $image."
