@@ -63,6 +63,8 @@ def test_local_conversion_final_image_e2e_is_wired_and_hardened() -> None:
         "engine_version_unpinned",
         "conversion_timeout",
         "conversion_cancelled",
+        "output_write_failed",
+        "--overwrite",
         "podman stop",
         "mermaid-cli",
     ):

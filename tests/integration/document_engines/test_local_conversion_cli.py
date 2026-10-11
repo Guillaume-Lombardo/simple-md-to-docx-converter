@@ -436,3 +436,34 @@ def test_real_mermaid_local_conversion_records_diagram_engines(
     assert set(engines) == {"pandoc", "mermaid-cli", "chromium"}
     assert engines["chromium"]["actual_version"] == "151.0.7922.173"
     assert engines["mermaid-cli"]["actual_version"]
+
+
+@pytest.mark.requires_pandoc
+def test_failed_overwrite_keeps_the_previous_complete_output_set(
+    tmp_path: Path,
+) -> None:
+    source, output = _inputs(tmp_path)
+    previous = {
+        "document.docx": b"previous docx",
+        "document.traceability.json": b"previous manifest",
+    }
+    for name, content in previous.items():
+        (output / name).write_bytes(content)
+    output.chmod(0o500)
+    try:
+        error = _error(
+            _run(
+                _environment(tmp_path),
+                "convert",
+                str(source),
+                "--local",
+                "--overwrite",
+                "-o",
+                str(output),
+            )
+        )
+    finally:
+        output.chmod(0o700)
+
+    assert error["code"] == "output_write_failed"
+    assert {path.name: path.read_bytes() for path in output.iterdir()} == previous

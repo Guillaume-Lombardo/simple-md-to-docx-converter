@@ -119,10 +119,16 @@ active-content, relationship, style, and approved-font checks as template activa
 
 `--to` takes a comma-separated list of `docx` and `pdf` and defaults to `docx`. Outputs are named
 after the source stem, for example `doc.docx`, `doc.pdf`, and `doc.traceability.json`, in the
-existing real directory given by `-o`/`--output-dir` (default: the current directory). Every file
-is written to a private temporary file, synchronized, and published atomically with owner-only
-`0600` permissions. Existing outputs are refused before conversion starts; `--overwrite` atomically
-replaces only existing regular files. A failure, timeout, or cancellation publishes nothing.
+existing real directory given by `-o`/`--output-dir` (default: the current directory). Outputs are
+published as one set with owner-only `0600` permissions: every file is first written to a private
+temporary file in that directory and synchronized, and only then are the names published. Existing
+outputs are refused before conversion starts, and a name created concurrently is never replaced.
+`--overwrite` replaces only existing regular files and keeps each original until the whole set is
+published. A failure, the global timeout, or cancellation while files are written or published
+restores the previous set (or removes the new files) and reports the failure; a signal that arrives
+after the directory is synchronized no longer withdraws the result. If an original cannot be
+restored, the command fails with `output_rollback_failed` and leaves the original copy in a hidden
+`.markweave-local-*.previous` file.
 
 ### Engines, approved pins, and traceability
 

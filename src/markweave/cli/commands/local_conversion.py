@@ -17,13 +17,12 @@ import threading
 import time
 import unicodedata
 from collections.abc import Sequence
-from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from uuid import uuid4
 
 from markweave.cli.errors import CliError
+from markweave.cli.local_outputs import check_destination, publish_outputs
 from markweave.cli.output import OutputWriter
 from markweave.cli.types import CommandContext, ExitCode
 
@@ -39,7 +38,6 @@ _LOCAL_DESTS = (
     "local_overwrite",
 )
 _FORMATS = ("docx", "pdf")
-_OUTPUT_FILE_MODE = 0o600
 _READ_FLAGS = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
 _CANCELLATION_SIGNALS = (signal.SIGINT, signal.SIGTERM)
 
@@ -193,7 +191,7 @@ def _convert_locally(
     directory = _open_directory(output_directory)
     try:
         for name in (*names, manifest_name):
-            _check_destination(directory, name, overwrite=overwrite)
+            check_destination(directory, name, overwrite=overwrite)
         deadline = (
             time.monotonic() + context.timeout_seconds
             if context.timeout_seconds is not None
@@ -214,13 +212,24 @@ def _convert_locally(
                 )
             except (LocalConversionError, ConversionError) as error:
                 raise _conversion_error(error, cancelled, deadline) from None
-            if cancelled.is_set():
-                raise _cancelled_error()
+
+            def checkpoint() -> None:
+                if cancelled.is_set():
+                    raise _cancelled_error()
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise _timeout_error()
+
+            checkpoint()
             files = [
                 (name, result.outputs[LocalOutput(value)])
                 for name, value in zip(names, formats, strict=True)
             ]
-            _publish(directory, [*files, (manifest_name, result.manifest)], overwrite)
+            publish_outputs(
+                directory,
+                [*files, (manifest_name, result.manifest)],
+                overwrite=overwrite,
+                checkpoint=checkpoint,
+            )
     finally:
         os.close(directory)
     for warning in result.warnings:
@@ -328,89 +337,6 @@ def _open_directory(path: Path) -> int:
         ) from None
 
 
-def _check_destination(directory: int, name: str, *, overwrite: bool) -> None:
-    try:
-        metadata = os.stat(name, dir_fd=directory, follow_symlinks=False)
-    except FileNotFoundError:
-        return
-    except OSError:
-        raise _output_failure() from None
-    if not overwrite:
-        raise CliError(
-            "output_exists",
-            "A local output already exists; use --overwrite to replace it.",
-        )
-    if not stat.S_ISREG(metadata.st_mode):
-        raise CliError("output_unsafe", "A local output destination is unsafe.")
-
-
-def _publish(directory: int, files: list[tuple[str, bytes]], overwrite: bool) -> None:
-    """Publish every output atomically, removing new files after a later failure."""
-    created: list[str] = []
-    try:
-        for name, content in files:
-            _check_destination(directory, name, overwrite=overwrite)
-            if _publish_one(directory, name, content, overwrite=overwrite):
-                created.append(name)
-        os.fsync(directory)
-    except BaseException:
-        for name in created:
-            with suppress(OSError):
-                os.unlink(name, dir_fd=directory)
-        raise
-
-
-def _publish_one(directory: int, name: str, content: bytes, *, overwrite: bool) -> bool:
-    temporary = f".markweave-local-{uuid4().hex}"
-    try:
-        descriptor = os.open(
-            temporary,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
-            _OUTPUT_FILE_MODE,
-            dir_fd=directory,
-        )
-    except OSError:
-        raise _output_failure() from None
-    try:
-        with os.fdopen(descriptor, "wb") as output:
-            output.write(content)
-            output.flush()
-            os.fsync(output.fileno())
-        if overwrite:
-            existed = _exists(directory, name)
-            os.replace(temporary, name, src_dir_fd=directory, dst_dir_fd=directory)
-            temporary = ""
-            return not existed
-        try:
-            os.link(
-                temporary,
-                name,
-                src_dir_fd=directory,
-                dst_dir_fd=directory,
-                follow_symlinks=False,
-            )
-        except FileExistsError:
-            raise CliError(
-                "output_exists",
-                "A local output already exists; use --overwrite to replace it.",
-            ) from None
-        return True
-    except OSError:
-        raise _output_failure() from None
-    finally:
-        if temporary:
-            with suppress(OSError):
-                os.unlink(temporary, dir_fd=directory)
-
-
-def _exists(directory: int, name: str) -> bool:
-    try:
-        os.stat(name, dir_fd=directory, follow_symlinks=False)
-    except FileNotFoundError:
-        return False
-    return True
-
-
 class _Cancellation:
     """Turn SIGINT/SIGTERM into cooperative engine cancellation.
 
@@ -443,20 +369,18 @@ def _conversion_error(
     if cancelled.is_set():
         return _cancelled_error()
     if deadline is not None and time.monotonic() >= deadline:
-        return CliError("conversion_timeout", "The local conversion timed out.")
+        return _timeout_error()
     code = getattr(error, "code", "conversion_failed")
     message = str(error) or "The local conversion failed."
     return CliError(str(getattr(code, "value", code)), message)
 
 
+def _timeout_error() -> CliError:
+    return CliError("conversion_timeout", "The local conversion timed out.")
+
+
 def _cancelled_error() -> CliError:
     return CliError("conversion_cancelled", "The local conversion was cancelled.")
-
-
-def _output_failure() -> CliError:
-    return CliError(
-        "output_write_failed", "The local conversion outputs could not be written."
-    )
 
 
 def _required_string(namespace: argparse.Namespace, key: str) -> str:

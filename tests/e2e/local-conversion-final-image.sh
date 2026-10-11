@@ -183,6 +183,27 @@ expect_failure timeout conversion_timeout \
   "$image" --json --timeout 5 convert /work/input/document.md --local -o /work/output
 test "$(($(date +%s) - started))" -lt 120 || fail "timeout was not bounded"
 
+# A failed overwrite keeps the previous complete output set: the runtime UID can
+# inspect but not write this host-owned directory, so staging fails.
+mkdir -- "$work/output-overwrite"
+printf 'previous docx' >"$work/output-overwrite/document.docx"
+printf 'previous manifest' >"$work/output-overwrite/document.traceability.json"
+chmod 0755 "$work/output-overwrite"
+chmod 0644 "$work/output-overwrite/"*
+if local_run "$work/output-overwrite" "$image" --json convert \
+  /work/input/document.md --local --overwrite -o /work/output \
+  >"$work/overwrite.out" 2>"$work/overwrite.err"; then
+  fail "read-only overwrite unexpectedly succeeded"
+fi
+grep -Fq '"code":"output_write_failed"' "$work/overwrite.err" \
+  || fail "read-only overwrite did not report output_write_failed"
+test "$(cat "$work/output-overwrite/document.docx")" = "previous docx" \
+  || fail "failed overwrite changed the previous DOCX"
+test "$(cat "$work/output-overwrite/document.traceability.json")" = "previous manifest" \
+  || fail "failed overwrite changed the previous manifest"
+test "$(find "$work/output-overwrite" -mindepth 1 | wc -l)" = 2 \
+  || fail "failed overwrite left staged files"
+
 # Cancellation: SIGTERM to the container's markweave process stops the engine.
 cancel_output="$(new_output cancel)"
 podman run --detach --name "$cancel_name" \
