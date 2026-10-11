@@ -10,6 +10,70 @@ Use the [upgrade guide](docs/upgrading.md) for supported transitions and rollbac
 [release process](docs/releasing.md) for artifact evidence, the [security policy](SECURITY.md) for
 private reporting, and the [support policy](SUPPORT.md) for help with a published release.
 
+<a id="release-0-8-0"></a>
+
+## [0.8.0] - 2026-10-11
+
+### Added
+
+- `markweave convert SOURCE --local` converts a local file without a server, an account or ClamAV.
+  It runs the service's validation, archive, image, Mermaid, Pandoc and LibreOffice adapters with
+  the same `MARKWEAVE_*` limits, records the engine versions it used in a content-free
+  traceability manifest, fails clearly when a required engine is missing, and warns when an engine
+  version differs from the approved pin; `--require-pinned` turns that warning into a failure. A
+  documented container invocation runs it with the bundled engines.
+- The **2docx** and **2pptx** workspaces accept several files, a selected folder or a dropped
+  folder, and remote `markweave convert` collects the local images referenced by a Markdown path.
+  Both clients package the Markdown and its referenced images in the approved archive layout before
+  upload; the service still applies every archive, path, image, size, count and scanning rule.
+- An optional, permission-gated Composer workspace: secure instance and personal model
+  connections, administrator **LLM settings**, chat-driven proposals and questions with human
+  accept or reject decisions, immutable Markdown and source revisions with native DOCX and PPTX
+  revision previews, permissioned author knowledge, and typed DOCX template filling. Composer model
+  access is disabled by default; enabling it requires `MARKWEAVE_COMPOSER_ENABLED=true` and the
+  documented policy settings, which an administrator policy can narrow but not expand.
+  Migrations 20 to 26 add its persistent state.
+- Inline, display and malformed TeX math are documented and covered by DOCX, PDF and PowerPoint
+  golden tests; the final-image smoke fails when LibreOffice Math is missing.
+
+### Changed
+
+- `markweave restore` accepts recovery sets created by an earlier supported schema. It verifies a
+  set against the schema of its recorded revision, migrates it to the current head and verifies
+  stable object references again. Supported sets start at schema revision `20260829_14`
+  (release 0.5.0); older, unknown or newer revisions are refused with stable errors.
+- The Compose quickstart files are consolidated from ten to seven. The Next.js browser tier is part
+  of `compose.yaml`, and the Podman browser settings are part of `compose.podman.yaml` and
+  `compose.podman-trusted-upstream.yaml`; `compose.nextjs.yaml`, `compose.nextjs-podman.yaml` and
+  `compose.nextjs-podman-trusted-upstream.yaml` are removed. Every supported helper mode renders the
+  same configuration as before.
+- Admission, workers and job traceability record Mermaid CLI `11.17.0`, the version the final image
+  ships, and the final-image smoke compares every recorded engine version with its executable.
+- User and session settings share one navigation entry, and the primary header and Administration
+  setup are more compact.
+- The documentation index exposes a conversion capability matrix, and the package metadata
+  describes the PowerPoint and experimental document-to-Markdown workflows.
+- Container images adopt the reviewed Red Hat UBI OpenSSL `3.5.8-2.el9_8` package update.
+
+### Fixed
+
+- Composer decisions no longer fail with HTTP 412 when a model step commits a new proposal or
+  question while the workspace loads; the workspace reads one version-consistent draft snapshot.
+- Restore verification accepts a missing upload only when its retention cleanup completed; a
+  missing active, unexpired or cleanup-incomplete upload still fails verification.
+- Distributed restore inserts template version pointers in dependency order with integrity triggers
+  enabled, and standalone restore accepts recovery-set paths containing `#`, `?` or `%`.
+
+### Known limitations
+
+- A distributed recovery set that contains a retained conversion job referencing a superseded
+  template version cannot be restored yet.
+
+### Release notes
+
+- Repository Compose and quickstart defaults remain pinned to the verified `0.7.3` backend and
+  frontend digests until the `0.8.0` images are published and their exact receipts are adopted.
+
 <a id="release-0-7-3"></a>
 
 ## [0.7.3] - 2026-09-22
