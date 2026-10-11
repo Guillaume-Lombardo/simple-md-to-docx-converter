@@ -783,8 +783,8 @@ can still emit raw HTML nodes with that reader, reject raw HTML in the validated
 before invoking Pandoc. Disable user and administrator filters, user includes, and remote resources; only the reviewed
 internal cross-reference and page-break filters approved in section 3.7 (D5 and D12,
 T111) may run. Translate only the inline HTML allowlist of section
-3.7 (D3). TeX-like text is
-ordinary text for this reader; no unsupported `-raw_tex` flag is added.
+3.7 (D3). Raw TeX outside `$...$` and `$$...$$` math
+delimiters is ordinary text for this reader; no unsupported `-raw_tex` flag is added.
 
 Evaluate `pandoc --sandbox` in T00 with images and `reference.docx`; do not claim it is enabled until the complete pipeline passes. Run Pandoc from the job workspace with fixed arguments, no shell, no network, deadlines, memory limits, and an unprivileged identity.
 

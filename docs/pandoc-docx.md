@@ -32,6 +32,34 @@ forbidden. The adapter does not claim operating-system network isolation; deploy
 supplies that boundary. Pandoc's `--sandbox` option is not enabled because it also prevents the
 approved local resource behavior.
 
+## Math
+
+The reader's `tex_math_dollars` extension turns `$...$` into inline math and `$$...$$` into display
+math. Pandoc 3.10.2 converts both to native Word equations (OMML): inline math becomes an
+`m:oMath` element inside the paragraph, and display math becomes a centered `m:oMathPara`. The
+equations stay editable in Word and need no image, font, or network resource.
+
+```markdown
+Inline $E = mc^{2}$ in a sentence.
+
+$$
+\int_{0}^{1} x \, dx = \frac{1}{2}
+$$
+```
+
+Raw TeX outside dollar delimiters, such as `\textbf{bold}` or `\begin{equation}`, is ordinary
+text: the reader has no raw TeX support, so it is neither interpreted nor rejected.
+
+Malformed TeX does not fail the conversion. When Pandoc cannot parse an expression such as `$x^$`,
+`$\undefinedmacro{x}$`, or `$$\begin{matrix} a$$`, it keeps the original source, including its
+dollar delimiters, as literal text and continues. The DOCX is still produced; Pandoc's warning is
+not reported to the user because the adapter discards engine output. Pandoc is lenient with some
+incomplete input; for example, `$\left( x$` still produces an equation.
+
+PDF output renders the DOCX equations through LibreOffice Math. Without the LibreOffice Math module,
+LibreOffice silently drops the equations from the PDF while the DOCX keeps them. The final image
+installs the module, and its smoke test fails when equations are missing from the PDF.
+
 ## Process boundary
 
 Each conversion uses a new temporary workspace containing only the Markdown input, approved
@@ -76,7 +104,8 @@ validation.
 
 The real integration suite uses the exact approved Pandoc 3.10.2 artifact, converts the T04 corpus,
 and inspects the resulting OpenXML for headings, lists, links, tables, footnotes, code styles,
-attributes, Unicode text, Mermaid media, and reference-document style propagation. CI downloads the
+attributes, Unicode text, Mermaid media, inline and display math as OMML, malformed-math
+literal fallback, and reference-document style propagation. CI downloads the
 official Pandoc and Chrome artifacts, verifies their locked SHA-256 values, and installs Mermaid
 from the T00 lock with Puppeteer downloads disabled. Final-image E2E additionally covers the
 user-visible asynchronous conversion workflow in both storage profiles.
