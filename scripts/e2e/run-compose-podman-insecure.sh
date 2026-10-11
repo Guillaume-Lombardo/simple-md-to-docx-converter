@@ -109,9 +109,6 @@ rendered_images="$(
       --file "$repository/compose.podman.yaml" \
       --file "$repository/compose.trusted-upstream.yaml" \
       --file "$repository/compose.podman-trusted-upstream.yaml" \
-      --file "$repository/compose.nextjs.yaml" \
-      --file "$repository/compose.nextjs-podman.yaml" \
-      --file "$repository/compose.nextjs-podman-trusted-upstream.yaml" \
       config --images
 )"
 test "$(grep -Fxc "$backend_image" <<<"$rendered_images")" = 1
