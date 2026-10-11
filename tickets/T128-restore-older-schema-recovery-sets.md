@@ -66,6 +66,22 @@ before migrating.
   guide documents the profile-specific errors and cleanup, and the final-image recovery CLI smoke
   restores populated `20260923_24` sets in both profiles to head with readiness, then checks the
   refusal and cleanup of incomplete or unknown schemas.
+- 2026-10-11: Review round 2 corrections:
+  - Distributed restore now inserts template current-version pointers after the template
+    versions they reference, and the conversion jobs that name a template pair after those
+    pointers, with the integrity triggers left enabled. This also fixes restores of current-head
+    sets.
+  - SQLite read-only URIs now encode the path, so recovery sets under directory names containing
+    `#`, `?` or `%` restore.
+  - The production backup is back to its `main` behavior. Earlier-revision distributed test sets
+    come from a test-only historical producer built on the migration-defined table allowlist.
+  - Unknown and below-floor revisions are refused through restore, both in real PostgreSQL/S3
+    integration tests and in the final-image smoke, with the target database and bucket left
+    untouched.
+  - Known limitation, outside this ticket: a retained conversion job that names a superseded
+    template version still cannot be restored in the distributed profile, because the
+    conversion-template integrity trigger accepts only the current pair. This is unchanged from
+    `main`.
 
 ## Synchronization
 

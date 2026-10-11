@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sqlite3
@@ -19,6 +20,7 @@ from sqlalchemy import Connection, Engine, MetaData, Table, insert, select, text
 from sqlalchemy import inspect as sqlalchemy_inspect
 from sqlalchemy.engine import URL
 
+from markweave.config import StorageProfile
 from markweave.jobs.models import JobOutput, JobProcessResult, JobRequest, JobState
 from markweave.jobs.policy import JobAdmissionPolicy
 from markweave.jobs.service import JobService, JobServicePolicy
@@ -27,7 +29,16 @@ from markweave.persistence.jobs import SqlJobRepository
 from markweave.persistence.migrations import upgrade_database, upgrade_database_to
 from markweave.persistence.schema import ConversionJobRow, UserRow
 from markweave.persistence.sql import create_database_engine, standalone_database_url
-from markweave.recovery_schema import head_revision
+from markweave.recovery_adapters import DATABASE_PAYLOAD, _encode
+from markweave.recovery_manifest import (
+    RecoveryIdentity,
+    RecoveryMember,
+    build_manifest,
+    canonical_json,
+    sha256_file,
+    write_manifest,
+)
+from markweave.recovery_schema import AUXILIARY_TABLES, head_revision
 from markweave.storage import (
     FilesystemObjectStore,
     ObjectKey,
@@ -350,6 +361,8 @@ class OlderSchemaRecords:
     job_id: str
     draft_id: str
     revision_id: str
+    template_id: str
+    template_version_id: str
     objects: dict[str, bytes]
 
     def key(self, scope: str) -> str:
@@ -416,6 +429,13 @@ def populate_older_schema(engine: Engine) -> OlderSchemaRecords:
                 "publication_state": "published",
             },
         )
+        # Select the published version as current, as template publication does.
+        templates = _table(connection, "templates")
+        connection.execute(
+            templates.update()
+            .where(templates.c.id == template_id)
+            .values(current_version_id=version_id)
+        )
         connection.execute(
             insert(_table(connection, "conversion_jobs")),
             {
@@ -435,6 +455,8 @@ def populate_older_schema(engine: Engine) -> OlderSchemaRecords:
                 "cancel_requested": False,
                 "cleanup_completed": False,
                 "result_object_id": result_id,
+                "template_id": template_id,
+                "template_version_id": version_id,
             },
         )
         connection.execute(
@@ -501,6 +523,8 @@ def populate_older_schema(engine: Engine) -> OlderSchemaRecords:
         job_id,
         draft_id,
         revision_id,
+        template_id,
+        version_id,
         {
             f"template-versions/{owner}/{version_id}": b"template",
             f"uploads/{owner}/{upload_id}": b"# source",
@@ -566,6 +590,20 @@ def _verify_older_database(
             )
             if revision_state != "published":
                 raise RuntimeError("restored earlier-schema revision is invalid")
+            pair = connection.execute(
+                text(
+                    "SELECT j.template_id, j.template_version_id, t.current_version_id "
+                    "FROM conversion_jobs j JOIN templates t ON t.id = j.template_id "
+                    "WHERE j.id = :id"
+                ),
+                {"id": records.job_id},
+            ).one()
+            if tuple(pair) != (
+                records.template_id,
+                records.template_version_id,
+                records.template_version_id,
+            ):
+                raise RuntimeError("restored earlier-schema template pair is invalid")
     finally:
         engine.dispose()
 
@@ -620,6 +658,49 @@ def distributed_older_initialize(records_path: Path) -> None:
     _write_older_records(records_path, records)
 
 
+def distributed_empty_initialize(revision: str) -> None:
+    """Migrate an empty database to `revision` and seed one stable object."""
+
+    engine = create_database_engine(os.environ["RECOVERY_DATABASE"])
+    try:
+        upgrade_database_to(engine, revision)
+    finally:
+        engine.dispose()
+    client = _s3()
+    try:
+        for bucket in filter(None, os.environ["RECOVERY_CREATE_BUCKETS"].split(",")):
+            client.create_bucket(Bucket=bucket)
+        client.put_object(
+            Bucket=os.environ["RECOVERY_SOURCE_BUCKET"],
+            Key=f"uploads/{uuid4()}/{uuid4()}",
+            Body=b"final-image-historical",
+        )
+    finally:
+        client.close()
+
+
+def distributed_historical_set(
+    destination: Path, schema_revision: str | None, omit_tables: frozenset[str]
+) -> None:
+    client = _s3()
+    try:
+        backup_id = write_historical_distributed_set(
+            destination,
+            os.environ["RECOVERY_DATABASE"],
+            client,
+            (
+                os.environ["RECOVERY_S3_ENDPOINT"],
+                "us-east-1",
+                os.environ["RECOVERY_SOURCE_BUCKET"],
+            ),
+            schema_revision=schema_revision,
+            omit_tables=omit_tables,
+        )
+    finally:
+        client.close()
+    print(backup_id)
+
+
 def distributed_older_alter(statement: str) -> None:
     engine = create_database_engine(os.environ["RECOVERY_DATABASE"])
     try:
@@ -642,6 +723,134 @@ def distributed_older_verify(records_path: Path) -> None:
                     raise RuntimeError("restored earlier-schema object is invalid")
     finally:
         client.close()
+
+
+def _migration_shape(revision: str) -> dict[str, list[str]]:
+    """Return the migration-defined model tables and columns at one revision."""
+
+    engine = create_database_engine("sqlite+pysqlite:///:memory:")
+    try:
+        upgrade_database_to(engine, revision)
+        with engine.connect() as connection:
+            inspector = sqlalchemy_inspect(connection)
+            return {
+                name: [column["name"] for column in inspector.get_columns(name)]
+                for name in inspector.get_table_names()
+                if name not in AUXILIARY_TABLES
+            }
+    finally:
+        engine.dispose()
+
+
+def historical_database_payload(
+    connection: Connection,
+    *,
+    schema_revision: str | None = None,
+    omit_tables: frozenset[str] = frozenset(),
+) -> dict[str, Any]:
+    """Build a logical payload the way an earlier release's backup wrote it.
+
+    Test-only: production backup always captures the current model. Only tables
+    and columns that the migrations define at `schema_revision` are read; the
+    payload records the database's own Alembic revision.
+    """
+
+    revision = connection.scalar(text("SELECT version_num FROM alembic_version"))
+    shape = _migration_shape(schema_revision or revision)
+    order = [
+        name
+        for name, _constraints in sqlalchemy_inspect(
+            connection
+        ).get_sorted_table_and_fkc_names()
+        if name in shape and name not in omit_tables
+    ]
+    if set(order) | omit_tables != set(shape):
+        raise RuntimeError("historical payload source lacks a migration table")
+    tables = []
+    for name in order:
+        table = Table(name, MetaData(), autoload_with=connection)
+        columns = shape[name]
+        rows = connection.execute(select(*(table.c[column] for column in columns)))
+        tables.append(
+            {
+                "name": name,
+                "columns": columns,
+                "rows": [
+                    {key: _encode(value) for key, value in row.items()}
+                    for row in rows.mappings()
+                ],
+            }
+        )
+    return {
+        "schema": "markweave-postgresql-logical-v1",
+        "revision": revision,
+        "tables": tables,
+    }
+
+
+def write_historical_distributed_set(  # noqa: PLR0913 - explicit provider identity
+    destination: Path,
+    database_url: str | URL,
+    client: Any,
+    configuration: tuple[str, str, str],
+    *,
+    schema_revision: str | None = None,
+    omit_tables: frozenset[str] = frozenset(),
+) -> str:
+    """Publish a checksummed distributed set for a historical schema revision."""
+
+    destination.mkdir(mode=0o700, parents=True, exist_ok=True)
+    staging = destination / f".historical-{uuid4().hex}"
+    staging.mkdir(mode=0o700)
+    payload_path = staging / DATABASE_PAYLOAD
+    payload_path.parent.mkdir(mode=0o700)
+    engine = create_database_engine(database_url)
+    try:
+        with engine.connect() as connection:
+            payload = historical_database_payload(
+                connection, schema_revision=schema_revision, omit_tables=omit_tables
+            )
+            resource = connection.execute(
+                text(
+                    "SELECT current_database(), current_schema(), "
+                    "COALESCE(inet_server_addr()::text, 'local'), inet_server_port()"
+                )
+            ).one()
+    finally:
+        engine.dispose()
+    payload_path.write_bytes(canonical_json(payload) + b"\n")
+    size, digest = sha256_file(payload_path)
+    members = [RecoveryMember(DATABASE_PAYLOAD, size, digest)]
+    endpoint, region, bucket = configuration
+    listed = client.list_objects_v2(Bucket=bucket)
+    inventory = sorted(item["Key"] for item in listed.get("Contents", []))
+    for key in inventory:
+        target = staging / "objects" / key
+        target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        response = client.get_object(Bucket=bucket, Key=key)
+        with closing(response["Body"]) as body:
+            target.write_bytes(body.read())
+        object_size, object_digest = sha256_file(target)
+        members.append(RecoveryMember(f"objects/{key}", object_size, object_digest))
+    database_source = hashlib.sha256(canonical_json(list(resource))).hexdigest()
+    # The same provider identity the S3 recovery adapter derives for its source.
+    object_source = hashlib.sha256(
+        canonical_json([endpoint, region, bucket])
+    ).hexdigest()
+    manifest = build_manifest(
+        StorageProfile.DISTRIBUTED,
+        created_at=datetime.now(UTC),
+        identity=RecoveryIdentity(
+            hashlib.sha256(digest.encode()).hexdigest(),
+            hashlib.sha256(canonical_json(inventory)).hexdigest(),
+            "historical-test-producer",
+            f"{database_source}.{object_source}",
+        ),
+        members=tuple(members),
+    )
+    write_manifest(staging, manifest)
+    os.replace(staging, destination / manifest.backup_id)
+    return manifest.backup_id
 
 
 # Fixed test-only schema changes that a supported restore must refuse.
@@ -685,6 +894,12 @@ def _operations(arguments: argparse.Namespace) -> dict[str, Callable[[], None]]:
         "distributed-older-initialize": lambda: distributed_older_initialize(records),
         "distributed-older-alter": lambda: distributed_older_alter(statement),
         "distributed-older-verify": lambda: distributed_older_verify(records),
+        "distributed-empty-initialize": lambda: distributed_empty_initialize(
+            arguments.revision
+        ),
+        "distributed-historical-set": lambda: distributed_historical_set(
+            path, arguments.schema_revision, frozenset(arguments.omit_table)
+        ),
     }
 
 
@@ -694,6 +909,9 @@ def main() -> None:
     parser.add_argument("--path", required=False, type=Path)
     parser.add_argument("--records", required=False, type=Path)
     parser.add_argument("--alteration", choices=tuple(_OLDER_ALTERATIONS))
+    parser.add_argument("--revision")
+    parser.add_argument("--schema-revision")
+    parser.add_argument("--omit-table", action="append", default=[])
     arguments = parser.parse_args()
     operations = _operations(arguments)
     if arguments.operation not in operations:

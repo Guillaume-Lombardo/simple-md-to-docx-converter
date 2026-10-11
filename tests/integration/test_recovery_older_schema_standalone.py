@@ -11,7 +11,11 @@ from sqlalchemy import inspect, select, text
 
 from markweave.config import StorageProfile
 from markweave.persistence.migrations import upgrade_database, upgrade_database_to
-from markweave.persistence.schema import ComposerRevisionRow, ConversionJobRow
+from markweave.persistence.schema import (
+    ComposerRevisionRow,
+    ConversionJobRow,
+    TemplateRow,
+)
 from markweave.persistence.sql import create_database_engine, standalone_database_url
 from markweave.recovery_manifest import RecoveryError
 from markweave.recovery_schema import OLDEST_RECOVERY_SET_REVISION, head_revision
@@ -87,6 +91,13 @@ def _assert_restored_at_head(target: Path, records: OlderSchemaRecords) -> None:
                 )
             ).one()
             assert job == ("succeeded", records.owner_id)
+            assert connection.execute(
+                select(
+                    ConversionJobRow.template_version_id, TemplateRow.current_version_id
+                )
+                .join(TemplateRow, TemplateRow.id == ConversionJobRow.template_id)
+                .where(ConversionJobRow.id == records.job_id)
+            ).one() == (records.template_version_id, records.template_version_id)
             assert (
                 connection.scalar(
                     select(ComposerRevisionRow.publication_state).where(
@@ -205,3 +216,28 @@ def test_standalone_refuses_current_schema_relabelled_as_earlier(
     with pytest.raises(RecoveryError, match="migration failed"):
         _restore(data, tmp_path)
     assert not (tmp_path / "restored").exists()
+
+
+@pytest.mark.parametrize("name", ["recovery#archive", "recovery?archive", "100%set"])
+def test_standalone_restores_sets_under_uri_reserved_directory_names(
+    tmp_path: Path, name: str
+) -> None:
+    data, records = _older_data(tmp_path)
+    service = RecoveryService()
+    sets = (tmp_path / name).resolve()
+    manifest = service.backup(
+        BackupRequest(
+            StorageProfile.STANDALONE, sets, 60, data_directory=data.resolve()
+        )
+    )
+    target = (tmp_path / f"restored-{name}").resolve()
+    service.restore(
+        RestoreRequest(
+            StorageProfile.STANDALONE,
+            sets / manifest.backup_id,
+            60,
+            "offline-reserved-name-proof",
+            data_directory=target,
+        )
+    )
+    _assert_restored_at_head(target, records)

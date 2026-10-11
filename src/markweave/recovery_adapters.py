@@ -20,6 +20,7 @@ from typing import Any, Protocol, cast
 from uuid import UUID
 
 from sqlalchemy import Column, Connection, MetaData, Table, inspect, select, text
+from sqlalchemy.engine import URL
 from sqlalchemy.exc import SQLAlchemyError
 
 from markweave.persistence.errors import PersistenceError
@@ -46,6 +47,10 @@ from markweave.recovery_schema import (
 from markweave.storage import ObjectScope
 
 RECOVERY_ADVISORY_LOCK = 1_297_337_037
+# Restore inserts these pointer columns only after every referenced row exists.
+_DEFERRED_POINTERS = {"templates": "current_version_id"}
+# Integrity triggers on these tables require restored template pointers.
+_POINTER_DEPENDENT_TABLES = frozenset({"conversion_jobs"})
 DATABASE_PAYLOAD = "database/metadata.json"
 SQLITE_PAYLOAD = "database/metadata.sqlite3"
 _SCOPES = frozenset(scope.value for scope in ObjectScope)
@@ -213,7 +218,9 @@ class StandaloneRecoveryAdapter:
             self._verify_sqlite(database)
             # Verify against the schema the set was created with, before migration.
             self._verify_stable_references_sqlite(database, stage / "objects")
-            engine = create_database_engine(f"sqlite+pysqlite:///{database}")
+            engine = create_database_engine(
+                URL.create("sqlite+pysqlite", database=str(database))
+            )
             try:
                 upgrade_database(engine)
                 with engine.connect() as connection:
@@ -250,7 +257,9 @@ class StandaloneRecoveryAdapter:
         try:
             # `immutable=1` reads the verified set without creating journal files in it.
             with closing(
-                sqlite3.connect(f"file:{database}?mode=ro&immutable=1", uri=True)
+                sqlite3.connect(
+                    _read_only_sqlite_uri(database, immutable=True), uri=True
+                )
             ) as connection:
                 return require_restorable_revision(sqlite_revision(connection))
         except sqlite3.Error:
@@ -276,7 +285,7 @@ class StandaloneRecoveryAdapter:
     def _verify_sqlite(database: Path) -> None:
         try:
             with closing(
-                sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+                sqlite3.connect(_read_only_sqlite_uri(database), uri=True)
             ) as connection:
                 result = connection.execute("PRAGMA integrity_check").fetchone()
             if result != ("ok",):
@@ -311,7 +320,7 @@ class StandaloneRecoveryAdapter:
 
         try:
             with closing(
-                sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+                sqlite3.connect(_read_only_sqlite_uri(database), uri=True)
             ) as connection:
                 recorded = sqlite_revision(connection)
                 if expected_revision is None:
@@ -392,11 +401,8 @@ class PostgreSQLRecoveryAdapter:
                         "SELECT pg_current_wal_lsn()::text, txid_current_snapshot()::text"
                     )
                 ).one()
-                revision = connection.scalar(
-                    text("SELECT version_num FROM alembic_version")
-                )
                 tables: list[dict[str, Any]] = []
-                for table in self._backup_tables(connection, revision):
+                for table in Base.metadata.sorted_tables:
                     deadline.remaining()
                     rows = connection.execute(select(table)).mappings()
                     tables.append(
@@ -409,6 +415,9 @@ class PostgreSQLRecoveryAdapter:
                             ],
                         }
                     )
+                revision = connection.scalar(
+                    text("SELECT version_num FROM alembic_version")
+                )
                 payload = {
                     "schema": "markweave-postgresql-logical-v1",
                     "revision": revision,
@@ -531,6 +540,8 @@ class PostgreSQLRecoveryAdapter:
 
         if {item["name"] for item in payload_tables} != set(tables_by_name):
             raise RecoveryError("PostgreSQL backup schema is incompatible")
+        pointers: list[tuple[Table, str, Any, Any]] = []
+        deferred: list[tuple[Table, list[dict[str, Any]]]] = []
         for item in payload_tables:
             deadline.remaining()
             table = tables_by_name[item["name"]]
@@ -550,22 +561,30 @@ class PostgreSQLRecoveryAdapter:
                 if rows != [{"id": 1}]:
                     raise RecoveryError("PostgreSQL backup schema is incompatible")
                 continue  # Migration has already seeded the singleton lock row.
+            if table.name in _POINTER_DEPENDENT_TABLES:
+                deferred.append((table, rows))
+                continue
+            pointer = _DEFERRED_POINTERS.get(table.name)
+            if pointer is not None and pointer in columns:
+                pointers.extend(
+                    (table, pointer, row["id"], row[pointer])
+                    for row in rows
+                    if row.get(pointer) is not None
+                )
+                rows = [row | {pointer: None} for row in rows]
             if rows:
                 connection.execute(table.insert(), rows)
-
-    @staticmethod
-    def _backup_tables(connection: Connection, revision: object) -> list[Table]:
-        """Select the model of the database revision, refusing unknown schemas."""
-
-        if require_restorable_revision(revision) == head_revision():
-            return list(Base.metadata.sorted_tables)
-        inspector = inspect(connection)
-        names = [
-            name
-            for name, _constraints in inspector.get_sorted_table_and_fkc_names()
-            if name is not None and name not in AUXILIARY_TABLES
-        ]
-        return [_reflected_table(inspector, name) for name in names]
+        # Integrity triggers require the referenced version before the pointer, and
+        # the pointer before any conversion that names that template pair.
+        for table, pointer, identifier, value in pointers:
+            deadline.remaining()
+            connection.execute(
+                table.update().where(table.c.id == identifier).values({pointer: value})
+            )
+        for table, rows in deferred:
+            deadline.remaining()
+            if rows:
+                connection.execute(table.insert(), rows)
 
     @staticmethod
     def _restore_tables(
@@ -945,6 +964,13 @@ def _referenced_keys_from_rows(tables: Mapping[str, Any]) -> frozenset[str]:
     for key in keys:
         _validate_object_key(key)
     return frozenset(keys)
+
+
+def _read_only_sqlite_uri(database: Path, *, immutable: bool = False) -> str:
+    """Encode the path so `#`, `?` and `%` in directory names stay literal."""
+
+    options = "mode=ro&immutable=1" if immutable else "mode=ro"
+    return f"{database.absolute().as_uri()}?{options}"
 
 
 def _reflected_table(inspector: Any, name: str) -> Table:

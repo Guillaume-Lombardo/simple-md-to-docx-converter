@@ -121,9 +121,13 @@ A distributed restore of an earlier-revision set requires a target database with
 recreates the recorded revision, inserts the rows, and migrates to the current head in one
 database transaction. A target database already migrated to the current head accepts only a set
 created at the current head, and refuses an earlier one with `Distributed database target must be
-empty for an earlier schema`. The distributed `markweave backup` command also captures a database
-still at an earlier supported revision, for example before an upgrade, and refuses an unknown
-revision.
+empty for an earlier schema`. Restore inserts each template's current-version pointer after its
+template versions, and the conversion jobs that name a template pair after those pointers, so
+the integrity triggers stay enabled.
+
+Run `markweave backup` with the release that matches the database revision: it captures the
+model of its own release. Take the pre-upgrade backup with the release that is currently deployed,
+as the upgrade guide requires, and restore it later with the same or a newer release.
 
 For distributed restore, use `--database-url-environment` and the `--s3-*` options for distinct
 isolated targets. Supply static credentials, when needed, with

@@ -1,8 +1,11 @@
-"""Distributed restore of recovery sets created by an earlier supported schema."""
+"""Distributed restore of recovery sets created by an earlier supported schema.
+
+Production backup captures only the current model, so earlier-revision sets are
+written by the test-only historical producer shared with the final-image smoke.
+"""
 
 from __future__ import annotations
 
-import json
 import os
 from collections.abc import Iterator
 from contextlib import ExitStack, closing
@@ -16,16 +19,17 @@ from sqlalchemy.engine import make_url
 
 from markweave.config import StorageProfile
 from markweave.persistence.migrations import upgrade_database, upgrade_database_to
-from markweave.persistence.schema import ComposerRevisionRow, ConversionJobRow
-from markweave.persistence.sql import create_database_engine
-from markweave.recovery_adapters import (
-    PostgreSQLRecoveryAdapter,
-    RecoveryDeadline,
-    S3Configuration,
+from markweave.persistence.schema import (
+    ComposerRevisionRow,
+    ConversionJobRow,
+    TemplateRow,
 )
-from markweave.recovery_manifest import RecoveryError, RecoveryManifest
+from markweave.persistence.sql import create_database_engine
+from markweave.recovery_adapters import S3Configuration
+from markweave.recovery_manifest import RecoveryError
 from markweave.recovery_schema import OLDEST_RECOVERY_SET_REVISION, head_revision
 from markweave.recovery_service import BackupRequest, RecoveryService, RestoreRequest
+from tests.e2e.recovery_cli_setup import write_historical_distributed_set
 from tests.recovery_older_schema import (
     PRE_FILL_PLAN_REVISION,
     OlderSchemaRecords,
@@ -37,6 +41,8 @@ pytestmark = [
     pytest.mark.requires_postgres,
     pytest.mark.requires_s3,
 ]
+_BELOW_FLOOR_REVISION = "20260828_13"
+_UNKNOWN_REVISION = "20991231_99"
 
 
 @pytest.fixture
@@ -111,30 +117,49 @@ def _older_source(stack: ExitStack, client) -> tuple[str, str, OlderSchemaRecord
     return database, bucket, records
 
 
-def _backup(root: Path, database: str, bucket: str) -> RecoveryManifest:
-    return RecoveryService().backup(
-        BackupRequest(
+def _historical_set(
+    root: Path,
+    client,
+    database: str,
+    bucket: str,
+    **options,
+) -> Path:
+    destination = (root / "sets").resolve()
+    backup_id = write_historical_distributed_set(
+        destination,
+        database,
+        client,
+        (
+            os.environ["MARKWEAVE_TEST_S3_ENDPOINT_URL"],
+            os.environ["MARKWEAVE_TEST_S3_REGION"],
+            bucket,
+        ),
+        **options,
+    )
+    return destination / backup_id
+
+
+def _restore(source: Path, database: str, bucket: str) -> None:
+    RecoveryService().restore(
+        RestoreRequest(
             StorageProfile.DISTRIBUTED,
-            (root / "sets").resolve(),
+            source,
             120,
+            "isolated-older-schema-proof",
             database_url=database,
             s3=_configuration(bucket),
-            consistency_proof="workers-drained-older-schema",
         )
     )
 
 
-def _restore_request(
-    root: Path, manifest: RecoveryManifest, database: str, bucket: str
-) -> RestoreRequest:
-    return RestoreRequest(
-        StorageProfile.DISTRIBUTED,
-        (root / "sets" / manifest.backup_id).resolve(),
-        120,
-        "isolated-older-schema-proof",
-        database_url=database,
-        s3=_configuration(bucket),
-    )
+def _assert_untouched(client, database: str, bucket: str) -> None:
+    assert not client.list_objects_v2(Bucket=bucket).get("Contents", [])
+    engine = create_database_engine(database)
+    try:
+        with engine.connect() as connection:
+            assert inspect(connection).get_table_names() == []
+    finally:
+        engine.dispose()
 
 
 def test_distributed_restores_pre_fill_plan_set_to_head_with_references(
@@ -143,13 +168,10 @@ def test_distributed_restores_pre_fill_plan_set_to_head_with_references(
     client = s3_client
     with ExitStack() as stack:
         database, bucket, records = _older_source(stack, client)
-        manifest = _backup(tmp_path, database, bucket)
+        source = _historical_set(tmp_path, client, database, bucket)
         target_database = _schema_url(stack)
         target_bucket = _bucket(stack, client, "older-target")
-        result = RecoveryService().restore(
-            _restore_request(tmp_path, manifest, target_database, target_bucket)
-        )
-        assert result.backup_id == manifest.backup_id
+        _restore(source, target_database, target_bucket)
         engine = create_database_engine(target_database)
         try:
             with engine.connect() as connection:
@@ -159,10 +181,26 @@ def test_distributed_restores_pre_fill_plan_set_to_head_with_references(
                 )
                 assert "composer_fill_plans" in inspect(connection).get_table_names()
                 assert connection.execute(
-                    select(ConversionJobRow.state, ConversionJobRow.owner_id).where(
-                        ConversionJobRow.id == records.job_id
+                    select(
+                        ConversionJobRow.state,
+                        ConversionJobRow.owner_id,
+                        ConversionJobRow.template_id,
+                        ConversionJobRow.template_version_id,
+                    ).where(ConversionJobRow.id == records.job_id)
+                ).one() == (
+                    "succeeded",
+                    records.owner_id,
+                    records.template_id,
+                    records.template_version_id,
+                )
+                assert (
+                    connection.scalar(
+                        select(TemplateRow.current_version_id).where(
+                            TemplateRow.id == records.template_id
+                        )
                     )
-                ).one() == ("succeeded", records.owner_id)
+                    == records.template_version_id
+                )
                 assert (
                     connection.scalar(
                         select(ComposerRevisionRow.publication_state).where(
@@ -179,6 +217,58 @@ def test_distributed_restores_pre_fill_plan_set_to_head_with_references(
                 assert body.read() == content
 
 
+def test_distributed_restores_current_template_pointer_from_a_head_backup(
+    tmp_path: Path, s3_client
+) -> None:
+    client = s3_client
+    with ExitStack() as stack:
+        database = _schema_url(stack)
+        bucket = _bucket(stack, client, "head-source")
+        engine = create_database_engine(database)
+        try:
+            upgrade_database(engine)
+            records = populate_older_schema(engine)
+        finally:
+            engine.dispose()
+        for key, content in records.objects.items():
+            client.put_object(Bucket=bucket, Key=key, Body=content)
+        manifest = RecoveryService().backup(
+            BackupRequest(
+                StorageProfile.DISTRIBUTED,
+                (tmp_path / "sets").resolve(),
+                120,
+                database_url=database,
+                s3=_configuration(bucket),
+                consistency_proof="workers-drained-head",
+            )
+        )
+        target_database = _schema_url(stack)
+        target_bucket = _bucket(stack, client, "head-target")
+        _restore(
+            (tmp_path / "sets" / manifest.backup_id).resolve(),
+            target_database,
+            target_bucket,
+        )
+        engine = create_database_engine(target_database)
+        try:
+            with engine.connect() as connection:
+                assert connection.execute(
+                    select(TemplateRow.current_version_id).where(
+                        TemplateRow.id == records.template_id
+                    )
+                ).scalar_one() == (records.template_version_id)
+                assert (
+                    connection.scalar(
+                        select(ConversionJobRow.template_version_id).where(
+                            ConversionJobRow.id == records.job_id
+                        )
+                    )
+                    == records.template_version_id
+                )
+        finally:
+            engine.dispose()
+
+
 def test_distributed_refuses_earlier_set_missing_a_retained_object(
     tmp_path: Path, s3_client
 ) -> None:
@@ -186,20 +276,12 @@ def test_distributed_refuses_earlier_set_missing_a_retained_object(
     with ExitStack() as stack:
         database, bucket, records = _older_source(stack, client)
         client.delete_object(Bucket=bucket, Key=records.key("composer-artifacts"))
-        manifest = _backup(tmp_path, database, bucket)
+        source = _historical_set(tmp_path, client, database, bucket)
         target_database = _schema_url(stack)
         target_bucket = _bucket(stack, client, "older-missing")
         with pytest.raises(RecoveryError, match="stable object references"):
-            RecoveryService().restore(
-                _restore_request(tmp_path, manifest, target_database, target_bucket)
-            )
-        assert not client.list_objects_v2(Bucket=target_bucket).get("Contents", [])
-        engine = create_database_engine(target_database)
-        try:
-            with engine.connect() as connection:
-                assert inspect(connection).get_table_names() == []
-        finally:
-            engine.dispose()
+            _restore(source, target_database, target_bucket)
+        _assert_untouched(client, target_database, target_bucket)
 
 
 def test_distributed_refuses_earlier_set_into_a_migrated_target(
@@ -208,7 +290,7 @@ def test_distributed_refuses_earlier_set_into_a_migrated_target(
     client = s3_client
     with ExitStack() as stack:
         database, bucket, _records = _older_source(stack, client)
-        manifest = _backup(tmp_path, database, bucket)
+        source = _historical_set(tmp_path, client, database, bucket)
         target_database = _schema_url(stack)
         engine = create_database_engine(target_database)
         try:
@@ -217,70 +299,80 @@ def test_distributed_refuses_earlier_set_into_a_migrated_target(
             engine.dispose()
         target_bucket = _bucket(stack, client, "older-migrated")
         with pytest.raises(RecoveryError, match="must be empty for an earlier schema"):
-            RecoveryService().restore(
-                _restore_request(tmp_path, manifest, target_database, target_bucket)
-            )
+            _restore(source, target_database, target_bucket)
         assert not client.list_objects_v2(Bucket=target_bucket).get("Contents", [])
 
 
-def test_distributed_backup_refuses_unknown_newer_schema(
+def test_distributed_incomplete_earlier_set_rolls_back_and_removes_objects(
     tmp_path: Path, s3_client
+) -> None:
+    client = s3_client
+    with ExitStack() as stack:
+        database, bucket, _records = _older_source(stack, client)
+        source = _historical_set(
+            tmp_path,
+            client,
+            database,
+            bucket,
+            omit_tables=frozenset({"composer_questions"}),
+        )
+        target_database = _schema_url(stack)
+        target_bucket = _bucket(stack, client, "older-incomplete")
+        with pytest.raises(RecoveryError, match="schema is incompatible"):
+            _restore(source, target_database, target_bucket)
+        _assert_untouched(client, target_database, target_bucket)
+
+
+@pytest.mark.parametrize(
+    ("revision", "message"),
+    [
+        (_UNKNOWN_REVISION, "unknown to this release"),
+        (_BELOW_FLOOR_REVISION, "predates supported recovery sets"),
+    ],
+)
+def test_distributed_restore_refuses_unsupported_revisions_before_writes(
+    tmp_path: Path, s3_client, revision: str, message: str
 ) -> None:
     client = s3_client
     with ExitStack() as stack:
         database = _schema_url(stack)
-        bucket = _bucket(stack, client, "newer-source")
+        bucket = _bucket(stack, client, "unsupported-source")
         engine = create_database_engine(database)
         try:
-            upgrade_database(engine)
-            with engine.begin() as connection:
-                connection.execute(
-                    text("UPDATE alembic_version SET version_num = '20991231_99'")
-                )
+            if revision == _UNKNOWN_REVISION:
+                upgrade_database(engine)
+                with engine.begin() as connection:
+                    connection.execute(
+                        text("UPDATE alembic_version SET version_num = :revision"),
+                        {"revision": revision},
+                    )
+            else:
+                upgrade_database_to(engine, revision)
         finally:
             engine.dispose()
-        with pytest.raises(RecoveryError, match="unknown to this release"):
-            _backup(tmp_path, database, bucket)
-        assert [path.name for path in (tmp_path / "sets").iterdir()] == [
-            ".markweave-recovery.lock"
-        ]
-
-
-def test_distributed_incompatible_earlier_payload_rolls_back_its_migration(
-    tmp_path: Path, s3_client
-) -> None:
-    client = s3_client
-    with ExitStack() as stack:
-        database, _bucket, records = _older_source(stack, client)
-        staging = tmp_path / "staging"
-        staging.mkdir()
-        adapter = PostgreSQLRecoveryAdapter()
-        backup = adapter.backup(database, staging, RecoveryDeadline.after(60))
-        payload = staging / "database" / "metadata.json"
-        document = json.loads(payload.read_bytes())
-        assert document["revision"] == PRE_FILL_PLAN_REVISION
-        questions = next(
-            table
-            for table in document["tables"]
-            if table["name"] == "composer_questions"
+        client.put_object(
+            Bucket=bucket, Key=f"uploads/{uuid4()}/{uuid4()}", Body=b"object"
         )
-        questions["columns"].pop()
-        payload.write_text(json.dumps(document), encoding="utf-8")
-        target_database = _schema_url(stack)
-        with pytest.raises(RecoveryError, match="schema is incompatible"):
-            adapter.restore(
-                target_database,
-                payload,
-                source_identity=backup.source_identity,
-                object_keys=frozenset(records.objects),
-                deadline=RecoveryDeadline.after(60),
+        if revision == _UNKNOWN_REVISION:
+            # The unchanged production backup records the newer label it observes.
+            manifest = RecoveryService().backup(
+                BackupRequest(
+                    StorageProfile.DISTRIBUTED,
+                    (tmp_path / "sets").resolve(),
+                    120,
+                    database_url=database,
+                    s3=_configuration(bucket),
+                    consistency_proof="workers-drained-newer",
+                )
             )
-        engine = create_database_engine(target_database)
-        try:
-            with engine.connect() as connection:
-                assert inspect(connection).get_table_names() == []
-        finally:
-            engine.dispose()
+            source = (tmp_path / "sets" / manifest.backup_id).resolve()
+        else:
+            source = _historical_set(tmp_path, client, database, bucket)
+        target_database = _schema_url(stack)
+        target_bucket = _bucket(stack, client, "unsupported-target")
+        with pytest.raises(RecoveryError, match=message):
+            _restore(source, target_database, target_bucket)
+        _assert_untouched(client, target_database, target_bucket)
 
 
 def test_distributed_restores_oldest_supported_recovery_set(
@@ -295,12 +387,10 @@ def test_distributed_restores_oldest_supported_recovery_set(
             upgrade_database_to(engine, OLDEST_RECOVERY_SET_REVISION)
         finally:
             engine.dispose()
-        manifest = _backup(tmp_path, database, bucket)
+        source = _historical_set(tmp_path, client, database, bucket)
         target_database = _schema_url(stack)
         target_bucket = _bucket(stack, client, "oldest-target")
-        RecoveryService().restore(
-            _restore_request(tmp_path, manifest, target_database, target_bucket)
-        )
+        _restore(source, target_database, target_bucket)
         engine = create_database_engine(target_database)
         try:
             with engine.connect() as connection:

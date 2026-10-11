@@ -101,8 +101,8 @@ done
 [[ "$ready" == true ]]
 ensure_postgres_database "$postgres" target
 ensure_postgres_database "$postgres" missing
-for database in older_source older_target older_bad_source older_bad_target \
-  older_newer_source; do
+for database in older_source older_target older_bad_target older_newer_source \
+  older_newer_target older_floor_source older_floor_target; do
   ensure_postgres_database "$postgres" "$database"
 done
 
@@ -364,15 +364,27 @@ distributed_restore() {
     --offline-proof final-image-older-schema-isolated --yes
 }
 
+# Production backup captures only the current model, so earlier-revision sets are
+# written inside the image by the test-only historical producer.
+historical_set() {
+  local database="$1"
+  local bucket="$2"
+  local destination="$3"
+  shift 3
+  run_setup "${common_s3[@]}" --env RECOVERY_DATABASE="$postgres_root/$database" \
+    --env RECOVERY_SOURCE_BUCKET="$bucket" \
+    -- distributed-historical-set --path "$destination" "$@" | tail -n 1
+}
+
 # A populated pre-T91 distributed set restores to head with its references.
 run_setup "${common_s3[@]}" \
   --env RECOVERY_DATABASE="$postgres_root/older_source" \
   --env RECOVERY_SOURCE_BUCKET=older-source-bucket \
-  --env RECOVERY_CREATE_BUCKETS=older-source-bucket,older-target-bucket,older-bad-bucket,older-rejected-bucket,older-newer-bucket \
+  --env RECOVERY_CREATE_BUCKETS=older-source-bucket,older-target-bucket,older-rejected-bucket,older-newer-bucket,older-newer-rejected-bucket,older-floor-bucket,older-floor-rejected-bucket \
   -- distributed-older-initialize --records /e2e/distributed-older.records.json
-older_json="$(distributed_backup older_source older-source-bucket \
+older_id="$(historical_set older_source older-source-bucket \
   /e2e/distributed-older-sets)"
-older_id="$(jq -er '.backup_id' <<<"$older_json")"
+[[ "$older_id" =~ ^[0-9a-f]{64}$ ]]
 distributed_restore older_target older-target-bucket \
   "/e2e/distributed-older-sets/$older_id" >/dev/null
 run_setup "${common_s3[@]}" \
@@ -387,17 +399,10 @@ verify_restored_readiness --env MARKWEAVE_STORAGE_PROFILE=distributed \
   --env MARKWEAVE_S3_ACCESS_KEY_ID=recovery-test \
   --env MARKWEAVE_S3_SECRET_ACCESS_KEY=recovery-test-secret
 
-# An incomplete earlier schema is refused, rolled back, and its objects removed.
-run_setup "${common_s3[@]}" \
-  --env RECOVERY_DATABASE="$postgres_root/older_bad_source" \
-  --env RECOVERY_SOURCE_BUCKET=older-bad-bucket --env RECOVERY_CREATE_BUCKETS= \
-  -- distributed-older-initialize --records /e2e/distributed-older-bad.records.json
-run_setup "${common_s3[@]}" \
-  --env RECOVERY_DATABASE="$postgres_root/older_bad_source" \
-  -- distributed-older-alter --alteration drop-table
-bad_json="$(distributed_backup older_bad_source older-bad-bucket \
-  /e2e/distributed-older-bad-sets)"
-bad_id="$(jq -er '.backup_id' <<<"$bad_json")"
+# An incomplete earlier set is refused, rolled back, and its objects removed.
+bad_id="$(historical_set older_source older-source-bucket \
+  /e2e/distributed-older-bad-sets --omit-table composer_questions)"
+[[ "$bad_id" =~ ^[0-9a-f]{64}$ ]]
 if rejected_json="$(distributed_restore older_bad_target older-rejected-bucket \
   "/e2e/distributed-older-bad-sets/$bad_id" 2>&1)"; then
   echo "distributed restore accepted an incomplete earlier schema" >&2
@@ -409,20 +414,46 @@ run_setup "${common_s3[@]}" \
   --env RECOVERY_DATABASE="$postgres_root/older_bad_target" \
   --env RECOVERY_MISSING_BUCKET=older-rejected-bucket -- verify-empty-target
 
-# A database at a revision unknown to this release is refused before any set exists.
+# A set labelled with a revision unknown to this release, produced by the unchanged
+# production backup, is refused by restore before any target write.
 run_setup "${common_s3[@]}" \
   --env RECOVERY_DATABASE="$postgres_root/older_newer_source" \
   --env RECOVERY_SOURCE_BUCKET=older-newer-bucket --env RECOVERY_CREATE_BUCKETS= \
-  -- distributed-older-initialize --records /e2e/distributed-older-newer.records.json
+  -- distributed-empty-initialize --revision head
 run_setup "${common_s3[@]}" \
   --env RECOVERY_DATABASE="$postgres_root/older_newer_source" \
   -- distributed-older-alter --alteration newer-revision
-if newer_json="$(distributed_backup older_newer_source older-newer-bucket \
-  /e2e/distributed-older-newer-sets 2>&1)"; then
-  echo "distributed backup accepted an unknown schema revision" >&2
+newer_json="$(distributed_backup older_newer_source older-newer-bucket \
+  /e2e/distributed-older-newer-sets)"
+newer_id="$(jq -er '.backup_id' <<<"$newer_json")"
+if rejected_json="$(distributed_restore older_newer_target \
+  older-newer-rejected-bucket "/e2e/distributed-older-newer-sets/$newer_id" 2>&1)"; then
+  echo "distributed restore accepted an unknown schema revision" >&2
   exit 1
 fi
 expect_recovery_failure "Recovery set schema revision is unknown to this release" \
-  "$newer_json"
+  "$rejected_json"
+run_setup "${common_s3[@]}" \
+  --env RECOVERY_DATABASE="$postgres_root/older_newer_target" \
+  --env RECOVERY_MISSING_BUCKET=older-newer-rejected-bucket -- verify-empty-target
+
+# A set from just below the supported floor is refused before any target write.
+run_setup "${common_s3[@]}" \
+  --env RECOVERY_DATABASE="$postgres_root/older_floor_source" \
+  --env RECOVERY_SOURCE_BUCKET=older-floor-bucket --env RECOVERY_CREATE_BUCKETS= \
+  -- distributed-empty-initialize --revision 20260828_13
+floor_id="$(historical_set older_floor_source older-floor-bucket \
+  /e2e/distributed-older-floor-sets)"
+[[ "$floor_id" =~ ^[0-9a-f]{64}$ ]]
+if rejected_json="$(distributed_restore older_floor_target \
+  older-floor-rejected-bucket "/e2e/distributed-older-floor-sets/$floor_id" 2>&1)"; then
+  echo "distributed restore accepted a revision below the supported floor" >&2
+  exit 1
+fi
+expect_recovery_failure \
+  "Recovery set schema revision predates supported recovery sets" "$rejected_json"
+run_setup "${common_s3[@]}" \
+  --env RECOVERY_DATABASE="$postgres_root/older_floor_target" \
+  --env RECOVERY_MISSING_BUCKET=older-floor-rejected-bucket -- verify-empty-target
 
 echo "Final-image standalone and distributed recovery CLI smoke passed, including earlier-schema sets."

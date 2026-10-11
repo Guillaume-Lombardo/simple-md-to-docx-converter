@@ -31,7 +31,7 @@ from markweave.recovery_adapters import (
     _regular_object,
     _verify_database_references,
 )
-from markweave.recovery_manifest import RecoveryError
+from markweave.recovery_manifest import RecoveryError, canonical_json
 from markweave.recovery_schema import (
     AUXILIARY_TABLES,
     OLDEST_RECOVERY_SET_REVISION,
@@ -43,6 +43,7 @@ from markweave.recovery_schema import (
     sqlite_revision,
     sqlite_shape,
 )
+from tests.e2e.recovery_cli_setup import historical_database_payload
 from tests.recovery_older_schema import PRE_FILL_PLAN_REVISION, populate_older_schema
 from tests.unit.test_recovery_provider_adapters import _PostgreSQLEngine
 
@@ -261,15 +262,18 @@ def _distributed_fakes(tmp_path: Path, mocker, *, target_revision: str | None = 
     records = populate_older_schema(source_engine)
     if target_revision is not None:
         upgrade_database_to(target_engine, target_revision)
-    engines = iter(
-        (
-            _PostgreSQLEngine(source_engine, ("source", "main", "local", 5432)),
-            _PostgreSQLEngine(target_engine, ("target", "main", "local", 5432)),
+    staging = tmp_path / "staging"
+    (staging / "database").mkdir(parents=True)
+    payload = staging / "database" / "metadata.json"
+    with source_engine.connect() as connection:
+        payload.write_bytes(
+            canonical_json(historical_database_payload(connection)) + b"\n"
         )
-    )
     mocker.patch(
         "markweave.recovery_adapters.create_database_engine",
-        side_effect=lambda *_args, **_kwargs: next(engines),
+        return_value=_PostgreSQLEngine(
+            target_engine, ("target", "main", "local", 5432)
+        ),
     )
     mocker.patch(
         "markweave.recovery_adapters.inspect",
@@ -281,14 +285,10 @@ def _distributed_fakes(tmp_path: Path, mocker, *, target_revision: str | None = 
             connection.raw, revision
         ),
     )
-    staging = tmp_path / "staging"
-    staging.mkdir()
-    adapter = PostgreSQLRecoveryAdapter()
-    backup = adapter.backup("postgresql://source", staging, RecoveryDeadline.after(30))
     return (
-        adapter,
-        backup,
-        staging / "database" / "metadata.json",
+        PostgreSQLRecoveryAdapter(),
+        "source-identity",
+        payload,
         records,
         (
             source_engine,
@@ -297,11 +297,11 @@ def _distributed_fakes(tmp_path: Path, mocker, *, target_revision: str | None = 
     )
 
 
-def _restore(adapter, backup, payload: Path, keys: frozenset[str]) -> str:
+def _restore(adapter, source_identity: str, payload: Path, keys: frozenset[str]) -> str:
     return adapter.restore(
         "postgresql://target",
         payload,
-        source_identity=backup.source_identity,
+        source_identity=source_identity,
         object_keys=keys,
         deadline=RecoveryDeadline.after(30),
     )
