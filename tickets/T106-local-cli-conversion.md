@@ -2,7 +2,7 @@
 ticket: T106
 linear_id: G1L-626
 linear_url: https://linear.app/g1lom/issue/G1L-626/t106-add-local-serverless-cli-conversion
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -62,6 +62,25 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
   earlier mismatch note was removed from `docs/conversion-cli.md`. Limitations: host fonts are not
   verified; PPTX output and client-side packaging of Markdown with local
   images are out of scope for local mode.
+- 2026-10-11: Completed and verified on `main`. PR #287 was squash-merged as
+  `4280275d676a1bfbc522ce9e5282a6c6c27c52ba` from head `63b0e87` after six independent review
+  rounds; round 6 approved that exact head with no remaining findings. PR CI run 38161431692
+  passed at that head, and push CI run 38164507559 on `main` at `4280275` passed all 19 jobs,
+  including `container`, `document-engines`, `e2e-standalone`, `e2e-distributed` and `CI / gate`.
+  Linear G1L-626 is Done. Per-criterion evidence:
+  - `markweave convert SOURCE --local` runs the service validators and the shared
+    `build_document_engines` adapters with the same `MARKWEAVE_*` limits.
+  - Engine versions are probed and recorded in the traceability manifest; a missing engine fails
+    with `engine_missing`, a different version warns, and `--require-pinned` fails with
+    `engine_version_unpinned`.
+  - The documented container invocation is exercised by
+    `tests/e2e/local-conversion-final-image.sh` in the `container` job.
+  - Business HTTP commands are unchanged; remote and local options are mutually refused.
+  - Unit, real-engine integration and final-image E2E tests cover success, missing engine,
+    invalid input, timeout and cancellation.
+  - `docs/cli.md`, `docs/conversion-cli.md` and README document the command.
+  Limitations unchanged: host fonts are not verified; PPTX output and client-side packaging of
+  Markdown with local images are out of scope for local mode.
 
 ## Synchronization
 

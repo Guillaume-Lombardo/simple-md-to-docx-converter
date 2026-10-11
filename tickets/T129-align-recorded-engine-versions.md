@@ -2,7 +2,7 @@
 ticket: T129
 linear_id: G1L-682
 linear_url: https://linear.app/g1lom/issue/G1L-682/t129-align-recorded-engine-versions-with-the-shipped-toolchain
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -46,3 +46,18 @@ Make the conversion component versions recorded by admission, workers and job tr
   local `main` final image, that check rejects the stale `11.16.0` value and accepts the
   corrected manifest. Test fixtures and the Mermaid and T00 documentation now state `11.17.0`
   for the shipped toolchain while the T00 evidence keeps its original probe record.
+- 2026-10-11: Completed and verified on `main`. PR #289 was squash-merged as
+  `ed03bdfa8ef5300d0692f44c3e4e3d8823f4e367` from head `8772cf6`, a `main`-update merge of
+  reviewed head `9489ec7`. Independent review round 1 approved it with no findings; hosted CI run
+  38134149393 passed at the reviewed head and PR CI run 38153593707 passed at the merged head.
+  Main CI run 38156378579 at `ed03bdf` passed all 16 selected jobs, including
+  `document-engines`, `container`, both final-image E2E profiles and `CI / gate`. Linear G1L-682
+  is Done. Per-criterion evidence:
+  - `COMPONENT_VERSIONS` records the shipped Chromium `151.0.7922.173`, LibreOffice `26.2.5.2`,
+    Mermaid CLI `11.17.0` and Pandoc `3.10.2`.
+  - `tests/unit/conversion/test_runtime_manifest.py` fails when a recorded version differs from its
+    repository source of truth; the review's negative checks confirmed this for every engine.
+  - `scripts/container/smoke.sh` compares the installed recorded versions with the executables'
+    reported versions in the hardened final image; the `container` job passed it on `main`.
+  - The Mermaid and T00 documentation state `11.17.0` for the shipped toolchain; the T00 evidence
+    keeps its original probe record.
