@@ -33,7 +33,9 @@ TEMPLATE = base64.b64decode(
 CLI = Path(sys.executable).with_name("markweave")
 
 
-def _environment(tmp_path: Path, **overrides: str) -> dict[str, str]:
+def _environment(
+    tmp_path: Path, *, private_workspace: bool = True, **overrides: str
+) -> dict[str, str]:
     environment = {
         name: value
         for name, value in os.environ.items()
@@ -43,12 +45,13 @@ def _environment(tmp_path: Path, **overrides: str) -> dict[str, str]:
         if line and not line.startswith("#"):
             name, value = line.split("=", 1)
             environment[name] = value
-    workspace = tmp_path / "engine-workspace"
-    workspace.mkdir(exist_ok=True)
+    if private_workspace:
+        workspace = tmp_path / "engine-workspace"
+        workspace.mkdir(exist_ok=True)
+        environment["MARKWEAVE_TEMPLATE_ENGINE_WORKSPACE_ROOT"] = str(workspace)
     environment.update(
         {
             "MARKWEAVE_CONVERSION_FONT_MANIFEST_PATH": str(FONT_MANIFEST),
-            "MARKWEAVE_TEMPLATE_ENGINE_WORKSPACE_ROOT": str(workspace),
             "MARKWEAVE_TEMPLATE_ENGINE_TIMEOUT_SECONDS": "120",
             "MARKWEAVE_CONVERSION_PDF_MAX_PAGES": "20",
             "MARKWEAVE_CONVERSION_MERMAID_EXECUTABLE": os.environ.get(
@@ -414,8 +417,15 @@ def test_real_mermaid_local_conversion_records_diagram_engines(
     source, output = _inputs(
         tmp_path, "# Diagram\n\n```mermaid\nflowchart LR\n  A --> B\n```\n"
     )
+    # Like the Mermaid adapter tests, keep the default system temporary root: the
+    # sandboxed Chromium renderer cannot traverse pytest's owner-only directories.
     completed = _run(
-        _environment(tmp_path), "convert", str(source), "--local", "-o", str(output)
+        _environment(tmp_path, private_workspace=False),
+        "convert",
+        str(source),
+        "--local",
+        "-o",
+        str(output),
     )
 
     assert completed.returncode == 0, completed.stderr
