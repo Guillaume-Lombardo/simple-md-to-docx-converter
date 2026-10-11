@@ -11,11 +11,17 @@ readonly repository
 readonly seccomp_profile="$repository/toolchain/document-engines/chrome-seccomp.json"
 readonly env_file="$repository/examples/local-conversion.env"
 readonly cancel_name="markweave-t106-local-cancel-$$"
+readonly locked_name="markweave-t106-local-locked-$$"
+lock_holder=""
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/markweave-t106-local.XXXXXX")"
 readonly work
 cleanup() {
-  podman rm --force --ignore "$cancel_name" >/dev/null 2>&1 || true
+  podman rm --force --ignore "$cancel_name" "$locked_name" >/dev/null 2>&1 || true
+  if [[ -n "$lock_holder" ]]; then
+    kill "$lock_holder" >/dev/null 2>&1 || true
+    wait "$lock_holder" 2>/dev/null || true
+  fi
   podman unshare rm -rf -- "$work"
 }
 trap cleanup EXIT
@@ -230,5 +236,90 @@ podman logs "$cancel_name" 2>&1 | grep -Fq '"code":"conversion_cancelled"' \
   || fail "cancellation error was not reported"
 reclaim "$cancel_output"
 test -z "$(ls -A -- "$cancel_output")" || fail "cancellation left outputs"
+
+# Overlapping publication: while another publisher holds the output directory
+# lock, an --overwrite run waits with the previous set intact; SIGTERM cancels it
+# without publishing, and releasing the lock lets a run publish its complete set.
+locked_run() {
+  local output="$1"
+  podman run --detach --name "$locked_name" \
+    --user "$runtime_uid:0" --read-only --cap-drop=all \
+    --security-opt=no-new-privileges --security-opt="seccomp=$seccomp_profile" \
+    --network=none --memory=1g --cpus=2 --pids-limit=256 \
+    --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777 \
+    --tmpfs /work:rw,nosuid,nodev,size=256m,mode=0770 --shm-size=256m \
+    --env-file "$env_file" \
+    --volume "$work/input:/work/input:ro,Z" --volume "$output:/work/output:Z" \
+    "$image" --json convert /work/input/document.md --local --overwrite \
+    -o /work/output >/dev/null
+}
+# Hold the lock for a fixed period: releasing means waiting for the holder.
+hold_lock() {
+  podman unshare flock --exclusive "$1" sleep 25 &
+  lock_holder=$!
+  for _ in $(seq 1 100); do
+    if ! podman unshare flock --nonblock "$1" true 2>/dev/null; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  fail "the publication lock was not acquired"
+}
+release_lock() {
+  wait "$lock_holder" || fail "the publication lock holder failed"
+  lock_holder=""
+}
+previous_set() {
+  printf 'previous docx' | podman unshare tee "$1/document.docx" >/dev/null
+  printf 'previous manifest' \
+    | podman unshare tee "$1/document.traceability.json" >/dev/null
+  podman unshare chown "$runtime_uid:0" \
+    "$1/document.docx" "$1/document.traceability.json"
+}
+expect_previous_set() {
+  test "$(podman unshare cat "$1/document.docx")" = "previous docx" \
+    || fail "$2 changed the previous DOCX"
+  test "$(podman unshare cat "$1/document.traceability.json")" = "previous manifest" \
+    || fail "$2 changed the previous manifest"
+  test "$(podman unshare find "$1" -mindepth 1 | wc -l)" = 2 \
+    || fail "$2 left extra files"
+}
+for outcome in cancelled released; do
+  locked_output="$(new_output "locked-$outcome")"
+  previous_set "$locked_output"
+  hold_lock "$locked_output"
+  locked_run "$locked_output"
+  sleep 12
+  test "$(podman inspect "$locked_name" --format '{{.State.Running}}')" = true \
+    || fail "$outcome publication did not wait for the output lock"
+  expect_previous_set "$locked_output" "waiting $outcome publication"
+  if [[ "$outcome" == cancelled ]]; then
+    podman stop --time 30 "$locked_name" >/dev/null
+    release_lock
+    test "$(podman inspect "$locked_name" --format '{{.State.ExitCode}}')" = 1 \
+      || fail "cancelled locked publication did not exit with status 1"
+    podman logs "$locked_name" 2>&1 | grep -Fq '"code":"conversion_cancelled"' \
+      || fail "cancelled locked publication did not report cancellation"
+    expect_previous_set "$locked_output" "cancelled locked publication"
+  else
+    release_lock
+    test "$(podman wait "$locked_name")" = 0 \
+      || fail "released locked publication failed"
+    reclaim "$locked_output"
+    uv run python - "$locked_output" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+output = Path(sys.argv[1])
+manifest = json.loads((output / "document.traceability.json").read_bytes())
+docx = (output / "document.docx").read_bytes()
+assert manifest["mode"] == "local", manifest
+assert manifest["outputs"][0]["sha256"] == hashlib.sha256(docx).hexdigest()
+PY
+  fi
+  podman rm --force "$locked_name" >/dev/null
+done
 
 echo "Final-image local conversion E2E passed for $image."

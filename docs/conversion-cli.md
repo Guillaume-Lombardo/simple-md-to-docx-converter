@@ -128,9 +128,15 @@ outputs are refused before conversion starts, and a name created concurrently is
 `--overwrite` replaces only existing regular files and keeps each original until the whole set is
 published. A failure, the global timeout, or cancellation while files are written or published
 restores the previous set (or removes the new files) and reports the failure; a signal that arrives
-after the directory is synchronized no longer withdraws the result. If an original cannot be
-restored, the command fails with `output_rollback_failed` and leaves the original copy in a hidden
-`.markweave-local-*.previous` file.
+after the directory is synchronized no longer withdraws the result. Publications into the same
+output directory are serialized with an exclusive lock on that directory: a second run waits, still
+honoring cancellation and `--timeout`, for at most the global timeout or, without one,
+`MARKWEAVE_TEMPLATE_ENGINE_TIMEOUT_SECONDS`, and then fails with `output_busy`. A rollback only
+touches names that still hold this run's files. If another process changed one meanwhile, that file
+is kept, the original stays in a hidden `.markweave-local-*.previous` file, and the command fails with
+`output_conflict`; if an original cannot be restored, it fails with `output_rollback_failed` and keeps
+the same copy. The lock relies on `flock`, so file systems without it (some network mounts) do not
+serialize publication.
 
 ### Engines, approved pins, and traceability
 

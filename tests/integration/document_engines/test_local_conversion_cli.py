@@ -9,6 +9,8 @@ timeout, and cancellation behavior is deterministic on every host.
 from __future__ import annotations
 
 import base64
+import fcntl
+import hashlib
 import io
 import json
 import os
@@ -467,3 +469,128 @@ def test_failed_overwrite_keeps_the_previous_complete_output_set(
 
     assert error["code"] == "output_write_failed"
     assert {path.name: path.read_bytes() for path in output.iterdir()} == previous
+
+
+_INTERRUPTED_PUBLICATION = """
+import os
+import signal
+import sys
+
+from markweave.cli.main import main
+
+mode = sys.argv[1]
+original = os.replace
+replaced = 0
+
+
+def replace(source, target, **options):
+    global replaced
+    if str(source).endswith(".previous"):
+        return original(source, target, **options)
+    replaced += 1
+    if mode == "failure" and replaced == 2:
+        raise OSError("injected publication failure")
+    original(source, target, **options)
+    if mode == "signal" and replaced == 1:
+        os.kill(os.getpid(), signal.SIGTERM)
+
+
+os.replace = replace
+raise SystemExit(main(sys.argv[2:]))
+"""
+
+
+def _previous_set(output: Path) -> dict[str, bytes]:
+    previous = {
+        "document.docx": b"previous docx",
+        "document.pdf": b"previous pdf",
+        "document.traceability.json": b"previous manifest",
+    }
+    for name, content in previous.items():
+        (output / name).write_bytes(content)
+    return previous
+
+
+@pytest.mark.requires_pandoc
+@pytest.mark.parametrize(
+    ("mode", "code"),
+    [("signal", "conversion_cancelled"), ("failure", "output_write_failed")],
+)
+def test_interruption_after_a_replacement_restores_the_previous_set(
+    tmp_path: Path, mode: str, code: str
+) -> None:
+    source, output = _inputs(tmp_path)
+    previous = _previous_set(output)
+    completed = subprocess.run(
+        (
+            sys.executable,
+            "-c",
+            _INTERRUPTED_PUBLICATION,
+            mode,
+            "--json",
+            "convert",
+            str(source),
+            "--local",
+            "--overwrite",
+            "-o",
+            str(output),
+        ),
+        capture_output=True,
+        check=False,
+        env=_environment(tmp_path),
+        text=True,
+        timeout=300,
+    )
+
+    assert _error(completed)["code"] == code
+    assert {path.name: path.read_bytes() for path in output.iterdir()} == previous
+
+
+@pytest.mark.requires_pandoc
+@pytest.mark.parametrize("outcome", ["released", "cancelled"])
+def test_overlapping_publication_waits_for_the_output_directory_lock(
+    tmp_path: Path, outcome: str
+) -> None:
+    source, output = _inputs(tmp_path)
+    previous = _previous_set(output)
+    holder = os.open(output, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        fcntl.flock(holder, fcntl.LOCK_EX)
+        process = subprocess.Popen(
+            (
+                str(CLI),
+                "--json",
+                "convert",
+                str(source),
+                "--local",
+                "--overwrite",
+                "-o",
+                str(output),
+            ),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=_environment(tmp_path),
+            text=True,
+        )
+        time.sleep(3)
+        assert process.poll() is None, "publication must wait for the lock"
+        assert {path.name: path.read_bytes() for path in output.iterdir()} == previous
+        if outcome == "released":
+            fcntl.flock(holder, fcntl.LOCK_UN)
+        else:
+            process.send_signal(signal.SIGTERM)
+        stdout, stderr = process.communicate(timeout=120)
+    finally:
+        os.close(holder)
+
+    if outcome == "released":
+        assert process.returncode == 0, stderr
+        assert json.loads(stdout)["status"] == "succeeded"
+        manifest = json.loads((output / "document.traceability.json").read_bytes())
+        docx = (output / "document.docx").read_bytes()
+        assert manifest["outputs"][0]["sha256"] == hashlib.sha256(docx).hexdigest()
+        assert (output / "document.pdf").read_bytes() == previous["document.pdf"]
+    else:
+        assert process.returncode == 1
+        assert json.loads(stderr)["error"]["code"] == "conversion_cancelled"
+        assert {path.name: path.read_bytes() for path in output.iterdir()} == previous

@@ -9,8 +9,10 @@ or any failure before the final decision point restores the previous set.
 
 from __future__ import annotations
 
+import fcntl
 import os
 import stat
+import time
 from collections.abc import Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
@@ -20,6 +22,7 @@ from markweave.cli.errors import CliError
 
 _OUTPUT_FILE_MODE = 0o600
 _TEMPORARY_PREFIX = ".markweave-local-"
+_LOCK_POLL_SECONDS = 0.05
 
 
 @dataclass
@@ -69,8 +72,50 @@ def publish_outputs(
     *,
     overwrite: bool,
     checkpoint: Callable[[], None],
+    lock_timeout_seconds: float,
 ) -> None:
-    """Publish every file or none; ``checkpoint`` raises to abort and roll back."""
+    """Publish every file or none; ``checkpoint`` raises to abort and roll back.
+
+    Publications into one directory are serialized with an exclusive lock on the
+    directory itself, so an overlapping publication can never observe or undo a
+    partially committed set. Waiting honors ``checkpoint`` and is bounded.
+    """
+    _lock_directory(directory, checkpoint, lock_timeout_seconds)
+    try:
+        _publish_locked(directory, files, overwrite=overwrite, checkpoint=checkpoint)
+    finally:
+        with suppress(OSError):
+            fcntl.flock(directory, fcntl.LOCK_UN)
+
+
+def _lock_directory(
+    directory: int, checkpoint: Callable[[], None], timeout_seconds: float
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        checkpoint()
+        try:
+            fcntl.flock(directory, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                raise CliError(
+                    "output_busy",
+                    "Another local conversion is publishing into the output directory.",
+                ) from None
+            time.sleep(_LOCK_POLL_SECONDS)
+            continue
+        except OSError:
+            raise output_failure() from None
+        return
+
+
+def _publish_locked(
+    directory: int,
+    files: Sequence[tuple[str, bytes]],
+    *,
+    overwrite: bool,
+    checkpoint: Callable[[], None],
+) -> None:
     staged: list[_Staged] = []
     committed: list[_Committed] = []
     backups: list[str] = []
@@ -172,22 +217,39 @@ def _commit(
 
 
 def _rollback(directory: int, committed: list[_Committed]) -> None:
-    """Restore originals and remove only files this publication created."""
-    failed = False
+    """Undo only names that still hold this publication's files.
+
+    A destination whose identity changed belongs to someone else: it is left in
+    place, the original copy is kept, and a stable conflict is reported.
+    """
+    failed = conflicted = False
     for item in reversed(committed):
+        try:
+            metadata = os.stat(item.name, dir_fd=directory, follow_symlinks=False)
+        except FileNotFoundError:
+            conflicted = conflicted or item.backup is not None
+            continue
+        except OSError:
+            failed = True
+            continue
+        if (metadata.st_dev, metadata.st_ino) != item.identity:
+            conflicted = conflicted or item.backup is not None
+            continue
         try:
             if item.backup is not None:
                 os.replace(
                     item.backup, item.name, src_dir_fd=directory, dst_dir_fd=directory
                 )
-                continue
-            metadata = os.stat(item.name, dir_fd=directory, follow_symlinks=False)
-            if (metadata.st_dev, metadata.st_ino) == item.identity:
+            else:
                 os.unlink(item.name, dir_fd=directory)
-        except FileNotFoundError:
-            continue
         except OSError:
             failed = True
+    if conflicted:
+        raise CliError(
+            "output_conflict",
+            "A local output changed during rollback; the previous version was kept "
+            "in a hidden .markweave-local-*.previous file.",
+        )
     if failed:
         raise CliError(
             "output_rollback_failed",

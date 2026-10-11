@@ -249,6 +249,11 @@ def _convert_locally(
                 [*files, (manifest_name, result.manifest)],
                 overwrite=overwrite,
                 checkpoint=checkpoint,
+                lock_timeout_seconds=(
+                    max(0.0, deadline - time.monotonic())
+                    if deadline is not None
+                    else settings.template_engine_timeout_seconds
+                ),
             )
     finally:
         os.close(directory)
