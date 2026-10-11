@@ -1,5 +1,9 @@
+# Rootless Podman override for scripts/quickstart-simple.sh.
 # Rootless Podman rejects uid/gid as tmpfs mount options through its Docker API.
 # ClamAV's root init already has CHOWN and prepares its private log directory.
+# The backend healthcheck is intentionally disabled: the simple quickstart starts
+# Markweave separately and proves its in-container readiness before it creates
+# the browser tier.
 services:
   markweave:
     depends_on:
@@ -26,6 +30,18 @@ services:
       - /tmp:rw,nosuid,nodev,noexec,size=64m
       - /var/lock:rw,nosuid,nodev,noexec,size=1m
       - /var/log/clamav:rw,nosuid,nodev,noexec,size=32m,mode=0750
+
+  frontend:
+    depends_on:
+      markweave:
+        condition: service_started
+
+  router:
+    depends_on:
+      frontend:
+        condition: service_started
+      markweave:
+        condition: service_started
 
 networks:
   frontend:

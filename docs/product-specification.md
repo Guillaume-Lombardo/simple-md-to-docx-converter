@@ -697,6 +697,10 @@ documentation.
   unchanged. The browser and CLI clients may let a user select or drop a Markdown file together
   with its images or a folder, and package them client-side into the approved archive layout before
   upload. The server applies the same archive, image, scanning, and limit rules to that archive.
+  On 2026-10-10 the owner decided how clients find references: the CLI reuses the service's own
+  reference module through the optional `markweave[packaging]` extra, so the base CLI stays
+  standard-library only, and the browser uses markdown-it (the original of the service parser)
+  with parity proved against a service-generated fixture. Clients package only referenced images.
 - **D3 – Inline HTML allowlist (T105).** Before Pandoc, the validator translates only `<br>`,
   `<sub>`, `<sup>`, `<kbd>`, and `<u>` without attributes into equivalent Pandoc constructs and
   removes HTML comments. Every other raw HTML node, every attribute, and every malformed or

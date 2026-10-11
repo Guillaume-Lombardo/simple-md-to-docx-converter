@@ -34,6 +34,32 @@ run_hardened --env "EXPECTED_APPLICATION_VERSION=$application_version" \
   test "$(mmdc --version)" = "11.17.0"
   test "$(google-chrome-stable --version | awk "{\$1=\$1; print}")" = "Google Chrome 151.0.7922.173"
   test "$(soffice --version | awk "{\$1=\$1; print}")" = "LibreOffice 26.2.5.2 cd7284b4cbbfeb507e630c1aac019f4157393acb"
+  /opt/md-converter/venv/bin/python - <<"PYTHON"
+import subprocess
+import sys
+
+import markweave
+from markweave.conversion.runtime_manifest import COMPONENT_VERSIONS
+
+
+def reported(*command: str) -> list[str]:
+    completed = subprocess.run(command, check=True, capture_output=True, text=True)
+    return completed.stdout.splitlines()[0].split()
+
+
+recorded = dict(COMPONENT_VERSIONS)
+shipped = {
+    "chromium": reported("google-chrome-stable", "--version")[2],
+    "libreoffice": reported("soffice", "--version")[1],
+    "md-converter": markweave.__version__,
+    "mermaid-cli": reported("mmdc", "--version")[0],
+    "pandoc": reported("pandoc", "--version")[1],
+}
+if recorded != shipped:
+    sys.exit(
+        f"Recorded component versions {recorded} differ from the shipped executables {shipped}."
+    )
+PYTHON
   mkdir -p /work/home /work/xdg/cache /work/xdg/config /work/xdg/data /work/xdg/runtime /work/tmp
   chmod 0700 /work/home /work/xdg/cache /work/xdg/config /work/xdg/data /work/xdg/runtime /work/tmp
   pandoc --print-default-data-file reference.docx > /work/reference.docx

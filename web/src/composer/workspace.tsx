@@ -67,6 +67,43 @@ function prependUnique<T extends { id: string }>(
   const ids = new Set(current.map((item) => item.id));
   return [...incoming.filter((item) => !ids.has(item.id)), ...current];
 }
+
+const snapshotAttempts = 3;
+
+// The server creates every proposal and question at the current draft version
+// and advances that version in the same transaction. A listed item whose base
+// version is not below the draft version therefore proves that the draft was
+// read before the item existed; its ETag cannot authorize a review decision.
+function draftPredatesReviewItems(
+  draft: ComposerDraft,
+  proposals: ComposerProposal[],
+  questions: ComposerQuestion[],
+): boolean {
+  return [...proposals, ...questions].some(
+    (item) => item.base_version >= draft.version,
+  );
+}
+
+async function readDraftSnapshot(api: ComposerWorkspaceApi, id: string) {
+  for (let attempt = 1; ; attempt += 1) {
+    const [draft, messages, proposals, questions, revisions] =
+      await Promise.all([
+        api.draft(id),
+        api.messages(id),
+        api.proposals(id),
+        api.questions(id),
+        api.revisions(id),
+      ]);
+    // A torn read that persists keeps the older ETag, so the server still
+    // rejects a stale decision and the workspace reloads instead.
+    if (
+      attempt >= snapshotAttempts ||
+      !draftPredatesReviewItems(draft, proposals, questions)
+    )
+      return { draft, messages, proposals, questions, revisions };
+  }
+}
+
 const availability: Record<string, string> = {
   unconfigured:
     "No Composer connection is configured. Existing drafts and exports remain available.",
@@ -263,6 +300,10 @@ function ComposerWorkspaceInner({
   const loadingMoreRef = useRef<PageKind | null>(null);
   const publishingGeneration = useRef<string | null>(null);
   const recoveringGeneration = useRef<string | null>(null);
+  const reloadedForStep = useRef<string | null>(null);
+  const reloadRef = useRef<
+    ((draftId: string, preferredRevisionId?: string) => Promise<void>) | null
+  >(null);
   const mounted = useRef(false);
 
   const ownerId =
@@ -464,14 +505,8 @@ function ComposerWorkspaceInner({
           setError("");
           return;
         }
-        const [draft, messages, proposals, questions, revisions] =
-          await Promise.all([
-            api.draft(id),
-            api.messages(id),
-            api.proposals(id),
-            api.questions(id),
-            api.revisions(id),
-          ]);
+        const { draft, messages, proposals, questions, revisions } =
+          await readDraftSnapshot(api, id);
         const revisionId =
           preferredRevisionId ??
           (view.revision?.draft_id === id
@@ -531,6 +566,23 @@ function ComposerWorkspaceInner({
                   return;
                 setStep(restored);
                 if (restored.status !== "completed") return;
+                if (
+                  reloadedForStep.current !== restored.id &&
+                  ((restored.question_id &&
+                    !questions.some(
+                      (item) => item.id === restored.question_id,
+                    )) ||
+                    (restored.proposal_id &&
+                      !proposals.some(
+                        (item) => item.id === restored.proposal_id,
+                      )))
+                ) {
+                  // The step finished after this snapshot was read. Reload the
+                  // whole snapshot so the draft ETag covers its review item.
+                  reloadedForStep.current = restored.id;
+                  void reloadRef.current?.(id, preferredRevisionId);
+                  return;
+                }
                 try {
                   if (
                     restored.question_id &&
@@ -702,6 +754,10 @@ function ComposerWorkspaceInner({
     },
     [api, currentOwner, expireIfUnauthorized, ownerId, view.revision],
   );
+
+  useEffect(() => {
+    reloadRef.current = load;
+  }, [load]);
 
   useEffect(() => {
     if (!ownerId) return;

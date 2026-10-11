@@ -1,0 +1,618 @@
+"""Unit coverage for client-side Markdown and local-image packaging (T104)."""
+
+from __future__ import annotations
+
+import errno
+import io
+import json
+import os
+import subprocess
+import sys
+import zipfile
+from collections.abc import Callable
+from pathlib import Path, PurePosixPath
+
+import pytest
+
+from markweave import conversion as conversion_package
+from markweave.cli import markdown_package
+from markweave.cli.commands import conversions
+from markweave.cli.commands.conversion_http import ConversionHttpResponse
+from markweave.cli.main import main
+from markweave.cli.markdown_package import (
+    ENTRYPOINT,
+    INVALID_ARCHIVE,
+    PACKAGING_UNAVAILABLE,
+    MarkdownPackage,
+    PackageError,
+    build_package,
+    load_image_references,
+    open_markdown_directory,
+    package_markdown,
+)
+from markweave.conversion import image_references, validation
+from markweave.conversion.errors import ConversionError
+from markweave.conversion.image_references import (
+    ESCAPING_IMAGE_PATH,
+    INVALID_IMAGE_PATH,
+    INVALID_METADATA,
+    MISSING_IMAGE,
+)
+from markweave.conversion.images import SUPPORTED_IMAGE_SUFFIXES
+from tests.markdown_image_references import FIXTURE, render
+
+pytestmark = pytest.mark.unit
+
+PNG = b"\x89PNG\r\n\x1a\nclient-side-bytes"
+JOB_ID = "11111111-1111-4111-8111-111111111111"
+CORRELATION_ID = "22222222-2222-4222-8222-222222222222"
+REFERENCES = json.loads(FIXTURE.read_text(encoding="utf-8"))
+
+
+def test_checked_in_parity_fixture_is_the_service_parser_output() -> None:
+    """Regenerate with ``uv run python -m tests.markdown_image_references``."""
+    assert FIXTURE.read_text(encoding="utf-8") == render()
+
+
+def test_service_validation_uses_the_shared_reference_module() -> None:
+    assert validation._MARKDOWN is image_references.MARKDOWN
+    assert validation._METADATA_MARKDOWN is image_references.METADATA_MARKDOWN
+    assert validation._is_remote_destination is image_references.is_remote_destination
+    assert load_image_references() is image_references
+
+
+@pytest.mark.parametrize(
+    "case", REFERENCES["resolutions"], ids=lambda case: repr(case["destination"])
+)
+def test_service_resolution_matches_the_fixture(case: dict) -> None:
+    destination = case["destination"]
+    entrypoint = PurePosixPath(ENTRYPOINT)
+    if case.get("remote"):
+        assert validation._is_remote_destination(destination)
+        return
+    if "error" in case:
+        with pytest.raises(ConversionError) as raised:
+            validation._resolve_local_image(destination, entrypoint, frozenset())
+        assert str(raised.value) == case["error"]
+        return
+    validation._resolve_local_image(
+        destination, entrypoint, frozenset({PurePosixPath(case["path"])})
+    )
+
+
+def test_client_suffixes_match_the_service_image_formats() -> None:
+    assert markdown_package.SUPPORTED_IMAGE_SUFFIXES == SUPPORTED_IMAGE_SUFFIXES
+
+
+def test_reference_module_does_not_import_image_engines() -> None:
+    script = (
+        "import sys\n"
+        "import markweave.cli.markdown_package\n"
+        "assert 'markdown_it' not in sys.modules\n"
+        "import markweave.conversion.image_references\n"
+        "loaded = [m for m in ('PIL', 'cairosvg', 'tinycss2', 'fastapi') "
+        "if m in sys.modules]\n"
+        "assert not loaded, loaded\n"
+    )
+    result = subprocess.run(
+        (sys.executable, "-I", "-c", script),
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    ("markdown", "packaged"),
+    [
+        ("![logo][ref]\n\n[ref]:\n  assets/logo.png\n", "assets/logo.png"),
+        ("![logo][ref]\n\n> [ref]: assets/logo.png\n", "assets/logo.png"),
+        ("![logo](assets/&copy;.png)", "assets/©.png"),
+    ],
+    ids=["multiline-definition", "container-definition", "html-entity"],
+)
+def test_review_regressions_package_what_the_service_requires(
+    tmp_path: Path, markdown: str, packaged: str
+) -> None:
+    (tmp_path / "assets").mkdir()
+    (tmp_path / packaged).write_bytes(PNG)
+
+    package = _package(tmp_path / "doc.md", markdown.encode())
+
+    assert package is not None
+    assert list(_members(package.content)) == [ENTRYPOINT, packaged]
+
+
+def test_review_regression_list_indented_code_is_not_an_image(
+    tmp_path: Path,
+) -> None:
+    markdown = b"- list\n\n      ![literal](missing.png)"
+
+    assert _package(tmp_path / "doc.md", markdown) is None
+
+
+def test_invalid_metadata_reuses_the_service_message(tmp_path: Path) -> None:
+    with pytest.raises(PackageError) as raised:
+        _package(tmp_path / "doc.md", b"---\n: [\n---\n![x](x.png)")
+
+    assert raised.value.message == INVALID_METADATA
+    assert raised.value.code == "validation"
+
+
+def test_missing_packaging_extra_needs_guidance_only_for_image_syntax(
+    tmp_path: Path, mocker, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delattr(conversion_package, "image_references")
+    mocker.patch.dict(
+        sys.modules,
+        {"markdown_it": None, "markweave.conversion.image_references": None},
+    )
+    assert load_image_references() is None
+    for markdown in (
+        b"# Plain text only\n",
+        b"---\ntitle: Report\n---\n# Title\n",
+        b"# A backslash \\ without front matter\n",
+    ):
+        assert _package(tmp_path / "doc.md", markdown) is None
+
+    # Image syntax, or front matter with a backslash escape that may decode into
+    # image syntax, needs the shared parser.
+    for markdown in (
+        b"![x](x.png)",
+        b'---\nimage: "\\x21[x](x.png)"\n---\n',
+        b'---\nimage: "!\\\n  [x](x.png)"\n---\n',
+    ):
+        with pytest.raises(PackageError) as raised:
+            _package(tmp_path / "doc.md", markdown)
+        assert raised.value.code == "packaging_unavailable"
+        assert raised.value.message == PACKAGING_UNAVAILABLE
+    assert "markweave[packaging]" in PACKAGING_UNAVAILABLE
+
+
+def test_yaml_escapes_that_decode_into_image_syntax_are_packaged(
+    tmp_path: Path,
+) -> None:
+    """Review round 2: no literal ``![`` fast path bypasses the shared parser."""
+    (tmp_path / "logo.png").write_bytes(PNG)
+    markdown = b'---\nimage: "\\x21[x](logo.png)"\n---\n# Title\n'
+    assert b"![" not in markdown
+
+    package = _package(tmp_path / "doc.md", markdown)
+
+    assert package is not None
+    assert list(_members(package.content)) == [ENTRYPOINT, "logo.png"]
+
+
+def test_upload_limit_is_read_once_and_only_when_images_are_needed(
+    tmp_path: Path, mocker
+) -> None:
+    (tmp_path / "x.png").write_bytes(PNG)
+    markdown = b"![x](x.png)"
+    package = _package(tmp_path / "doc.md", markdown)
+    assert package is not None
+    limit = mocker.Mock(return_value=len(package.content))
+
+    assert _package(tmp_path / "doc.md", b"# None", upload_limit=limit) is None
+    limit.assert_not_called()
+    assert _package(tmp_path / "doc.md", markdown, upload_limit=limit)
+    limit.assert_called_once_with()
+
+    # File sizes are checked before reading, then the built archive itself.
+    for maximum in (len(markdown) + len(PNG) - 1, len(package.content) - 1):
+        limit.return_value = maximum
+        with pytest.raises(PackageError) as raised:
+            _package(tmp_path / "doc.md", markdown, upload_limit=limit)
+        assert (raised.value.code, raised.value.message) == (
+            "conversion_request_invalid",
+            "The conversion request is invalid.",
+        )
+
+
+def _package(
+    markdown_path: Path,
+    markdown: bytes,
+    *,
+    upload_limit: Callable[[], int] | None = None,
+) -> MarkdownPackage | None:
+    """Package through the anchored directory descriptor, as the CLI does."""
+    directory = open_markdown_directory(markdown_path)
+    try:
+        return package_markdown(directory, markdown, upload_limit=upload_limit)
+    finally:
+        os.close(directory)
+
+
+def _members(content: bytes) -> dict[str, bytes]:
+    with zipfile.ZipFile(io.BytesIO(content)) as archive:
+        for info in archive.infolist():
+            assert info.compress_type == zipfile.ZIP_STORED
+            assert info.date_time == (1980, 1, 1, 0, 0, 0)
+            assert info.external_attr >> 16 == 0o100644
+        return {info.filename: archive.read(info) for info in archive.infolist()}
+
+
+def test_package_collects_only_referenced_images_deterministically(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "assets" / "nested").mkdir(parents=True)
+    (tmp_path / "assets" / "a.png").write_bytes(PNG)
+    (tmp_path / "assets" / "nested" / "b.svg").write_bytes(b"<svg/>")
+    (tmp_path / "unreferenced.png").write_bytes(b"unused")
+    markdown = (
+        b"# Title\n\n![a](assets/a.png)\n![again](./assets/a.png)\n"
+        b"![b](assets/nested/b.svg)\n![remote](https://example.com/r.png)\n"
+    )
+    source = tmp_path / "report.md"
+
+    first = _package(source, markdown)
+    second = _package(source, markdown)
+
+    assert first is not None and second is not None
+    assert first.content == second.content
+    assert first.image_count == 2
+    members = _members(first.content)
+    assert list(members) == [ENTRYPOINT, "assets/a.png", "assets/nested/b.svg"]
+    assert members[ENTRYPOINT] == markdown
+    assert members["assets/a.png"] == PNG
+
+
+@pytest.mark.parametrize(
+    "markdown",
+    [b"# No images\n", b"![r](https://example.com/r.png)", b"\xff\xfe not utf-8"],
+)
+def test_markdown_without_local_images_is_uploaded_unchanged(
+    tmp_path: Path, markdown: bytes
+) -> None:
+    assert _package(tmp_path / "doc.md", markdown) is None
+
+
+@pytest.mark.parametrize(
+    ("markdown", "message"),
+    [
+        (b"![m](assets/missing.png)", MISSING_IMAGE),
+        (b"![t](../outside.png)", ESCAPING_IMAGE_PATH),
+        (b"![t](assets/../../outside.png)", ESCAPING_IMAGE_PATH),
+        (b"![a](/etc/hostname.png)", INVALID_IMAGE_PATH),
+        (b"![u](notes.txt)", MISSING_IMAGE),
+        (b"![d](folder.png)", MISSING_IMAGE),
+        (b"![r](./)", MISSING_IMAGE),
+    ],
+)
+def test_package_rejects_missing_escaping_and_invalid_references(
+    tmp_path: Path, markdown: bytes, message: str
+) -> None:
+    root = tmp_path / "root"
+    (root / "folder.png").mkdir(parents=True)
+    (root / "notes.txt").write_text("text", encoding="utf-8")
+    (tmp_path / "outside.png").write_bytes(PNG)
+
+    with pytest.raises(PackageError) as raised:
+        _package(root / "doc.md", markdown)
+
+    assert raised.value.message == message
+
+
+def test_package_rejects_symlinks_escaping_the_markdown_directory(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    (tmp_path / "secret.png").write_bytes(PNG)
+    (tmp_path / "shared").mkdir()
+    (root / "link.png").symlink_to(tmp_path / "secret.png")
+    (root / "shared").symlink_to(tmp_path / "shared", target_is_directory=True)
+    (tmp_path / "shared" / "x.png").write_bytes(PNG)
+
+    for markdown in (b"![l](link.png)", b"![s](shared/x.png)"):
+        with pytest.raises(PackageError) as raised:
+            _package(root / "doc.md", markdown)
+        assert raised.value.message == ESCAPING_IMAGE_PATH
+
+
+def test_package_refuses_every_symlink_even_inside_the_markdown_directory(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "real").mkdir()
+    (tmp_path / "real" / "x.png").write_bytes(PNG)
+    (tmp_path / "alias").symlink_to(tmp_path / "real", target_is_directory=True)
+    (tmp_path / "real" / "link.png").symlink_to(tmp_path / "real" / "x.png")
+
+    for markdown in (b"![x](alias/x.png)", b"![x](real/link.png)"):
+        with pytest.raises(PackageError) as raised:
+            _package(tmp_path / "doc.md", markdown)
+        assert raised.value.message == ESCAPING_IMAGE_PATH
+
+
+def test_ancestor_swapped_for_a_symlink_after_resolution_is_refused(
+    tmp_path: Path, mocker
+) -> None:
+    """Security regression: no realpath check followed by a pathname open."""
+    root = tmp_path / "root"
+    (root / "assets").mkdir(parents=True)
+    (root / "assets" / "logo.png").write_bytes(PNG)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "logo.png").write_bytes(b"\x89PNG outside secret")
+    resolve = markdown_package._referenced_paths
+
+    def swap_after_resolution(*arguments: object) -> list[PurePosixPath]:
+        paths = resolve(*arguments)  # ty: ignore[invalid-argument-type]
+        (root / "assets").rename(root / "moved")
+        (root / "assets").symlink_to(outside, target_is_directory=True)
+        return paths
+
+    mocker.patch.object(
+        markdown_package, "_referenced_paths", side_effect=swap_after_resolution
+    )
+
+    with pytest.raises(PackageError) as raised:
+        _package(root / "doc.md", b"![l](assets/logo.png)")
+
+    assert raised.value.message == ESCAPING_IMAGE_PATH
+
+
+def test_image_reads_bound_size_and_detect_concurrent_growth(
+    tmp_path: Path, mocker
+) -> None:
+    (tmp_path / "x.png").write_bytes(PNG)
+    fstat = os.fstat
+
+    def smaller(descriptor: int) -> os.stat_result:
+        values = list(fstat(descriptor))
+        values[6] = len(PNG) - 1
+        return os.stat_result(values)
+
+    mocker.patch.object(markdown_package.os, "fstat", side_effect=smaller)
+    with pytest.raises(PackageError) as raised:
+        _package(tmp_path / "doc.md", b"![x](x.png)")
+    assert raised.value.message == MISSING_IMAGE
+
+
+def test_missing_markdown_directory_cannot_be_anchored(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError):
+        open_markdown_directory(tmp_path / "absent" / "doc.md")
+
+
+def _swap_for_outward_symlink(directory: Path, outside: Path) -> None:
+    directory.rename(directory.with_name(f"{directory.name}-moved"))
+    directory.symlink_to(outside, target_is_directory=True)
+
+
+@pytest.mark.parametrize("swapped", ["markdown-directory", "ancestor"])
+def test_directory_swapped_during_the_upload_limit_lookup_stays_anchored(
+    tmp_path: Path, swapped: str
+) -> None:
+    """Security regression: the base directory is never reopened by pathname.
+
+    The Markdown directory, or an ancestor above it, is replaced by a symbolic
+    link to an outside tree while the service upload limit is being read.
+    Reads stay on the originally anchored tree, so outside bytes never enter
+    the package.
+    """
+    ancestor = tmp_path / "workspace"
+    selected = ancestor / "selected"
+    selected.mkdir(parents=True)
+    (selected / "secret.png").write_bytes(PNG)
+    outside = tmp_path / "outside"
+    (outside / "selected").mkdir(parents=True)
+    (outside / "secret.png").write_bytes(b"\x89PNG outside secret")
+    (outside / "selected" / "secret.png").write_bytes(b"\x89PNG outside secret")
+    target = selected if swapped == "markdown-directory" else ancestor
+
+    def swap_then_limit() -> int:
+        _swap_for_outward_symlink(target, outside)
+        return 1_000_000
+
+    package = _package(
+        selected / "report.md", b"![s](secret.png)", upload_limit=swap_then_limit
+    )
+
+    assert (selected / "secret.png").read_bytes() == b"\x89PNG outside secret"
+    assert package is not None
+    assert _members(package.content)["secret.png"] == PNG
+
+
+@pytest.mark.parametrize("swapped", ["markdown-directory", "ancestor"])
+def test_convert_reads_source_and_images_through_one_anchored_directory(
+    tmp_path: Path, mocker, capsys: pytest.CaptureFixture[str], swapped: str
+) -> None:
+    """End to end through ``convert``: a swap during the options lookup changes
+    neither the uploaded Markdown nor its images."""
+    ancestor = tmp_path / "workspace"
+    selected = ancestor / "selected"
+    selected.mkdir(parents=True)
+    (selected / "report.md").write_bytes(b"![s](secret.png)")
+    (selected / "secret.png").write_bytes(PNG)
+    outside = tmp_path / "outside"
+    (outside / "selected").mkdir(parents=True)
+    for directory in (outside, outside / "selected"):
+        (directory / "report.md").write_bytes(b"![o](other.png)")
+        (directory / "secret.png").write_bytes(b"\x89PNG outside secret")
+    target = selected if swapped == "markdown-directory" else ancestor
+    client = mocker.Mock()
+    client.submit.return_value = _accepted()
+
+    def swap_then_options() -> ConversionHttpResponse:
+        _swap_for_outward_symlink(target, outside)
+        return _options()
+
+    client.options.side_effect = swap_then_options
+    mocker.patch.object(conversions, "_client", return_value=client)
+
+    assert main(("--json", "convert", str(selected / "report.md"))) == 0
+
+    assert json.loads(capsys.readouterr().out)["packaged_images"] == 1
+    assert _members(client.submit.call_args.args[0]) == {
+        ENTRYPOINT: b"![s](secret.png)",
+        "secret.png": PNG,
+    }
+
+
+def test_convert_reports_an_unopenable_markdown_directory(
+    tmp_path: Path, mocker, capsys: pytest.CaptureFixture[str]
+) -> None:
+    client_factory = mocker.patch.object(conversions, "_client")
+
+    assert main(("--json", "convert", str(tmp_path / "absent" / "doc.md"))) == 1
+
+    error = json.loads(capsys.readouterr().err)["error"]
+    assert error == {
+        "code": "source_unavailable",
+        "message": "The conversion source is unavailable.",
+    }
+    client_factory.assert_not_called()
+
+
+def test_package_rejects_case_colliding_archive_paths(tmp_path: Path) -> None:
+    (tmp_path / "A.png").write_bytes(PNG)
+    (tmp_path / "a.png").write_bytes(PNG)
+
+    with pytest.raises(PackageError) as raised:
+        _package(tmp_path / "doc.md", b"![a](A.png) ![b](a.png)")
+
+    assert raised.value.message == INVALID_ARCHIVE
+
+
+def test_image_read_maps_loops_and_other_errors(tmp_path: Path, mocker) -> None:
+    (tmp_path / "x.png").write_bytes(PNG)
+    real_open = os.open
+    failure: list[int] = []
+
+    def opener(path: object, flags: int, *args: object, **kwargs: object) -> int:
+        if kwargs.get("dir_fd") is not None:
+            raise OSError(failure[0], os.strerror(failure[0]))
+        return real_open(path, flags, *args, **kwargs)  # ty: ignore[invalid-argument-type]
+
+    mocker.patch.object(markdown_package.os, "open", side_effect=opener)
+    for code, message in (
+        (errno.ELOOP, ESCAPING_IMAGE_PATH),
+        (errno.EACCES, MISSING_IMAGE),
+    ):
+        failure[:] = [code]
+        with pytest.raises(PackageError) as raised:
+            _package(tmp_path / "doc.md", b"![x](x.png)")
+        assert raised.value.message == message
+
+
+def test_build_package_places_markdown_at_the_approved_entrypoint() -> None:
+    content = build_package(
+        b"# T", {PurePosixPath("z.png"): b"z", PurePosixPath("a.png"): b"a"}
+    )
+
+    assert list(_members(content)) == [ENTRYPOINT, "a.png", "z.png"]
+
+
+def _options() -> ConversionHttpResponse:
+    return ConversionHttpResponse(
+        200,
+        {
+            "conversion_upload_max_bytes": 1_000_000,
+            "resolved_template": None,
+            "template_version_id": None,
+            "selection_source": "pandoc_default",
+        },
+    )
+
+
+def _accepted() -> ConversionHttpResponse:
+    job = {
+        "id": JOB_ID,
+        "owner_id": JOB_ID,
+        "template_mode": "pandoc-default",
+        "template_id": None,
+        "template_version_id": None,
+        "output": "docx",
+        "component_versions": [["markweave", "0.7.3"]],
+        "correlation_id": CORRELATION_ID,
+        "state": "queued",
+        "step": "queued",
+        "progress": 0,
+        "created_at": "2026-10-10T00:00:00Z",
+        "updated_at": "2026-10-10T00:00:00Z",
+        "attempt": 0,
+        "cancel_requested": False,
+        "error_code": None,
+        "error_message": None,
+        "expires_at": None,
+    }
+    return ConversionHttpResponse(
+        202, job, headers={"retry-after": "1", "x-correlation-id": CORRELATION_ID}
+    )
+
+
+@pytest.mark.parametrize(("images", "noun"), [(1, "image"), (2, "images")])
+def test_convert_uploads_a_package_for_markdown_with_local_images(
+    tmp_path: Path, mocker, capsys: pytest.CaptureFixture[str], images: int, noun: str
+) -> None:
+    for index in range(images):
+        (tmp_path / f"i{index}.png").write_bytes(PNG)
+    source = tmp_path / "private-name.md"
+    source.write_text(
+        "".join(f"![i](i{index}.png)\n" for index in range(images)), encoding="utf-8"
+    )
+    client = mocker.Mock()
+    client.submit.return_value = _accepted()
+    client.options.return_value = _options()
+    mocker.patch.object(conversions, "_client", return_value=client)
+
+    assert main(("convert", str(source))) == 0
+    human = capsys.readouterr()
+    assert f"with {images} packaged local {noun};" in human.out
+    assert main(("--json", "convert", str(source))) == 0
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["packaged_images"] == images
+    submitted = client.submit.call_args
+    assert submitted.kwargs["source_kind"] == "zip"
+    assert next(iter(_members(submitted.args[0]))) == ENTRYPOINT
+    assert source.name not in json.dumps(result)
+
+
+def test_convert_reports_stable_validation_errors_before_upload(
+    tmp_path: Path, mocker, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = tmp_path / "doc.md"
+    source.write_text("![x](../escape.png)", encoding="utf-8")
+    client_factory = mocker.patch.object(conversions, "_client")
+
+    assert main(("--json", "convert", str(source))) == 1
+
+    error = json.loads(capsys.readouterr().err)["error"]
+    assert error == {"code": "validation", "message": ESCAPING_IMAGE_PATH}
+    client_factory.assert_not_called()
+
+
+def test_convert_can_upload_markdown_unchanged_without_packaging(
+    tmp_path: Path, mocker, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = tmp_path / "doc.md"
+    source.write_text("![x](absent.png)", encoding="utf-8")
+    client = mocker.Mock()
+    client.submit.return_value = _accepted()
+    mocker.patch.object(conversions, "_client", return_value=client)
+
+    assert main(("--json", "convert", str(source), "--no-package")) == 0
+
+    assert "packaged_images" not in json.loads(capsys.readouterr().out)
+    assert client.submit.call_args.args[0] == b"![x](absent.png)"
+    assert client.submit.call_args.kwargs["source_kind"] == "md"
+
+
+def test_a_file_used_as_a_directory_is_a_missing_image(tmp_path: Path, mocker) -> None:
+    (tmp_path / "file.png").write_bytes(PNG)
+    for markdown in (b"![x](file.png/x.png)",):
+        with pytest.raises(PackageError) as raised:
+            _package(tmp_path / "doc.md", markdown)
+        assert raised.value.message == MISSING_IMAGE
+    directory = os.open(tmp_path, os.O_RDONLY)
+    try:
+        assert markdown_package._is_symlink("absent", directory) is False
+    finally:
+        os.close(directory)
+    mocker.patch.object(
+        markdown_package.os, "stat", side_effect=OSError(errno.EIO, "io")
+    )
+    with pytest.raises(PackageError) as raised:
+        _package(tmp_path / "doc.md", b"![x](file.png/x.png)")
+    assert raised.value.message == MISSING_IMAGE

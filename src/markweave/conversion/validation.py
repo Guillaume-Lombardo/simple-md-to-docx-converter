@@ -4,18 +4,13 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
-from urllib.parse import unquote, urlsplit
+from urllib.parse import urlsplit
 
-import yaml
-from markdown_it import MarkdownIt
 from markdown_it.token import Token
-from mdit_py_plugins.footnote import footnote_plugin
-from mdit_py_plugins.front_matter import front_matter_plugin
-from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
+from markweave.conversion import image_references as _references
 from markweave.conversion.archive import ApprovedDocument, ApprovedResource
 from markweave.conversion.errors import ConversionError, validation_error
 from markweave.conversion.images import (
@@ -27,28 +22,19 @@ from markweave.conversion.images import (
 PANDOC_READER = (
     "commonmark_x+pipe_tables+footnotes+attributes+yaml_metadata_block-raw_html"
 )
-_REMOTE_RESOURCE = re.compile(r"(?i)^(?:[a-z][a-z0-9+.-]*(?::|%3a)|//|%2f%2f)")
+# The image-reference parser and path rules are shared with the CLI packager.
+_MARKDOWN = _references.MARKDOWN
+_METADATA_MARKDOWN = _references.METADATA_MARKDOWN
+_REMOTE_RESOURCE = _references.REMOTE_RESOURCE
+_decoded_destination_variants = _references.decoded_destination_variants
+_is_remote_destination = _references.is_remote_destination
+_metadata_scalars = _references.metadata_scalars
+_walk = _references.walk
 _RAW_ATTRIBUTE = re.compile(r"^\{\s*=([^\s{}]+)\s*\}")
 _ALLOWED_EXTERNAL_LINK_SCHEMES = frozenset({"http", "https"})
-_MAX_URL_DECODE_PASSES = 2
 _ASCII_CONTROL_END = 32
 _ASCII_DELETE = 127
 _MAX_URL_PORT = 65_535
-
-
-class _ResourceParser(MarkdownIt):
-    def validateLink(self, url: str) -> bool:
-        """Tokenize every destination so validation, not the parser, decides policy."""
-
-        return True
-
-
-_MARKDOWN = (
-    _ResourceParser("commonmark", {"html": True})
-    .use(front_matter_plugin)
-    .use(footnote_plugin)
-)
-_METADATA_MARKDOWN = _ResourceParser("commonmark", {"html": True}).use(footnote_plugin)
 
 
 @dataclass(frozen=True)
@@ -59,39 +45,6 @@ class ApprovedMarkdown:
     entrypoint: PurePosixPath = field(default_factory=lambda: PurePosixPath("input.md"))
     resources: tuple[ApprovedResource, ...] = ()
     image_limits: ImageLimits | None = None
-
-
-def _walk(tokens: list[Token]) -> Iterator[Token]:
-    for token in tokens:
-        yield token
-        if token.children:
-            yield from _walk(token.children)
-
-
-def _metadata_scalars(metadata: str) -> Iterator[str]:
-    try:
-        root = yaml.compose(metadata, Loader=yaml.SafeLoader)
-    except yaml.YAMLError, RecursionError:
-        raise validation_error(
-            "Markdown input contains invalid YAML metadata."
-        ) from None
-    if root is None:
-        return
-    pending: list[Node] = [root]
-    seen: set[int] = set()
-    while pending:
-        node = pending.pop()
-        identity = id(node)
-        if identity in seen:
-            continue
-        seen.add(identity)
-        if isinstance(node, ScalarNode):
-            yield node.value
-        elif isinstance(node, SequenceNode):
-            pending.extend(node.value)
-        elif isinstance(node, MappingNode):
-            for key, value in node.value:
-                pending.extend((key, value))
 
 
 def _is_raw_attribute(value: str, *, complete: bool) -> bool:
@@ -105,74 +58,14 @@ def _is_raw_attribute(value: str, *, complete: bool) -> bool:
     )
 
 
-def _decoded_local_path(resource: str) -> PurePosixPath:
-    try:
-        parsed = urlsplit(resource)
-    except ValueError:
-        raise validation_error("Markdown image path is invalid.") from None
-    if parsed.query or parsed.fragment:
-        raise validation_error("Markdown image path is invalid.")
-    if re.search(r"(?i)%(?:2e|2f|5c)", resource):
-        raise validation_error("Markdown image path is invalid.")
-    try:
-        decoded = unquote(parsed.path, encoding="utf-8", errors="strict")
-    except UnicodeDecodeError:
-        raise validation_error("Markdown image path is invalid.") from None
-    if unquote(decoded, encoding="utf-8", errors="replace") != decoded:
-        raise validation_error("Markdown image path is invalid.")
-    if (
-        not decoded
-        or "\0" in decoded
-        or "\\" in decoded
-        or decoded.startswith("/")
-        or "?" in decoded
-        or "#" in decoded
-    ):
-        raise validation_error("Markdown image path is invalid.")
-    relative = PurePosixPath(decoded)
-    if relative.parts and ":" in relative.parts[0]:
-        raise validation_error("Markdown image path is invalid.")
-    return relative
-
-
 def _resolve_local_image(
     resource: str,
     entrypoint: PurePosixPath,
     approved_paths: frozenset[PurePosixPath],
 ) -> None:
-    relative = _decoded_local_path(resource)
-    resolved: list[str] = list(entrypoint.parent.parts)
-    if resolved == ["."]:
-        resolved.clear()
-    for part in relative.parts:
-        if part in {"", "."}:
-            continue
-        if part == "..":
-            if not resolved:
-                raise validation_error("Markdown image path escapes the archive.")
-            resolved.pop()
-            continue
-        resolved.append(part)
-    path = PurePosixPath(*resolved)
+    path = _references.resolve_local_image_path(resource, entrypoint)
     if path not in approved_paths:
-        raise validation_error("Markdown image is missing or unapproved.")
-
-
-def _decoded_destination_variants(resource: str) -> tuple[str, ...]:
-    variants = [resource]
-    for _ in range(_MAX_URL_DECODE_PASSES):
-        decoded = unquote(variants[-1], encoding="utf-8", errors="replace")
-        if decoded == variants[-1]:
-            break
-        variants.append(decoded)
-    return tuple(variants)
-
-
-def _is_remote_destination(resource: str) -> bool:
-    return any(
-        _REMOTE_RESOURCE.search(value)
-        for value in _decoded_destination_variants(resource)
-    )
+        raise validation_error(_references.MISSING_IMAGE)
 
 
 def _is_safe_external_link(resource: str) -> bool:

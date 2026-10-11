@@ -60,6 +60,22 @@ if not callable(markweave.app.create_app):
     raise SystemExit("server install does not expose its internal ASGI factory")
 """
 
+PACKAGING_IMPORT_CHECK = """\
+from importlib.util import find_spec
+import sys
+
+for module in sys.argv[1:]:
+    if find_spec(module) is None:
+        raise SystemExit(f"missing required packaging dependency: {module}")
+from markweave.cli.markdown_package import load_image_references
+references = load_image_references()
+if references is None or references.image_destinations("![a](a.png)") != ("a.png",):
+    raise SystemExit("packaging install cannot find Markdown image references")
+for forbidden in ("PIL", "cairosvg", "fastapi", "sqlalchemy"):
+    if forbidden in sys.modules or find_spec(forbidden) is not None:
+        raise SystemExit(f"packaging install contains server dependency: {forbidden}")
+"""
+
 REVERSE_ATTEMPT_IMPORT_CHECK = """\
 from importlib.util import find_spec
 import sys
@@ -222,6 +238,11 @@ adapter.close()
 """
 
 BASE_FORBIDDEN_MODULES = (
+    "markdown_it",
+    "mdit_py_plugins",
+    "yaml",
+    "PIL",
+    "cairosvg",
     "fastapi",
     "sqlalchemy",
     "boto3",
@@ -296,6 +317,12 @@ _SERVER_MODULES = (
 )
 SUPPORTED_INSTALLATION_PROFILES = (
     InstallationProfile("base", None, ()),
+    InstallationProfile(
+        "packaging",
+        "packaging",
+        ("markdown_it", "mdit_py_plugins", "yaml"),
+        PACKAGING_IMPORT_CHECK,
+    ),
     InstallationProfile("server", "server", _SERVER_MODULES),
     InstallationProfile("standalone", "standalone", _SERVER_MODULES),
     InstallationProfile(

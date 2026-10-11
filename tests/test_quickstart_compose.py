@@ -18,6 +18,12 @@ from typing import Any
 import pytest
 import yaml
 
+from tests.quickstart_compose_modes import (
+    SUPPORTED_MODES,
+    ComposeMode,
+    script_compose_files,
+)
+
 pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,9 +33,11 @@ SIMPLE_COMPOSER_OVERLAY = ROOT / "compose.simple-composer.yaml"
 PODMAN_OVERLAY = ROOT / "compose.podman.yaml"
 TRUSTED_UPSTREAM_OVERLAY = ROOT / "compose.trusted-upstream.yaml"
 PODMAN_TRUSTED_UPSTREAM_OVERLAY = ROOT / "compose.podman-trusted-upstream.yaml"
-NEXTJS_OVERLAY = ROOT / "compose.nextjs.yaml"
-NEXTJS_PODMAN_OVERLAY = ROOT / "compose.nextjs-podman.yaml"
-NEXTJS_PODMAN_TRUSTED_OVERLAY = ROOT / "compose.nextjs-podman-trusted-upstream.yaml"
+REMOVED_OVERLAYS = (
+    "compose.nextjs.yaml",
+    "compose.nextjs-podman.yaml",
+    "compose.nextjs-podman-trusted-upstream.yaml",
+)
 README = ROOT / "README.md"
 RUNNER = ROOT / "scripts/e2e/run-compose.sh"
 ALL_RUNNER = ROOT / "scripts/e2e/run-compose-all.sh"
@@ -75,12 +83,18 @@ def test_quickstart_uses_immutable_real_services_and_persistent_data() -> None:
     application = services["markweave"]
     scanner = services["clamav"]
 
-    assert application["image"] == MARKWEAVE_DIGEST
+    assert application["image"] == (
+        "${MARKWEAVE_CUTOVER_BACKEND_IMAGE:-" + MARKWEAVE_DIGEST + "}"
+    )
     assert application["platform"] == "linux/amd64"
     assert application["command"] == "serve"
     assert "restart" not in application
     assert application["depends_on"]["clamav"]["condition"] == "service_healthy"
-    assert application["ports"] == ["127.0.0.1:${MARKWEAVE_PORT:-8080}:8080"]
+    assert "ports" not in application
+    assert services["router"]["ports"] == ["127.0.0.1:${MARKWEAVE_PORT:-8080}:8080"]
+    assert [name for name, service in services.items() if "ports" in service] == [
+        "router"
+    ]
     assert set(application["volumes"]) == {
         "markweave-data:/data",
         "markweave-work:/work",
@@ -129,27 +143,20 @@ def test_compose_runners_probe_the_canonical_host_and_retain_421_policy(
 ) -> None:
     script = runner.read_text(encoding="utf-8")
 
-    assert 'readonly nextjs_overlay_file="$repository/compose.nextjs.yaml"' in script
-    assert '! -f "$nextjs_overlay_file"' in script
-    assert '--file "$nextjs_overlay_file"' in script
+    assert "nextjs" not in script
     assert "MARKWEAVE_ROUTER_PUBLIC_HOST=localhost:%s" in script
     compose_function = script.split("compose() {", 1)[1].split("\n}", 1)[0]
-    assert compose_function.index('"$compose_file"') < compose_function.index(
-        '"$nextjs_overlay_file"'
-    )
     if runner == SIMPLE_RUNNER:
-        assert compose_function.index(
-            '"$podman_overlay_file"'
-        ) < compose_function.index('"$nextjs_overlay_file"')
         assert (
-            'readonly nextjs_podman_overlay_file="$repository/compose.nextjs-podman.yaml"'
-            in script
+            'local files=(--file "$compose_file" --file "$overlay_file")'
+            in compose_function
         )
-        assert '! -f "$nextjs_podman_overlay_file"' in script
-        assert '--file "$nextjs_podman_overlay_file"' in script
-        assert compose_function.index(
-            '"$nextjs_overlay_file"'
-        ) < compose_function.index('"$nextjs_podman_overlay_file"')
+        assert compose_function.index('"$overlay_file"') < compose_function.index(
+            '"$podman_overlay_file"'
+        )
+    else:
+        assert '--file "$compose_file" \\\n' in compose_function
+        assert compose_function.count("--file") == 1
     assert 'readonly public_endpoint="http://127.0.0.1:$port"' in script
     assert 'readonly public_host="localhost:$port"' in script
     assert 'readonly public_base_url="http://$public_host"' in script
@@ -281,45 +288,14 @@ def test_trusted_upstream_overlay_removes_local_scanner_dependency() -> None:
     assert "local-antivirus" in overlay
 
 
-def test_podman_trusted_upstream_overlay_uses_rootless_user_mode_network() -> None:
+def test_podman_trusted_upstream_overlay_shares_one_loopback_listener() -> None:
     overlay = PODMAN_TRUSTED_UPSTREAM_OVERLAY.read_text(encoding="utf-8")
 
     assert "network_mode: slirp4netns" in overlay
-    assert "networks: !reset []" in overlay
-    assert "ports:" not in overlay
-
-
-def test_nextjs_cutover_overlay_is_a_two_image_rootless_boundary() -> None:
-    overlay = NEXTJS_OVERLAY.read_text(encoding="utf-8")
-
-    assert "MARKWEAVE_CUTOVER_BACKEND_IMAGE" in overlay
-    assert overlay.count("MARKWEAVE_CUTOVER_FRONTEND_IMAGE") == 2
-    assert MARKWEAVE_DIGEST in overlay
-    assert overlay.count(FRONTEND_DIGEST) == 2
-    assert "ports: !reset []" in overlay
-    assert "BACKEND_ORIGIN: http://markweave:8080" in overlay
-    assert "FRONTEND_ORIGIN: http://frontend:3000" in overlay
-    assert "HOSTNAME: 0.0.0.0" in overlay
-    assert "command: [node, router.mjs]" in overlay
-    assert "127.0.0.1:${MARKWEAVE_PORT:-8080}:8080" in overlay
-    assert "MARKWEAVE_INITIAL_ADMIN_PASSWORD" not in overlay
-    assert "MARKWEAVE_STANDALONE_DATA_DIRECTORY" not in overlay
-    assert overlay.count("read_only: true") == 2
-    assert overlay.count('user: "1001:0"') == 2
-    assert overlay.count("pids_limit: 64") == 2
-    assert "/_frontend/health/ready" in overlay
-    assert (
-        'PUBLIC_HOSTS: "${MARKWEAVE_ROUTER_PUBLIC_HOST:-localhost:'
-        '${MARKWEAVE_PORT:-8080},127.0.0.1:${MARKWEAVE_PORT:-8080}}"' in overlay
-    )
-    assert 'ROUTER_UPSTREAM_TIMEOUT_MS: "30000"' in overlay
-
-
-def test_nextjs_cni_free_overlay_exposes_only_the_shared_namespace_router() -> None:
-    overlay = NEXTJS_PODMAN_TRUSTED_OVERLAY.read_text(encoding="utf-8")
-
     assert overlay.count("network_mode: service:markweave") == 2
-    assert overlay.count("networks: !reset []") == 2
+    assert overlay.count("networks: !reset []") == 3
+    assert overlay.count("ports:") == 2
+    assert "ports: !reset []" in overlay
     assert "127.0.0.1:${MARKWEAVE_PORT:-8080}:3100" in overlay
     assert "BACKEND_ORIGIN: http://127.0.0.1:8080" in overlay
     assert "FRONTEND_ORIGIN: http://127.0.0.1:3000" in overlay
@@ -328,6 +304,81 @@ def test_nextjs_cni_free_overlay_exposes_only_the_shared_namespace_router() -> N
     assert 'ROUTER_PORT: "3100"' in overlay
     assert "fetch('http://127.0.0.1:3100/login'" in overlay
     assert "process.env.PUBLIC_HOSTS.split(',')[0]" in overlay
+
+
+def test_base_compose_includes_the_two_image_rootless_browser_tier() -> None:
+    compose = COMPOSE.read_text(encoding="utf-8")
+    services = _compose()["services"]
+    frontend = services["frontend"]
+    router = services["router"]
+
+    assert compose.count("MARKWEAVE_CUTOVER_BACKEND_IMAGE") == 1
+    assert compose.count("MARKWEAVE_CUTOVER_FRONTEND_IMAGE") == 2
+    assert compose.count(MARKWEAVE_DIGEST) == 1
+    assert compose.count(FRONTEND_DIGEST) == 2
+    assert "!reset" not in compose
+    assert "!override" not in compose
+    for service in (frontend, router):
+        assert service["image"] == (
+            "${MARKWEAVE_CUTOVER_FRONTEND_IMAGE:-" + FRONTEND_DIGEST + "}"
+        )
+        assert service["platform"] == "linux/amd64"
+        assert service["read_only"] is True
+        assert service["user"] == "1001:0"
+        assert service["cap_drop"] == ["ALL"]
+        assert service["security_opt"] == ["no-new-privileges:true"]
+        assert service["pids_limit"] == 64
+        assert service["networks"] == ["frontend"]
+        assert "volumes" not in service
+    assert frontend["environment"] == {
+        "HOSTNAME": "0.0.0.0"  # noqa: S104 - rendered container binding
+    }
+    assert "ports" not in frontend
+    assert "/_frontend/health/ready" in frontend["healthcheck"]["test"][-1]
+    assert router["command"] == ["node", "router.mjs"]
+    assert router["environment"]["BACKEND_ORIGIN"] == "http://markweave:8080"
+    assert router["environment"]["FRONTEND_ORIGIN"] == "http://frontend:3000"
+    assert router["environment"]["PUBLIC_HOSTS"] == (
+        "${MARKWEAVE_ROUTER_PUBLIC_HOST:-localhost:"
+        "${MARKWEAVE_PORT:-8080},127.0.0.1:${MARKWEAVE_PORT:-8080}}"
+    )
+    assert router["environment"]["ROUTER_UPSTREAM_TIMEOUT_MS"] == "30000"
+    assert "MARKWEAVE_INITIAL_ADMIN_PASSWORD" not in router["environment"]
+    assert "MARKWEAVE_STANDALONE_DATA_DIRECTORY" not in router["environment"]
+
+
+def test_removed_cutover_overlays_are_not_referenced() -> None:
+    consumers = [
+        COMPOSE,
+        SIMPLE_OVERLAY,
+        SIMPLE_COMPOSER_OVERLAY,
+        PODMAN_OVERLAY,
+        TRUSTED_UPSTREAM_OVERLAY,
+        PODMAN_TRUSTED_UPSTREAM_OVERLAY,
+        README,
+        ROOT / "docs/quickstart.md",
+        QUICKSTART,
+        SIMPLE_QUICKSTART,
+        RUNNER,
+        SIMPLE_RUNNER,
+        PODMAN_INSECURE_RUNNER,
+        ROOT / "scripts/ci/select_domains.py",
+        ROOT / "scripts/release/public_alignment.py",
+    ]
+    for removed in REMOVED_OVERLAYS:
+        assert not (ROOT / removed).exists()
+        for consumer in consumers:
+            assert removed not in consumer.read_text(encoding="utf-8"), consumer
+
+
+@pytest.mark.container_runtime_guard_exempt(
+    reason="The extracted helper calls a local docker stub that prints its arguments."
+)
+@pytest.mark.parametrize("mode", SUPPORTED_MODES, ids=lambda mode: mode.name)
+def test_quickstart_helpers_select_the_reviewed_compose_stack(
+    mode: ComposeMode,
+) -> None:
+    assert script_compose_files(mode) == mode.files
 
 
 def test_podman_overlay_replaces_only_unsupported_clamav_tmpfs_options() -> None:
@@ -425,18 +476,7 @@ def test_simple_quickstart_is_unprivileged_and_removes_only_exact_scratch() -> N
     assert "down --volumes" not in script
     assert "no physical capacity cap" in script
     assert "Markweave is ready with $runtime_name" in script
-    assert "compose.nextjs.yaml" in script
-    assert "compose.nextjs-podman.yaml" in script
-    assert "compose.nextjs-podman-trusted-upstream.yaml" in script
-    compose_function = script.split("compose() {", 1)[1].split("\n}", 1)[0]
-    assert compose_function.index('"$repository/compose.nextjs.yaml"') < (
-        compose_function.index('"$repository/compose.nextjs-podman.yaml"')
-    )
-    assert compose_function.index('"$repository/compose.nextjs-podman.yaml"') < (
-        compose_function.index(
-            '"$repository/compose.nextjs-podman-trusted-upstream.yaml"'
-        )
-    )
+    assert "nextjs" not in script
     assert "wait_for_podman_scanner" in script
     assert "wait_for_application" in script
     podman_start = script.split("start_podman_stack() {", 1)[1].split("\n}", 1)[0]
@@ -448,18 +488,20 @@ def test_simple_quickstart_is_unprivileged_and_removes_only_exact_scratch() -> N
     assert "MARKWEAVE_CUTOVER_FRONTEND_IMAGE" in script
 
 
-def test_nextjs_podman_overlay_matches_the_staged_startup_contract() -> None:
-    document = yaml.safe_load(NEXTJS_PODMAN_OVERLAY.read_text(encoding="utf-8"))
+def test_podman_overlay_matches_the_staged_browser_startup_contract() -> None:
+    overlay = PODMAN_OVERLAY.read_text(encoding="utf-8")
+    # BaseLoader accepts Compose merge tags and constructs only strings.
+    document = yaml.load(overlay, Loader=yaml.BaseLoader)  # noqa: S506
+    services = document["services"]
 
-    assert document == {
-        "services": {
-            "frontend": {"depends_on": {"markweave": {"condition": "service_started"}}},
-            "router": {
-                "depends_on": {
-                    "frontend": {"condition": "service_started"},
-                    "markweave": {"condition": "service_started"},
-                }
-            },
+    assert set(services) == {"markweave", "clamav", "frontend", "router"}
+    assert services["frontend"] == {
+        "depends_on": {"markweave": {"condition": "service_started"}}
+    }
+    assert services["router"] == {
+        "depends_on": {
+            "frontend": {"condition": "service_started"},
+            "markweave": {"condition": "service_started"},
         }
     }
 
@@ -536,7 +578,7 @@ def test_quickstart_script_uses_private_create_once_state_and_exact_cleanup() ->
     assert "markweave-data" not in script
     assert "clamav-signatures" not in script
     assert "/quickstart-template.docx" in (ROOT / ".gitignore").read_text()
-    assert "compose.nextjs.yaml" in script
+    assert "nextjs" not in script
     assert "wait_for_router" in script
     assert "MARKWEAVE_CUTOVER_BACKEND_IMAGE" in script
     assert "MARKWEAVE_CUTOVER_FRONTEND_IMAGE" in script
