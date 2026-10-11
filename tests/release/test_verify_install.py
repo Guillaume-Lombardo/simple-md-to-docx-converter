@@ -299,12 +299,12 @@ def test_clean_install_uses_private_digest_bound_copy_and_cleans_up(
         CONSOLE_TIMEOUT_SECONDS,
     )
     standalone_python = root / "venv-standalone" / "bin" / "python"
-    assert calls[19] == (
+    assert calls[26] == (
         (str(standalone_python), "-I", "-c", STANDALONE_RECOVERY_CHECK),
         root,
         CONSOLE_TIMEOUT_SECONDS,
     )
-    distributed_install = calls[24]
+    distributed_install = calls[31]
     assert distributed_install[0][-1] == f"{private_wheel}[distributed]"
     assert distributed_install[2] == INSTALL_TIMEOUT_SECONDS
     assert all(cwd == root for _, cwd, _ in calls)

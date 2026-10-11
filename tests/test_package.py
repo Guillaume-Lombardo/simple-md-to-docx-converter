@@ -48,6 +48,14 @@ def test_distribution_metadata_declares_the_supported_dependency_matrix() -> Non
     extras = project["optional-dependencies"]
 
     assert project["dependencies"] == []
+    assert extras["packaging"] == [
+        "markdown-it-py>=4,<5",
+        "mdit-py-plugins>=0.5,<0.7",
+        "pyyaml>=6,<7",
+    ]
+    # The CLI packager and the service share one parser and one set of pins.
+    assert extras["server"][0] == "markweave[packaging]"
+    assert not set(extras["packaging"]) & set(extras["server"])
     assert extras["standalone"] == ["markweave[server]"]
     assert extras["distributed"] == [
         "markweave[server]",
