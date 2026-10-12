@@ -67,3 +67,40 @@ Measured baseline (runs 38235590401 and 38150642257):
 
 - 2026-10-12: Mirrored from Linear and started on branch `chore/T135-build-images-once` from
   `origin/main` `9306cab`.
+- 2026-10-12: Implemented on `chore/T135-build-images-once`.
+  - **Single build.** `CI / build images` runs `scripts/container/ci_images.py build` once per run
+    for the roles the selected domains need. It acquires the pinned bases with retries, builds
+    with `--pull=never`, builds the frontend with the commit `--timestamp`, saves each image by
+    ID as an OCI archive and verifies the archive configuration digest. It uploads one archive
+    per role (compression 0, one-day retention) and publishes the IDs as job outputs.
+    - The `final-image` matrix (`container`, `supply-chain`, `frontend` and four E2E shards)
+      downloads only its domain's archives.
+    - `ci_images.py load` tags an image only when the archive configuration digest, the ID that
+      `podman load` reports and the tagged image ID all equal the build output.
+  - **Split domains.** Supply-chain scanning is its own domain with `supply-chain.sh`
+    unchanged. The four Compose sub-suites are separate domains.
+  - **E2E shards.** `scripts/e2e/run.sh` groups scenarios into phases assigned to two shards
+    (`MARKWEAVE_E2E_SHARD`). Unset runs every shard in order on one deployment, as releases do.
+    - `scripts/ci/e2e_shards.py`, run by the CI validator, fails when a scenario is unassigned,
+      reachable from two shards or from top-level code, or hidden in a seed.
+    - The browser shard re-seeds the system fallback template and the audited policy
+      checkpoint through `service_workflow seed-browser-prerequisites`.
+  - **Gate.** `CI / gate` requires the heavy and final-image partitions to cover exactly the
+    runnable domains, and fails closed on a skipped or failed matrix or image build.
+- 2026-10-12: Local verification on Podman 5.4.2 (4 vCPU) with archive-loaded images only, after
+  removing the built images.
+  - Archives: backend 1.46 GB, frontend 0.50 GB and reverse-attempt 0.40 GB. Fresh-storage
+    loads took 32.6 s, 12.0 s and 8.6 s.
+  - All four shard domains passed through `scripts.ci.run_domain`:
+    - `e2e-standalone-1`: 6 min 56 s (phases 79/141/170 s);
+    - `e2e-standalone-2`: 6 min 49 s (phases 47/183/154 s);
+    - `e2e-distributed-1`: 7 min 12 s (phases 76/149/177 s);
+    - `e2e-distributed-2`: 6 min 54 s (phases 46/183/155 s).
+  - The first shard-2 run found a hidden dependency. Opening a structured PPTX source in Composer
+    needs the ready Composer connection that the Composer chain configures (draft creation
+    returned 503), so that journey now stays with the Composer chain in shard 1.
+  - A local-only finding: reusing the build's storage gives the reverse image two repository
+    digests, which breaks broker unit verification. Hosted consumers start from fresh storage,
+    so they are unaffected.
+  - Hosted durations and the three consecutive full-suite runs remain to be measured after
+    review.
