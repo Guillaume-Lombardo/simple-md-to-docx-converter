@@ -161,9 +161,22 @@ guard runs in every worker. `slow` marks a test that alone takes several seconds
 local commands and CI still run it. A unit-only selection never reaches the 90% coverage
 thresholds, so use `--no-cov` (or the full selection) rather than lowering a threshold.
 
-The shared test configuration freezes the objects that exist after collection (`gc.freeze()`),
-so the per-test `gc.collect()` that attributes leaked resources to their test traverses only
-objects created since collection instead of every imported module.
+The shared test configuration runs `gc.collect()` at the teardown of every test, so a resource
+abandoned in a reference cycle fails the test that created it, and then freezes the surviving
+objects (`gc.freeze()`). Each collection therefore traverses only the objects one test created.
+Without the freeze, every collection traversed everything earlier tests retained (FastAPI's
+module-level dependency caches alone keep test-built applications alive), and the suite time grew
+quadratically with the number of tests. Objects frozen while alive that are abandoned later, such
+as module- or session-scoped fixture state, are collected once more after the last fixture
+teardown; an unclosed resource found there fails the session under the heading "resources
+abandoned outside a single test". Under pytest-xdist each worker reports its findings to the
+controller.
+
+pytest-xdist requires every worker to collect the same test identifiers, and `--lf` relies on the
+same property. Give `pytest.mark.parametrize` explicit `ids` (or fixed constants) whenever a value
+is derived from randomness or the clock, such as `uuid4()` or the timestamps in a generated ZIP
+archive; `tests/test_parallel_execution.py` collects the suite in two processes and fails on any
+difference.
 
 ## Continuous integration
 

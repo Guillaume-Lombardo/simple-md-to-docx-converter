@@ -1,6 +1,8 @@
 """Shared fixtures for the reference corpus."""
 
 import gc
+import sys
+import traceback
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -14,6 +16,8 @@ from tests.golden.corpus import CorpusManifest, materialize_case, read_manifest
 
 DISTRIBUTED_SERVICE_MARKERS = ("requires_postgres", "requires_s3")
 DISTRIBUTED_SERVICES_GROUP = "distributed-services"
+SESSION_LEAKS = pytest.StashKey[list[str]]()
+WORKER_LEAKS_OUTPUT = "markweave_session_resource_leaks"
 
 
 @pytest.hookimpl(tryfirst=True)
@@ -80,24 +84,95 @@ def dispose_every_created_database_engine(
 
 
 def pytest_collection_finish() -> None:
-    """Exclude long-lived collection objects from every per-test collection.
-
-    Modules, test functions and parametrization data stay reachable for the
-    whole session, yet a full ``gc.collect()`` traversed them after every test
-    and dominated the suite's wall time. Freezing them once keeps each per-test
-    collection proportional to the objects created since collection; resources
-    created by fixtures and tests remain collected and attributed as before.
-    """
+    """Exclude long-lived collection objects from every per-test collection."""
     gc.collect()
     gc.freeze()
 
 
 @pytest.fixture(autouse=True)
 def collect_unreachable_resources() -> Iterator[None]:
-    """Attribute finalizer warnings to the test that abandoned the resource."""
+    """Attribute finalizer warnings to the test that abandoned the resource.
 
+    The collection runs at this test's teardown, so a resource abandoned in a
+    reference cycle fails the test that created it. Freezing the survivors
+    afterwards keeps every later collection proportional to the objects one
+    test creates; without it, each collection traversed every object retained
+    by earlier tests and suite time grew quadratically. Frozen objects that
+    become unreachable later, such as module- or session-scoped fixture state,
+    are collected by the session-finish backstop instead.
+    """
     yield
     gc.collect()
+    gc.freeze()
+
+
+def _collect_frozen_garbage() -> list[str]:
+    """Unfreeze and collect every object, recording each finalizer failure."""
+    failures: list[str] = []
+
+    def record(unraisable: sys.UnraisableHookArgs) -> None:
+        message = unraisable.err_msg or "Exception ignored in"
+        failures.append(
+            f"{message}: {unraisable.object!r}\n"
+            + "".join(
+                traceback.format_exception(
+                    unraisable.exc_type,
+                    unraisable.exc_value,
+                    unraisable.exc_traceback,
+                )
+            )
+        )
+
+    previous_hook = sys.unraisablehook
+    sys.unraisablehook = record
+    try:
+        gc.unfreeze()
+        gc.collect()
+    finally:
+        sys.unraisablehook = previous_hook
+    return failures
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_sessionfinish(session: pytest.Session) -> None:
+    """Fail the session when frozen garbage abandoned an unclosed resource.
+
+    This runs after session-scoped fixtures are torn down and inside the
+    session's warning filters, so ``error::ResourceWarning`` still applies.
+    An xdist worker hands its findings to the controller, which reports them.
+    """
+    config = session.config
+    leaks = config.stash.setdefault(SESSION_LEAKS, [])
+    leaks.extend(_collect_frozen_garbage())
+    worker_output = getattr(config, "workeroutput", None)
+    if worker_output is not None:
+        worker_output[WORKER_LEAKS_OUTPUT] = list(leaks)
+    if leaks and session.exitstatus in {
+        pytest.ExitCode.OK,
+        pytest.ExitCode.NO_TESTS_COLLECTED,
+    }:
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_testnodedown(node: Any, error: object) -> None:
+    """Collect the session-finish leaks reported by a finished xdist worker."""
+    del error
+    worker_output = getattr(node, "workeroutput", None) or {}
+    node.config.stash.setdefault(SESSION_LEAKS, []).extend(
+        worker_output.get(WORKER_LEAKS_OUTPUT, ())
+    )
+
+
+def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
+    leaks = terminalreporter.config.stash.get(SESSION_LEAKS, [])
+    if not leaks:
+        return
+    terminalreporter.write_sep(
+        "=", "resources abandoned outside a single test", red=True
+    )
+    for leak in leaks:
+        terminalreporter.write_line(leak)
 
 
 @pytest.fixture(scope="session")
