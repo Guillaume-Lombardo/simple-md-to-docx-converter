@@ -22,6 +22,9 @@ private reporting, and the [support policy](SUPPORT.md) for help with a publishe
 - The frontend lockfile adopts fixed releases of `sharp` `0.35.5`, `undici` `7.30.0`,
   `brace-expansion` `1.1.21` and `5.0.12`, `js-yaml` `4.3.2` and `source-map-js` `1.2.2`. No High
   or Critical advisory with an available fix remains in the frontend dependency tree.
+- The backend image adopts the reviewed Red Hat UBI curl `7.76.1-40.el9_8.8` update
+  (`curl-minimal`, `libcurl-minimal` and `libcurl-devel`), which fixes CVE-2026-8924 and
+  CVE-2026-11856.
 
 ### Release notes
 
