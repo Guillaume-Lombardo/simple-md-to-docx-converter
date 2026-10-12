@@ -1,6 +1,13 @@
+# Ownership labels let scripts/testing/services.py reap only abandoned stacks.
+x-markweave-test-labels: &markweave-test-labels
+  io.markweave.tests.stack: local-services
+  io.markweave.tests.lock: ${MARKWEAVE_LOCAL_TEST_LOCK:?set by test service manager}
+  io.markweave.tests.created: ${MARKWEAVE_LOCAL_TEST_CREATED:?set by test service manager}
+  io.markweave.tests.host: ${MARKWEAVE_LOCAL_TEST_HOST:?set by test service manager}
 services:
   postgres:
     image: docker.io/library/postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8
+    labels: *markweave-test-labels
     environment:
       POSTGRES_DB: md_converter_test
       POSTGRES_PASSWORD: ${MARKWEAVE_LOCAL_TEST_PASSWORD:?set by test service manager}
@@ -18,6 +25,7 @@ services:
     pids_limit: 256
   rustfs:
     image: ghcr.io/rustfs/rustfs:1.0.0-beta.12-glibc@sha256:6d693c8d0c09a1c5770f1780303a5d58b9e864c313fd2644ecd561e92b79ae04
+    labels: *markweave-test-labels
     environment:
       RUSTFS_ACCESS_KEY: ${MARKWEAVE_LOCAL_TEST_ACCESS_KEY:?set by test service manager}
       RUSTFS_SECRET_KEY: ${MARKWEAVE_LOCAL_TEST_PASSWORD:?set by test service manager}
@@ -35,6 +43,11 @@ services:
     mem_limit: 1g
     cpus: 1
     pids_limit: 256
+networks:
+  default:
+    labels: *markweave-test-labels
 volumes:
   postgres-data:
+    labels: *markweave-test-labels
   rustfs-data:
+    labels: *markweave-test-labels

@@ -111,8 +111,46 @@ The local Docker Engine socket `/var/run/docker.sock` and `docker compose` must 
 to the current user. The helper explicitly selects that socket, ignoring remote Docker contexts.
 No `sudo`, system
 package installation, external credentials, persistent `.env`, or manual exports are needed.
-The first run may pull the pinned images. Do not interrupt cleanup with SIGKILL; after a host
-crash, inspect projects with `docker compose ls --all` and remove only the exact abandoned
+The first run may pull the pinned images.
+
+Every stack, its volumes and its network carry the labels `io.markweave.tests.stack=local-services`,
+`io.markweave.tests.lock`, `io.markweave.tests.created` and `io.markweave.tests.host`. The owning
+session holds an exclusive lock on the labelled file (under `$XDG_RUNTIME_DIR`, or the temporary
+directory, in `markweave-test-services-<uid>/`) for the stack's whole life. Teardown runs after
+test failures, `Ctrl-C`, `SIGTERM` and interpreter exit, and `SIGINT`/`SIGTERM` wait until
+`docker compose down` has finished. Every Docker command is recorded from the moment it starts
+until its whole process group, including the Compose plugin, is proven gone; a command that
+exits, successfully or not, while a descendant with redirected streams still runs has that
+descendant stopped. An interrupted or timed-out command is stopped with `SIGTERM`, then `SIGKILL`
+after a bounded grace period, and further interrupts wait until that stop and its record are
+complete. Teardown stops any recorded survivor again before removal.
+
+One invariant governs the owner lock: the session releases its `flock` and unlinks the lock file
+only when no Docker command group it started is alive and a fresh listing shows none of the
+stack's containers, volumes or networks. A successful `docker compose down` is not proof, because
+Compose reports success while a network or volume is still in use, and a failed listing counts as
+not proven. Every removal (teardown, the exit fallback and the reaper) repeats `down` a bounded
+number of times until the listing is empty. Otherwise the lock stays held until the
+interpreter-exit fallback stops the groups, removes the stack and proves both conditions; the kernel releases it at process exit at the latest, and the
+lock file then stays for the next session. The owner also writes every command group it starts
+into the lock file, and the next session waits for any of those groups that is still alive, up to
+the stale bound below. The reaper reports a stack as removed, and unlinks its lock file, only
+after the same listing proof; otherwise the file stays for the next session. Residual limitation: after a hard kill of the owner (`SIGKILL`, a crashed
+xdist worker or a host crash) nothing can stop its detached descendants, so a descendant that
+outlives the owner, or one whose process group number is reused, delays removal until the stale
+bound; a Compose plugin that keeps running past that bound can still recreate resources after
+the stack is removed.
+Interruptions that no process can handle, such as `SIGKILL`, a pytest-xdist worker crash or a
+host crash, release the lock with the process. The next session
+that acquires services then removes every labelled stack on the same host whose lock nobody
+holds; the pytest-xdist controller does the same as soon as a worker crashes. A stack whose
+owner still holds its lock is never touched, and unlabelled projects are never removed. When a
+lock file has disappeared, so the owner cannot be proven gone, or a command group recorded in it
+is still alive, a stack is removed only after `MARKWEAVE_TEST_SERVICES_STALE_AFTER_SECONDS`
+(default 3600). Run the same removal on demand with
+`uv run python -c "from scripts.testing.services import reap_stale_stacks; print(reap_stale_stacks())"`.
+To clean up by hand, inspect
+projects with `docker compose ls --all` and remove only the exact abandoned
 `markweave-tests-<id>` project using `compose.test.yaml`.
 
 To use externally managed services instead, configure **all six** variables:
@@ -134,6 +172,57 @@ Ruff targets Python 3.14 and applies the committed correctness, security, modern
 and maintainability rule families to source, CI helpers, and tests. Narrow per-file exceptions are
 recorded only for reviewed subprocess argument vectors and for assertions and process probes in
 tests. `ty` checks `src`, `scripts`, and `tests` explicitly against Python 3.14.
+
+### Fast parallel test loop
+
+The canonical commands above stay authoritative: run them before you ask for review and report
+their results. While iterating, `pytest-xdist` (in the `dev` group) runs the same tests on several
+worker processes. Run the unit tests that are not marked `slow`, without coverage gates:
+
+```bash
+uv run pytest -n auto -m "unit and not slow" --no-cov
+```
+
+Run the default local selection in parallel with its unchanged coverage gates:
+
+```bash
+uv run pytest -n auto --dist loadgroup -m "not requires_pandoc and not requires_mermaid and not requires_libreoffice and not requires_podman"
+```
+
+On the 4-vCPU reference developer host (measured 2026-10-12), `tests/unit` takes about 75 s
+serially and 47 s with `-n auto`, and the canonical default command about 7 minutes serially and
+under 3 minutes with `-n auto --dist loadgroup`.
+
+pytest-cov combines every worker's coverage data on the controller process, which then writes
+`coverage.json` and applies the 90% total and branch-only thresholds exactly once; a regression
+test proves that serial and parallel runs report identical lines, branches and gate results.
+`--dist loadgroup` keeps every `requires_postgres` or `requires_s3` test on one worker, which
+starts a single disposable PostgreSQL/RustFS stack. Without it each worker that receives such a
+test starts its own private stack, which stays isolated but costs more. The container runtime
+guard runs in every worker. `slow` marks a test that alone takes several seconds; the default
+local commands and CI still run it. A unit-only selection never reaches the 90% coverage
+thresholds, so use `--no-cov` (or the full selection) rather than lowering a threshold.
+
+The shared test configuration runs `gc.collect()` at the teardown of every test, so a resource
+abandoned in a reference cycle fails the test that created it, and then freezes the surviving
+objects (`gc.freeze()`). Each collection therefore traverses only the objects one test created.
+Without the freeze, every collection traversed everything earlier tests retained (FastAPI's
+module-level dependency caches alone keep test-built applications alive), and the suite time grew
+quadratically with the number of tests. The same teardown clears those three FastAPI caches,
+which lowers peak memory, and a guard test fails if a FastAPI upgrade renames them. Objects
+frozen while alive that are abandoned later, such as module- or session-scoped fixture state, are
+collected once more after the last fixture teardown; an unclosed resource found there fails the
+session under the heading "resources abandoned outside a single test". Under pytest-xdist each
+worker reports its findings to the controller.
+
+pytest-xdist requires every worker to collect the same test identifiers, and `--lf` relies on the
+same property. Give `pytest.mark.parametrize` explicit `ids` (or fixed constants) whenever a value
+is derived from randomness or the clock, such as `uuid4()` or the timestamps in a generated ZIP
+archive; `tests/test_parallel_execution.py` collects the suite in two processes and fails on any
+difference. Tests that run in parallel must not share host-global state either: timing assertions
+measure the CPU time of the measuring thread rather than wall time, tests take the broker
+authority lock under a per-test name, and the shared configuration removes application log
+handlers a test installed, so none outlives its capture stream.
 
 ## Continuous integration
 
@@ -239,15 +328,19 @@ The marker also selects local SQLite, filesystem, loopback HTTP/TLS, and functio
 boundary tests. A separate, always-run coverage job uses the pinned PostgreSQL and
 RustFS services to run the `storage-distributed` test selection. This job runs for
 every pull request, even when affected-domain selection omits the heavier storage
-suite. Both light shards have a 25-minute job bound, measured against the expanded
-cohort while preserving the same two-partition selection. The normal local test
-commands remain unchanged.
+suite. Each light shard runs its partition on every runner core with
+`-n auto --dist loadgroup` and has a 15-minute job bound; pytest-cov combines the
+worker data on the shard controller, so each shard still uploads one raw coverage file.
+The distributed coverage job stays serial: its PostgreSQL and S3 tests share one
+`xdist_group`, so workers would not shorten it, and other distribution modes would
+share the single provisioned database and bucket between workers. The normal local
+test commands remain unchanged.
 
 To reproduce a partition, use index `0` or `1` and a distinct coverage data file:
 
 ```bash
 COVERAGE_FILE=.coverage.shard0 uv run pytest -m 'unit or light_coverage' \
-  -p no:scripts.ci.pytest_branch_coverage \
+  -n auto --dist loadgroup -p no:scripts.ci.pytest_branch_coverage \
   -p scripts.ci.light_sharding --light-shard-count=2 --light-shard-index=0 \
   --cov-fail-under=0 --cov-report=
 ```

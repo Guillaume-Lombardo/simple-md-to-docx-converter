@@ -43,7 +43,9 @@ def policy() -> ConnectionPolicy:
         maximum_output_tokens=8,
         maximum_concurrent_calls=1,
         maximum_allowed_users=10,
-        timeout_seconds=0.05,
+        # Generous, so CPU contention from parallel workers cannot exhaust the
+        # budget while building a TLS context; deadline tests set their own.
+        timeout_seconds=5,
     )
 
 

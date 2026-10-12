@@ -181,7 +181,7 @@ jobs:
   python-tests:
     name: CI / Python tests (${{ matrix.shard }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       max-parallel: 2
@@ -213,7 +213,7 @@ jobs:
           SHARD_INDEX: ${{ matrix.shard }}
         run: >-
           uv run python -m scripts.ci.engine_userns_gate --
-          uv run pytest -m "unit or light_coverage"
+          uv run pytest -m "unit or light_coverage" -n auto --dist loadgroup
           -p no:scripts.ci.pytest_branch_coverage
           -p scripts.ci.light_sharding --light-shard-count=2
           --light-shard-index="$SHARD_INDEX" --cov-fail-under=0 --cov-report=

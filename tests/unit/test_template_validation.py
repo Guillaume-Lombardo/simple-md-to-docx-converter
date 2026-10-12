@@ -390,6 +390,7 @@ def test_every_active_default_content_type_is_rejected(
             TemplateValidationErrorCode.INVALID_PACKAGE,
         ),
     ),
+    ids=("not-a-zip", "missing-styles", "duplicate-styles"),
 )
 def test_invalid_packages_fail_with_stable_content_free_categories(
     data: bytes,

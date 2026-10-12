@@ -271,6 +271,7 @@ def test_success_uses_fixed_isolated_arguments_and_canonical_manifest(
             ConversionErrorCode.PDF_LIMIT_EXCEEDED,
         ),
     ),
+    ids=("invalid-docx", "docx-over-limit"),
 )
 def test_input_is_validated_before_engine_start(
     mocker: MockerFixture,

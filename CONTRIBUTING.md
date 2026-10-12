@@ -50,6 +50,12 @@ uv run pytest -m "not requires_pandoc and not requires_mermaid and not requires_
 uv run pytest
 ```
 
+For a faster loop while iterating, run the non-`slow` unit tests on all CPU cores with
+`uv run pytest -n auto -m "unit and not slow" --no-cov`. The canonical commands above remain the
+authoritative checks to run and report before review; see the
+[fast parallel test loop](docs/local-development.md#fast-parallel-test-loop). CI runs each of its two
+Python shards with `-n auto --dist loadgroup` under unchanged coverage gates.
+
 Use `uv run ruff format --check .` for a non-mutating formatting check. Tests that require a real
 engine or service must use the marker defined in `pyproject.toml`; they must not hide unavailable
 dependencies with ad hoc skips.

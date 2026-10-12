@@ -14,8 +14,18 @@ BRANCH_FAIL_UNDER = 90.0
 
 @pytest.hookimpl(trylast=True)
 def pytest_sessionfinish(session: pytest.Session) -> None:
-    """Fail canonical Pytest runs when application branch coverage is below 90%."""
-    if session.config.getoption("no_cov") or session.config.getoption("collectonly"):
+    """Fail canonical Pytest runs when application branch coverage is below 90%.
+
+    Under pytest-xdist, only the controller validates the report. pytest-cov
+    combines every worker's data and writes ``coverage.json`` on the controller
+    after all workers finish, so a worker would read a missing or stale file.
+    """
+    config = session.config
+    if (
+        config.getoption("no_cov")
+        or config.getoption("collectonly")
+        or hasattr(config, "workerinput")
+    ):
         return
     try:
         coverage = validate_branch_report(Path("coverage.json"))
