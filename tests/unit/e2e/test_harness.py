@@ -1676,9 +1676,9 @@ def _reservation_program(runner: str) -> str:
 @pytest.mark.parametrize(
     ("subnet", "gateway", "expected"),
     [
-        ("10.89.0.0/24", "10.89.0.1", "10.89.0.2 10.89.0.254 10.89.0.253 10.89.0.252"),
-        ("10.89.4.0/23", "10.89.4.1", "10.89.4.2 10.89.5.254 10.89.5.253 10.89.5.252"),
-        ("10.89.0.0/29", "10.89.0.1", "10.89.0.2 10.89.0.6 10.89.0.5 10.89.0.4"),
+        ("10.89.0.0/24", "10.89.0.1", "10.89.0.2 10.89.0.254 10.89.0.253"),
+        ("10.89.4.0/23", "10.89.4.1", "10.89.4.2 10.89.5.254 10.89.5.253"),
+        ("10.89.0.0/29", "10.89.0.1", "10.89.0.2 10.89.0.6 10.89.0.5"),
         ("10.89.0.0/30", "10.89.0.1", None),
         ("10.89.0.0/29", "10.89.0.5", None),
     ],
@@ -1705,35 +1705,33 @@ def test_e2e_network_reserves_distinct_usable_peer_addresses(
 
 
 @pytest.mark.unit
-def test_storage_and_frontend_peers_use_reserved_addresses_and_host_entries() -> None:
+def test_storage_peers_use_reserved_addresses_and_host_entries() -> None:
     runner = RUNNER.read_text(encoding="utf-8")
     start_frontend = _runner_function(
         runner, "start_frontend", "record_name_resolution"
     )
-    mapping = runner.split("# Pin the remaining peers the same way.", 1)[1].split(
+    mapping = runner.split("# Pin the storage peers the same way.", 1)[1].split(
         "\nreverse_digest=", 1
     )[0]
 
     assert (
         "read -r scanner_static_address postgres_static_address rustfs_static_address \\\n"
-        '  frontend_static_address <<<"$reserved_addresses"'
+        '  <<<"$reserved_addresses"'
     ) in runner
     assert '--network-alias postgres --ip "$postgres_static_address"' in runner
     assert '--network-alias rustfs --ip "$rustfs_static_address"' in runner
-    assert runner.count('--network-alias frontend --ip "$frontend_static_address"') == 2
-    assert "--network-alias frontend --user" not in runner
-    assert (
-        'require_reserved_address "$frontend_name" "$frontend_static_address"'
-        in start_frontend
-    )
+    # Replaced frontend containers keep dynamic addresses: reusing one address
+    # for a new container left a stale neighbor entry on Podman 4.9.
+    assert "frontend_static_address" not in runner
+    assert '--add-host "frontend:' not in runner
+    assert runner.count("--network-alias frontend --user") == 2
+    assert "require_reserved_address" not in start_frontend
     for name in ("postgres", "rustfs"):
         check = f'require_reserved_address "${name}_name" "${name}_static_address"'
         assert runner.count(check) == 2
         start = runner.index(f'podman start "${name}_name" >/dev/null')
         assert runner.index(check, start) > start
-    assert 'service_host_mapping=(--add-host "frontend:$frontend_static_address")' in (
-        mapping
-    )
+    assert "service_host_mapping=()" in mapping
     assert '--add-host "postgres:$postgres_static_address"' in mapping
     assert '--add-host "rustfs:$rustfs_static_address"' in mapping
     assert 'scanner_host_mapping+=("${service_host_mapping[@]}")' in mapping

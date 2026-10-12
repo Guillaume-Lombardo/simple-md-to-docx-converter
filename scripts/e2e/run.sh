@@ -659,12 +659,10 @@ start_frontend() {
   e2e_run_in_harness_directory \
     "$temporary_directory" "$temporary_directory_identity" \
     podman run --detach --name "$frontend_name" --network "$network_name" \
-    --network-alias frontend --ip "$frontend_static_address" \
-    --user "$runtime_uid:0" --read-only --cap-drop=all \
+    --network-alias frontend --user "$runtime_uid:0" --read-only --cap-drop=all \
     --security-opt=no-new-privileges --pids-limit=64 --memory=256m --cpus=0.5 \
     --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m --env HOSTNAME=0.0.0.0 \
     "$frontend_image" >/dev/null
-  require_reserved_address "$frontend_name" "$frontend_static_address"
   for _ in $(seq 1 120); do
     if e2e_podman exec "$frontend_name" node -e \
       'fetch("http://127.0.0.1:3001/_frontend/health/ready",{signal:AbortSignal.timeout(1000)}).then(r => process.exit(r.status === 200 ? 0 : 1)).catch(() => process.exit(1))' \
@@ -682,9 +680,10 @@ start_frontend() {
   return 1
 }
 
-# Record how long each peer name takes to resolve inside a container. The bare
-# names resolve through the pinned host entries; the `.dns.podman` names go to
-# the network's aardvark-dns resolver, so a stalled resolver remains visible.
+# Record how long each peer name takes to resolve inside a container. Pinned
+# bare names resolve through host entries, the frontend through the resolver,
+# and every `.dns.podman` name through the network's aardvark-dns resolver, so a
+# stalled resolver remains visible.
 record_name_resolution() {
   local container="$1"
   podman exec "$container" python -c '
@@ -718,8 +717,9 @@ for name in ("postgres", "rustfs", "frontend", "e2e-clamav"):
 
 # Stopping the scanner tears down its network endpoint, which reloads the
 # network's aardvark-dns resolver. Hosted runs showed DNS-dependent routes timing
-# out for a moment right afterwards while numeric routes answered. Those peers
-# are now pinned through host entries; this bounded poll (attempts 250 ms apart
+# out for a moment right afterwards while numeric routes answered. The storage
+# peers behind readiness are now pinned through host entries, and the frontend
+# alias remains a diagnostic DNS route. This bounded poll (attempts 250 ms apart
 # that start within 20 seconds, each request bounded to 2 seconds) only absorbs
 # a transient runtime stall. A persistent failure of any required route still
 # fails the scenario, so a real readiness or routing regression is not masked.
@@ -1160,9 +1160,14 @@ fi
 podman network create "$network_name" >/dev/null
 created+=("network:$network_name")
 # Reserve static addresses before any peer starts. The scanner takes the first
-# host address after the gateway; PostgreSQL, RustFS and the frontend take the
-# last host addresses, which dynamic allocation reaches only after exhausting the
-# rest of the subnet. Every address is validated as a distinct usable host.
+# host address after the gateway; PostgreSQL and RustFS take the last host
+# addresses, which dynamic allocation reaches only after exhausting the rest of
+# the subnet. Every address is validated as a distinct usable host. These peers
+# keep their container across restarts. The frontend is deliberately not
+# pinned: the harness replaces it with new containers, and on Podman 4.9 a new
+# container reusing the same address stayed unreachable for about five seconds
+# from the application's network namespace, which still held the previous
+# container's neighbor entry. No required route resolves the frontend by name.
 reserved_addresses="$(podman network inspect "$network_name" | uv run python -c '
 import ipaddress
 import json
@@ -1181,7 +1186,6 @@ for subnet in networks[0].get("subnets", []):
         gateway + 1,
         network.broadcast_address - 1,
         network.broadcast_address - 2,
-        network.broadcast_address - 3,
     ]
     unusable = {network.network_address, network.broadcast_address, gateway}
     if (
@@ -1195,16 +1199,15 @@ else:
     raise SystemExit("E2E network has no usable reserved IPv4 addresses")
 ')"
 read -r scanner_static_address postgres_static_address rustfs_static_address \
-  frontend_static_address <<<"$reserved_addresses"
+  <<<"$reserved_addresses"
 for reserved_address in "$scanner_static_address" "$postgres_static_address" \
-  "$rustfs_static_address" "$frontend_static_address"; do
+  "$rustfs_static_address"; do
   if [[ ! "$reserved_address" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "E2E network address reservation is incomplete." >&2
     exit 1
   fi
 done
-readonly scanner_static_address postgres_static_address rustfs_static_address \
-  frontend_static_address
+readonly scanner_static_address postgres_static_address rustfs_static_address
 
 created=("$clamav_name" "${created[@]}")
 e2e_run_in_harness_directory \
@@ -1280,11 +1283,12 @@ if [[ ! "$composer_provider_address" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; the
   exit 1
 fi
 scanner_host_mapping+=(--add-host "e2e-llm:$composer_provider_address")
-# Pin the remaining peers the same way. Stopping a peer reloads aardvark-dns,
-# and hosted runs showed alias lookups stalling right after the scanner stopped
+# Pin the storage peers the same way. Stopping a peer reloads aardvark-dns, and
+# hosted runs showed alias lookups stalling right after the scanner stopped
 # while numeric routes kept answering. The router shares the application's
-# network namespace and therefore its host entries.
-service_host_mapping=(--add-host "frontend:$frontend_static_address")
+# network namespace and therefore its host entries; it reaches the frontend by
+# its current numeric address.
+service_host_mapping=()
 if [[ "$profile" == distributed ]]; then
   service_host_mapping+=(
     --add-host "postgres:$postgres_static_address"
@@ -2041,8 +2045,7 @@ rm -f -- "$evidence_directory"/frontend-*
 e2e_run_in_harness_directory \
   "$temporary_directory" "$temporary_directory_identity" \
   podman run --detach --name "$frontend_name" --network "$network_name" \
-  --network-alias frontend --ip "$frontend_static_address" \
-  --user "$runtime_uid:0" --read-only --cap-drop=all \
+  --network-alias frontend --user "$runtime_uid:0" --read-only --cap-drop=all \
   --security-opt=no-new-privileges --pids-limit=64 --memory=256m --cpus=0.5 \
   --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m \
   --volume "$browser_runtime_directory:/e2e:ro,z" \
