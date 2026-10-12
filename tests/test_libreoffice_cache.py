@@ -126,8 +126,13 @@ def test_ci_uses_exact_restore_only_caches_and_trusted_saves() -> None:
     workflow = yaml.safe_load(
         (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     )
-    steps = workflow["jobs"]["heavy"]["steps"]
-    by_name = {step["name"]: step for step in steps}
+    # The DEB archive serves document-engine tests; the RPM archive serves the
+    # single final-image build.
+    by_name = {
+        step["name"]: step
+        for job in ("heavy", "build-images")
+        for step in workflow["jobs"][job]["steps"]
+    }
     restore_pin = "actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9"
     save_pin = "actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9"
 
