@@ -676,3 +676,74 @@ def test_reaper_continues_after_a_failed_removal(
     assert _removed(removals) == [PROJECT, OTHER]
     assert (services.lock_directory() / f"{PROJECT}.lock").exists()
     assert not (services.lock_directory() / f"{OTHER}.lock").exists()
+
+
+def test_interrupt_during_group_stop_waits_for_bookkeeping(
+    mocker: MockerFixture,
+) -> None:
+    """A second interrupt cannot cut the stop or its record short."""
+    popen = _popen(mocker, error=KeyboardInterrupt())
+    order: list[str] = []
+
+    def stop(process: object) -> bool:
+        del process
+        os.kill(os.getpid(), signal.SIGINT)
+        order.append("stopped")
+        return True
+
+    mocker.patch.object(services, "stop_process_group", side_effect=stop)
+    previous = signal.signal(signal.SIGINT, signal.default_int_handler)
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            services._compose("markweave-tests-example", {}, "up")
+    finally:
+        signal.signal(signal.SIGINT, previous)
+    assert order == ["stopped"]
+    popen.return_value.stdout.close.assert_called_once_with()
+    assert not services._UNSETTLED
+
+
+def test_command_group_is_recorded_until_its_death_is_proven(
+    mocker: MockerFixture,
+) -> None:
+    observed: list[bool] = []
+    popen = _popen(mocker)
+    popen.return_value.communicate.side_effect = lambda **_: (
+        observed.append(4242 in services._UNSETTLED) or ("", "")
+    )
+    services._compose("markweave-tests-example", {}, "port")
+    assert observed == [True]
+    assert not services._UNSETTLED
+
+
+def test_survivors_are_stopped_before_removal_and_at_exit(
+    mocker: MockerFixture, reaper: MockType
+) -> None:
+    del reaper
+    order: list[str] = []
+    survivor = mocker.Mock(pid=4343)
+    survivor.poll.return_value = None
+    services._UNSETTLED[4343] = survivor
+
+    def stop(process: object) -> bool:
+        order.append("stop")
+        return True
+
+    def compose(project: str, environment: dict[str, str], *args: str) -> str:
+        del project, environment
+        order.append(args[0])
+        return "127.0.0.1:15432" if args[0] == "port" else ""
+
+    mocker.patch.object(services, "stop_process_group", side_effect=stop)
+    mocker.patch.object(services, "_compose", side_effect=compose)
+    mocker.patch.object(services, "prepare_bucket")
+    with services.distributed_services():
+        pass
+    assert order == ["up", "port", "port", "stop", "down"]
+    assert not services._UNSETTLED
+
+    services._UNSETTLED[4343] = survivor
+    services._OWNED[PROJECT] = {}
+    order.clear()
+    services.remove_owned_stacks()
+    assert order == ["stop", "down"]

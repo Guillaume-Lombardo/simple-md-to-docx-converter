@@ -109,6 +109,17 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
   fake-plugin integration test (interrupt and timeout during `up`) proves no late resource appears
   after cleanup and fails with direct-child-only termination; a real Docker test interrupts
   `compose up` at its first resource and finds nothing left.
+- 2026-10-12: Review round 3 (review of `d22521a`, one major finding). `stop_process_group`
+  ran with the original handlers, so a second interrupt during the SIGTERM grace period, or an
+  interrupt after a timeout, escaped before the survivor was recorded and teardown released
+  ownership while a startup child lived. Now every Docker command is recorded as unsettled from
+  start (start and record share one deferred block) until its group is proven gone; group
+  termination, stream cleanup and bookkeeping run with SIGINT/SIGTERM deferred and re-raised
+  afterwards; teardown and the exit net stop every recorded survivor again before removal, and
+  the whole teardown block runs deferred. Regressions use a startup child that ignores SIGTERM
+  and needs SIGKILL: a second interrupt during interrupt-driven termination and an interrupt
+  during timeout-driven termination both remove the stack only after the child is gone and leave
+  no late resource. The previous head fails them with removal while the child was alive.
 - 2026-10-12: Remaining work. Adopt `-n auto --dist loadgroup` in the CI Python shard commands
   and lower the shard `timeout-minutes` from 40 to about 15 in `.github/workflows/ci.yml`,
   `scripts/ci/validate_ci.py` and `tests/test_ci_validation.py` after PR #297 (T130) merges.

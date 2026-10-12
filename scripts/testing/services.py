@@ -69,8 +69,8 @@ _LISTINGS = (("container", "ls", "--all"), ("volume", "ls"), ("network", "ls"))
 _DEFERRED_SIGNALS = (signal.SIGINT, signal.SIGTERM)
 # Projects this process owns, with their Compose environment, for the exit net.
 _OWNED: dict[str, dict[str, str]] = {}
-# Process groups of interrupted commands that survived termination.
-_UNSETTLED: set[int] = set()
+# Docker commands, by process group, whose whole group is not yet proven gone.
+_UNSETTLED: dict[int, subprocess.Popen[str]] = {}
 COMMAND_TIMEOUT_SECONDS = 300
 STOP_GRACE_SECONDS = 5.0
 STOP_KILL_SECONDS = 10.0
@@ -132,37 +132,45 @@ def _docker(
     arguments: tuple[str, ...], environment: Mapping[str, str], action: str
 ) -> str:
     command = ("docker", "--host", DOCKER_HOST, *arguments)
-    try:
-        process = subprocess.Popen(  # noqa: S603 - fixed local Docker argv
-            command,
-            cwd=ROOT,
-            env=environment,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            # A terminal interrupt must not reach the command directly; an
-            # interruption stops its whole process group below instead.
-            start_new_session=True,
-        )
-    except OSError as error:
-        raise RuntimeError(UNAVAILABLE) from error
+    # Starting and recording the command is one deferred step, so no interrupt
+    # can leave a started process group unrecorded.
+    with _deferred_interrupts():
+        try:
+            process = subprocess.Popen(  # noqa: S603 - fixed local Docker argv
+                command,
+                cwd=ROOT,
+                env=environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                # A terminal interrupt must not reach the command directly; an
+                # interruption stops its whole process group below instead.
+                start_new_session=True,
+            )
+        except OSError as error:
+            raise RuntimeError(UNAVAILABLE) from error
+        _UNSETTLED[process.pid] = process
     try:
         stdout, _ = process.communicate(timeout=COMMAND_TIMEOUT_SECONDS)
     except BaseException as error:
-        # Interrupts and timeouts both stop the whole group before teardown
-        # may run; a survivor keeps ownership so the stack is never forgotten.
-        settled = stop_process_group(process)
-        for stream in (process.stdout, process.stderr):
-            if stream is not None:
-                stream.close()
+        # The group stays recorded as unsettled until its death is proven, and
+        # further interrupts wait until termination and bookkeeping are done.
+        with _deferred_interrupts():
+            settled = stop_process_group(process)
+            _close_streams(process)
+            if settled:
+                _UNSETTLED.pop(process.pid, None)
         if not settled:
-            _UNSETTLED.add(process.pid)
             raise UnsettledCommandError(
                 f"Local test services: {action} did not stop."
             ) from error
         if isinstance(error, subprocess.TimeoutExpired):
             raise RuntimeError(UNAVAILABLE) from error
         raise
+    # A command that exited and closed its output has no live descendant
+    # holding the pipes; an interrupt before this line keeps it recorded, and
+    # ``unsettled_commands`` then prunes it once the group is gone.
+    _UNSETTLED.pop(process.pid, None)
     if process.returncode:
         # Engine diagnostics can contain environment values. Do not echo them.
         raise RuntimeError(f"Local test services: {action} failed.")
@@ -170,11 +178,25 @@ def _docker(
 
 
 def unsettled_commands() -> bool:
-    """Return whether any interrupted Docker command still has a live process."""
-    _UNSETTLED.difference_update(
-        {group for group in _UNSETTLED if not _group_alive(group)}
-    )
+    """Return whether a recorded Docker command group may still be alive."""
+    for group, process in list(_UNSETTLED.items()):
+        if process.poll() is not None and not _group_alive(group):
+            _UNSETTLED.pop(group, None)
     return bool(_UNSETTLED)
+
+
+def _close_streams(process: subprocess.Popen[str]) -> None:
+    for stream in (process.stdout, process.stderr):
+        if stream is not None:
+            stream.close()
+
+
+def stop_unsettled_commands() -> None:
+    """Stop every recorded group again; callers defer interrupts around it."""
+    for group, process in list(_UNSETTLED.items()):
+        if stop_process_group(process):
+            _close_streams(process)
+            _UNSETTLED.pop(group, None)
 
 
 def _compose(project: str, environment: Mapping[str, str], *arguments: str) -> str:
@@ -283,6 +305,8 @@ def _sigterm_as_interrupt() -> Generator[None]:
 
 def remove_owned_stacks() -> None:
     """Remove stacks whose session ended without running its finalizer."""
+    with _deferred_interrupts():
+        stop_unsettled_commands()
     for project, environment in list(_OWNED.items()):
         with contextlib.suppress(RuntimeError), _deferred_interrupts():
             _compose(project, environment, *DOWN_ARGUMENTS)
@@ -437,11 +461,14 @@ def project_resources(project: str) -> bool:
 def _settle_interrupted_startup(project: str, environment: Mapping[str, str]) -> None:
     """Prove that an interrupted or failed startup left nothing behind.
 
-    A request the stopped startup had already sent can still complete inside
-    the engine after the first removal, so removal repeats until the project
-    is empty. Ownership is kept when that cannot be proven.
+    Every recorded command group is stopped again first, so no startup child
+    can outlive the release. A request the stopped startup had already sent
+    can still complete inside the engine after the first removal, so removal
+    repeats until the project is empty. Ownership is kept when that cannot be
+    proven. Callers defer interrupts around this step.
     """
     for _ in range(SETTLE_ATTEMPTS):
+        stop_unsettled_commands()
         if not unsettled_commands() and not project_resources(project):
             return
         _compose(project, environment, *DOWN_ARGUMENTS)
@@ -512,16 +539,20 @@ def distributed_services() -> Generator[None]:
                 prepare_bucket()
                 yield
             finally:
-                for name, value in previous.items():
-                    if value is None:
-                        os.environ.pop(name, None)
-                    else:
-                        os.environ[name] = value
-                # Bookkeeping shares the masked block, so a deferred interrupt
-                # cannot separate a finished removal from its record.
+                # Removal, settling and bookkeeping share one deferred block,
+                # so an interrupt cannot separate a proven removal from its
+                # record or release ownership before every command group is
+                # gone. An interrupt before this block keeps ownership.
                 with _deferred_interrupts():
+                    for name, value in previous.items():
+                        if value is None:
+                            os.environ.pop(name, None)
+                        else:
+                            os.environ[name] = value
+                    # No startup command may outlive the removal below.
+                    stop_unsettled_commands()
                     _compose(project, environment, *DOWN_ARGUMENTS)
-                    if not started:
+                    if not started or unsettled_commands():
                         _settle_interrupted_startup(project, environment)
                     _OWNED.pop(project, None)
                     leaked = False

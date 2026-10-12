@@ -118,9 +118,12 @@ Every stack, its volumes and its network carry the labels `io.markweave.tests.st
 session holds an exclusive lock on the labelled file (under `$XDG_RUNTIME_DIR`, or the temporary
 directory, in `markweave-test-services-<uid>/`) for the stack's whole life. Teardown runs after
 test failures, `Ctrl-C`, `SIGTERM` and interpreter exit, and `SIGINT`/`SIGTERM` wait until
-`docker compose down` has finished. An interrupted or timed-out Docker command is stopped with
-its whole process group, including the Compose plugin, before teardown starts, and a stack whose
-startup did not finish is released only once the engine lists no resource of that project.
+`docker compose down` has finished. Every Docker command is recorded from the moment it starts
+until its whole process group, including the Compose plugin, is proven gone. An interrupted or
+timed-out command is stopped with `SIGTERM`, then `SIGKILL` after a bounded grace period, and
+further interrupts wait until that stop and its record are complete. Teardown stops any
+recorded survivor again before removal, and a stack whose startup did not finish is released only
+once the engine lists no resource of that project.
 Interruptions that no process can handle, such as `SIGKILL`, a pytest-xdist worker crash or a
 host crash, release the lock with the process. The next session
 that acquires services then removes every labelled stack on the same host whose lock nobody
