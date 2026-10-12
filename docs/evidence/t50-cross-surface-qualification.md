@@ -37,6 +37,11 @@ application and branch coverage thresholds. The second command adds the real Pan
 Mermaid/Chromium, and LibreOffice tests. Missing engines are failures or explicitly reported
 prerequisites, never passed rows.
 
+These commands record the T50 candidate revision and are kept unchanged as evidence. Since T97,
+the default local command also excludes `requires_podman` so that it passes on a host without
+Podman; for current revisions, use the canonical commands in
+[the local-development guide](../local-development.md).
+
 The repository's existing `workflow_dispatch` path is the executable complete-suite coordinator.
 After the exact candidate branch is pushed and will no longer change, dispatch it and bind the run
 to the candidate SHA:

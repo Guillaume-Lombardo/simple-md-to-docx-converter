@@ -173,6 +173,61 @@ reverse-attempt images are published from one source and have verified public re
 deployments should keep their verified `0.7.1` configuration until they adopt the repository's
 exact `0.7.3` pins and complete deployment-specific verification.
 
+## Incomplete 0.7.4 container release
+
+The `0.7.4` Python package was published, but its container release failed before any image was
+published or retained. Protected release run `38182704382` started from the trusted push of source
+`5d0ac0bb329018fa3a88d7ba516e575de9abc100` (PR #293). Its `detect`, `build-and-verify`,
+`create-release` and `publish` jobs succeeded: PyPI `markweave` `0.7.4` is published, and tag
+`v0.7.4` and its GitHub Release target that source. Job `container / build-and-publish`
+(`114598666127`) then stopped at "Generate and verify release SBOM evidence for all three images"
+with `error: fixable Critical vulnerabilities found`. The backend image passed the gate; the
+frontend image `md-converter-web` did not. The pinned Grype `0.116.1` reported the Critical
+advisory GHSA-vcvr-r3jv-pc5j in `next` `16.3.4`, fixed in `16.3.6`, together with fixable High
+advisories in `next`, `undici`, `sharp`, `brace-expansion`, `js-yaml` and `source-map-js`.
+
+The failure happened before staging retention and before any registry mutation. The run retained
+only artifact `11718675473` (`python-release-v0.7.4`, digest
+`sha256:5f07b4b657dbb6eaa32395670b63aabb53187bd60b49da4e29e74d27b0bb36e4`); no staged image bytes
+exist, so the container-only recovery dispatch is impossible. The `v0.7.4` Release has no assets,
+and GHCR returns `MANIFEST_UNKNOWN` for tag `0.7.4` in `md-converter`, `md-converter-web` and
+`md-converter-reverse-attempt`. Do not rebuild or republish `0.7.4`.
+
+On 2026-10-12 the owner approved the corrective `0.7.5` release (T133). It upgrades the vulnerable
+frontend dependencies and admits only the exact `0.7.4` to `0.7.5` pending transition, the third
+bounded exception, modeled on the `0.7.2` one. On a pull request, merge-group candidate or trusted
+`main` push, the check requires latest PyPI `0.7.4`, the base project `0.7.4` at the exact source
+above, the head project `0.7.5`, and Compose still on the verified `0.7.3` backend and frontend
+receipts. It binds the failed run, its sole unexpired Python artifact by ID, name and digest, the
+tag and the asset-free Release. It requires the exact structured absence of the `0.7.4` and
+`source-5d0ac0bb329018fa3a88d7ba516e575de9abc100` tags in all three GHCR repositories, with the
+same read-only fallback rules as the `0.7.2` exception. Scheduled, Release and manual runs, any
+other version pair or source, and any extra or forged evidence fail closed. A successful `0.7.5`
+release must publish one fresh matched three-image set and adopt its actual public receipts before
+unrelated work. Existing container deployments keep their verified `0.7.3` configuration until then.
+
+## Published 0.7.5 corrective release
+
+PR #295 was squash-merged as `d54a9c5f9440205bc415e7a49c4583f502392c29`. Protected release run
+`38223418529` then completed successfully from that source: PyPI `markweave` `0.7.5` carries the
+wheel and sdist with PEP 740 attestations from `release.yml` in the `pypi` environment, tag
+`v0.7.5` and its GitHub Release target that source, and one matched schema-2 three-image set was
+published. Its `release-images.json` binds every role to version `0.7.5`, that source, and frontend
+lockfile digest `9c40e366fdf12532ba3f0d64a6172a55c633fd046c53a9739ff5d40da9a8c7f1`:
+
+| Role | Repository | Published `0.7.5` digest |
+| --- | --- | --- |
+| Backend | `ghcr.io/guillaume-lombardo/md-converter` | `sha256:237597e5aee89a744f29027e3ad0e10845296f435da8902d1ee5af2b7f591677` |
+| Frontend | `ghcr.io/guillaume-lombardo/md-converter-web` | `sha256:f628055556c61b04cfbd3202e32464ad38719d7b057ea87ed9b249e44c6d01ce` |
+| Reverse attempt | `ghcr.io/guillaume-lombardo/md-converter-reverse-attempt` | `sha256:104d35de4f75459ed5bab4583a5fc472d521247cc23a339ed9b8995296ec97bc` |
+
+Anonymous requests for the `0.7.5` and `source-d54a9c5f9440205bc415e7a49c4583f502392c29` tags and
+for each digest returned these exact digests, and each digest has SLSA provenance from
+`container-release.yml` on `refs/heads/main` at that source. The follow-up adoption change pins the
+backend and frontend receipts in Compose and the quickstarts and records the reverse-attempt digest
+for the native-broker deployment. The `0.7.4` to `0.7.5` exception above remains bound to its exact
+transition and cannot authorize another one; deployment-specific verification is a separate step.
+
 ## Next.js cutover and legacy rollback
 
 A release containing the T64 cutover adds a separately published frontend

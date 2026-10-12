@@ -1,0 +1,279 @@
+"""Runtime guard: a test that launches a container runtime must carry its marker.
+
+The default local command excludes ``requires_podman`` so that it passes on a
+host without Podman. A test that launches Podman without that marker would fail
+there with ``FileNotFoundError``. This pytest plugin, registered by
+``tests/conftest.py``, installs a Python audit hook (``sys.addaudithook``) and
+inspects the process launches made while a test item runs its setup or call
+phase:
+
+* ``subprocess.Popen``, which also serves ``subprocess.run``, asyncio
+  subprocesses, ``os.popen`` and ``subprocess.getoutput``;
+* ``os.system``, ``os.posix_spawn*`` and ``pty.spawn``;
+* ``os.exec*``, including the exec that an ``os.spawn*`` child performs after
+  ``fork``. The forked child inherits the active item, refuses the exec and
+  reports the violation to the parent through a per-process directory, so the
+  parent fails the test when it builds the report.
+
+Detection is uniformly conservative, with no launcher, option or shell parsing.
+A launch counts as a runtime launch when the runtime name (``podman``,
+``docker``) appears as a shell word in the audited executable, in any argument
+vector element, or in a shell command string. A shell word may be inside quotes,
+``$(...)``, backticks, combined options (``bash -ec``) or launcher operands
+(``env -u VAR podman``, ``timeout 5 podman``). A path ending in the runtime name
+also counts, so ``subprocess.run(["podman", "x"], executable="/bin/echo")`` and
+``echo podman`` are flagged.
+
+Rationale: the guard is a developer safety net, not a security boundary. A
+missed launch is silent, whereas a false positive fails loudly with a message
+that names the marker to add. ``podman`` requires ``requires_podman``.
+``docker`` requires ``requires_docker``; ``requires_postgres`` and
+``requires_s3`` also allow it because their fixture provisions disposable
+services with Docker Compose. Markers are the item's effective markers, so
+module, class, function and ``pytest.param`` marks count. A test that only
+passes a runtime name to another program opts out with the reviewed marker
+``container_runtime_guard_exempt(reason="...")``. Its reason is mandatory, and
+the marker affects only this guard, never test selection.
+
+A violation raises :class:`ContainerRuntimeMarkerError` from the audit hook
+before the process starts, and is recorded on the item. A recorded violation
+fails the setup or call report whatever the test did afterwards, including
+swallowing the error, skipping or being marked ``xfail``.
+
+Limits, covered by the Podman-free canonical run: processes launched by other
+processes (shell scripts, the host-native broker), non-Python launchers,
+launches during collection, outside any item or during teardown (module- and
+session-scoped finalizers run during an unrelated item's teardown), and launches
+from threads while a nested pytester session runs (attributed to the innermost
+active item). Launches by fixture setup are attributed to the item that
+instantiates the fixture. An ``os.spawn*`` child that is not awaited
+(``P_NOWAIT``) may report after its item's report has been built.
+"""
+
+from __future__ import annotations
+
+import atexit
+import os
+import re
+import shutil
+import sys
+import tempfile
+import uuid
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Generator, Iterable
+
+RUNTIMES = frozenset({"podman", "docker"})
+ALLOWING_MARKERS = {
+    "podman": ("requires_podman",),
+    "docker": ("requires_docker", "requires_postgres", "requires_s3"),
+}
+EXEMPT_MARKER = "container_runtime_guard_exempt"
+_SHELL_WORDS = {
+    runtime: re.compile(
+        rf"(?:^|[^\w.\-/])(?:[^\s'\"`;|&()<>]*/)?{runtime}(?=$|[^\w.\-])"
+    )
+    for runtime in RUNTIMES
+}
+_ENFORCED_PHASES = frozenset({"setup", "call"})
+_VIOLATIONS = pytest.StashKey[list[str]]()
+
+
+class ContainerRuntimeMarkerError(RuntimeError):
+    """A test launched a container runtime without the matching marker."""
+
+
+def _text(value: object) -> str | None:
+    if isinstance(value, str | bytes | os.PathLike):
+        return os.fsdecode(value)
+    return None
+
+
+def text_runtimes(text: str) -> frozenset[str]:
+    """Return runtimes whose name appears as a shell word anywhere in ``text``."""
+    return frozenset(
+        runtime for runtime, pattern in _SHELL_WORDS.items() if pattern.search(text)
+    )
+
+
+def argv_runtimes(argv: Iterable[object], executable: object = None) -> frozenset[str]:
+    """Return runtimes named by an executable or by any argument vector element."""
+    runtimes: set[str] = set()
+    for value in (executable, *argv):
+        text = _text(value)
+        if text:
+            runtimes |= text_runtimes(text)
+    return frozenset(runtimes)
+
+
+def launched_runtimes(event: str, arguments: tuple[Any, ...]) -> frozenset[str]:
+    """Return the container runtimes a launch audit event may start."""
+    if event == "subprocess.Popen" and len(arguments) >= 2:
+        executable, argv = arguments[0], arguments[1]
+        if isinstance(argv, str | bytes | os.PathLike):
+            argv = [argv]
+        return argv_runtimes(argv if isinstance(argv, list | tuple) else [], executable)
+    if event == "os.system" and arguments:
+        return argv_runtimes([arguments[0]])
+    if event in {"os.exec", "os.posix_spawn"} and len(arguments) >= 2:
+        argv = arguments[1] if isinstance(arguments[1], list | tuple) else []
+        return argv_runtimes(argv, arguments[0])
+    if event == "pty.spawn" and arguments:
+        argv = arguments[0]
+        return argv_runtimes([argv] if isinstance(argv, str | bytes) else argv)
+    return frozenset()
+
+
+_EVENTS = frozenset(
+    {"subprocess.Popen", "os.system", "os.exec", "os.posix_spawn", "pty.spawn"}
+)
+# The innermost running context: an item phase, or ``None`` for session work
+# outside items. Nested pytester sessions push on top of the outer item.
+_ACTIVE: list[tuple[pytest.Item | None, str]] = []
+_OWNER_PID = os.getpid()
+_CHILD_REPORTS: Path | None = None
+_HOOK_INSTALLED = False
+
+
+def exemption_reason(item: pytest.Item) -> str | None:
+    """Return the validated guard exemption reason, or ``None`` if not exempt."""
+    marker = item.get_closest_marker(EXEMPT_MARKER)
+    if marker is None:
+        return None
+    reason = marker.kwargs.get("reason", marker.args[0] if marker.args else None)
+    if not isinstance(reason, str) or not reason.strip():
+        pytest.fail(
+            f"{item.nodeid}: {EXEMPT_MARKER} requires a non-empty reason, for example "
+            f'@pytest.mark.{EXEMPT_MARKER}(reason="passes podman to a fake")',
+            pytrace=False,
+        )
+    return reason
+
+
+def missing_markers(item: pytest.Item, runtimes: Iterable[str]) -> list[str]:
+    """Return runtimes whose allowing markers are all absent from the item."""
+    return sorted(
+        runtime
+        for runtime in runtimes
+        if not any(
+            item.get_closest_marker(marker) is not None
+            for marker in ALLOWING_MARKERS[runtime]
+        )
+    )
+
+
+def _report_from_child(nodeid: str, message: str) -> None:
+    """Let a forked child hand its violation to the parent process."""
+    if _CHILD_REPORTS is not None:
+        path = _CHILD_REPORTS / f"{uuid.uuid4().hex}.violation"
+        path.write_text(f"{nodeid}\n{message}", encoding="utf-8")
+
+
+def _child_reports(nodeid: str) -> list[str]:
+    """Consume violations that forked children reported for one item."""
+    if _CHILD_REPORTS is None:
+        return []
+    messages: list[str] = []
+    for path in sorted(_CHILD_REPORTS.glob("*.violation")):
+        owner, _, message = path.read_text(encoding="utf-8").partition("\n")
+        if owner == nodeid:
+            messages.append(message)
+            path.unlink()
+    return messages
+
+
+def _audit(event: str, arguments: tuple[Any, ...]) -> None:
+    if event not in _EVENTS or not _ACTIVE:
+        return
+    item, phase = _ACTIVE[-1]
+    if item is None or phase not in _ENFORCED_PHASES:
+        return
+    missing = missing_markers(item, launched_runtimes(event, arguments))
+    if not missing or item.get_closest_marker(EXEMPT_MARKER) is not None:
+        return
+    message = "; ".join(
+        f"{item.nodeid} launched {runtime} without pytest.mark."
+        f"{ALLOWING_MARKERS[runtime][0]}. Add that marker, or "
+        f'pytest.mark.{EXEMPT_MARKER}(reason="...") if the test only passes '
+        f"the name {runtime!r} to another program"
+        for runtime in missing
+    )
+    if os.getpid() == _OWNER_PID:
+        item.stash.setdefault(_VIOLATIONS, []).append(message)
+    else:
+        _report_from_child(item.nodeid, message)
+    raise ContainerRuntimeMarkerError(message)
+
+
+def _within(item: pytest.Item, phase: str) -> Generator[None, Any, Any]:
+    _ACTIVE.append((item, phase))
+    try:
+        return (yield)
+    finally:
+        _ACTIVE.pop()
+
+
+class ContainerRuntimeGuard:
+    """Pytest plugin that tracks the running item for the audit hook."""
+
+    def __init__(self) -> None:
+        global _HOOK_INSTALLED, _CHILD_REPORTS  # noqa: PLW0603 - one per process
+        if not _HOOK_INSTALLED:
+            _CHILD_REPORTS = Path(tempfile.mkdtemp(prefix="runtime-guard-"))
+            atexit.register(shutil.rmtree, _CHILD_REPORTS, ignore_errors=True)
+            sys.addaudithook(_audit)
+            _HOOK_INSTALLED = True
+
+    @pytest.hookimpl(wrapper=True)
+    def pytest_sessionstart(self) -> Generator[None]:
+        _ACTIVE.append((None, "session"))
+        return (yield)
+
+    @pytest.hookimpl(wrapper=True)
+    def pytest_sessionfinish(self) -> Generator[None]:
+        try:
+            return (yield)
+        finally:
+            _ACTIVE.pop()
+
+    @pytest.hookimpl(wrapper=True)
+    def pytest_runtest_setup(self, item: pytest.Item) -> Generator[None]:
+        exemption_reason(item)
+        return (yield from _within(item, "setup"))
+
+    @pytest.hookimpl(wrapper=True)
+    def pytest_runtest_call(self, item: pytest.Item) -> Generator[None]:
+        return (yield from _within(item, "call"))
+
+    @pytest.hookimpl(wrapper=True)
+    def pytest_runtest_teardown(self, item: pytest.Item) -> Generator[None]:
+        return (yield from _within(item, "teardown"))
+
+    @pytest.hookimpl(wrapper=True, tryfirst=True)
+    def pytest_runtest_makereport(
+        self, item: pytest.Item, call: pytest.CallInfo[None]
+    ) -> Generator[None, pytest.TestReport, pytest.TestReport]:
+        # As the outermost wrapper, this runs after skip and xfail handling.
+        report = yield
+        if call.when not in _ENFORCED_PHASES:
+            return report
+        violations = [*item.stash.get(_VIOLATIONS, []), *_child_reports(item.nodeid)]
+        item.stash[_VIOLATIONS] = []
+        if not violations:
+            return report
+        summary = "\n".join(
+            ["Container runtime launched without its marker:", *violations]
+        )
+        if hasattr(report, "wasxfail"):
+            del report.wasxfail
+        if report.failed:
+            # Keep the guard error traceback and add the summary.
+            report.sections.append(("container runtime guard", summary))
+        else:
+            report.outcome = "failed"
+            report.longrepr = summary
+        return report

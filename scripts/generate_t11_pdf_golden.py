@@ -43,21 +43,21 @@ PDF_LIMITS = PdfLimits(
     max_pdf_object_depth=100,
 )
 RASTER_LIMITS = RasterLimits(20, 5_000_000, 20_000_000)
+DEFAULT_SOURCE = Path("tests/corpus/pdf/document.md")
 
 
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def generate(output: Path, workspace: Path) -> None:
+def generate(output: Path, workspace: Path, source: Path = DEFAULT_SOURCE) -> None:
     """Generate deterministic PNG pages and their provenance manifest."""
 
     output.mkdir(mode=0o755, parents=True, exist_ok=True)
     if any(output.iterdir()):
         raise RuntimeError("The golden output directory must be empty")
     workspace.mkdir(mode=0o700, parents=True, exist_ok=True)
-    markdown_path = Path("tests/corpus/pdf/document.md")
-    markdown = markdown_path.read_bytes()
+    markdown = source.read_bytes()
     pandoc = shutil.which("pandoc")
     soffice = shutil.which("soffice")
     if pandoc is None or soffice is None:
@@ -155,8 +155,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
     parser.add_argument("workspace", type=Path)
+    parser.add_argument(
+        "--source",
+        type=Path,
+        default=DEFAULT_SOURCE,
+        help="Corpus Markdown to render (default: %(default)s)",
+    )
     arguments = parser.parse_args()
-    generate(arguments.output, arguments.workspace)
+    generate(arguments.output, arguments.workspace, arguments.source)
 
 
 if __name__ == "__main__":

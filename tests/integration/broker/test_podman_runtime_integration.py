@@ -35,6 +35,8 @@ from markweave.reversions.models import (
     ReverseContentLimits,
 )
 
+pytestmark = pytest.mark.requires_podman
+
 ROOT = Path(__file__).parents[3]
 PODMAN = Path("/usr/bin/podman")
 SYSTEMCTL = Path("/usr/bin/systemctl")

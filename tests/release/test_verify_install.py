@@ -63,7 +63,7 @@ def test_public_import_check_rejects_legacy_import_after_install(
     monkeypatch.setattr(
         importlib.util, "find_spec", lambda name: ModuleSpec(name, loader=None)
     )
-    monkeypatch.setattr(sys, "argv", ["check", "markweave", "0.7.3"])
+    monkeypatch.setattr(sys, "argv", ["check", "markweave", "0.7.5"])
 
     with pytest.raises(
         SystemExit, match="legacy md_converter import remains installed"
@@ -76,7 +76,7 @@ def test_public_import_check_rejects_application_version_mismatch(
 ) -> None:
     """Distribution and public application versions must identify one release."""
     monkeypatch.setattr(markweave, "__version__", "9.9.9")
-    monkeypatch.setattr(sys, "argv", ["check", "markweave", "0.7.3"])
+    monkeypatch.setattr(sys, "argv", ["check", "markweave", "0.7.5"])
 
     with pytest.raises(SystemExit, match=r"unexpected markweave\.__version__"):
         exec(PUBLIC_IMPORT_CHECK, {})  # noqa: S102 - isolated verifier contract
@@ -299,12 +299,12 @@ def test_clean_install_uses_private_digest_bound_copy_and_cleans_up(
         CONSOLE_TIMEOUT_SECONDS,
     )
     standalone_python = root / "venv-standalone" / "bin" / "python"
-    assert calls[19] == (
+    assert calls[26] == (
         (str(standalone_python), "-I", "-c", STANDALONE_RECOVERY_CHECK),
         root,
         CONSOLE_TIMEOUT_SECONDS,
     )
-    distributed_install = calls[24]
+    distributed_install = calls[31]
     assert distributed_install[0][-1] == f"{private_wheel}[distributed]"
     assert distributed_install[2] == INSTALL_TIMEOUT_SECONDS
     assert all(cwd == root for _, cwd, _ in calls)

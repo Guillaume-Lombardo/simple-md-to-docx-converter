@@ -6,7 +6,7 @@ import hashlib
 import io
 import os
 import zipfile
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 from markweave.config import ConfigurationError, Settings
@@ -23,6 +23,7 @@ from markweave.conversion.libreoffice import (
     PdfLimits,
     PdfTraceabilityContext,
 )
+from markweave.conversion.local_settings import LocalConversionSettings
 from markweave.conversion.mermaid import (
     MermaidCliRenderer,
     MermaidConfig,
@@ -30,6 +31,7 @@ from markweave.conversion.mermaid import (
     MermaidPreprocessingConverter,
 )
 from markweave.conversion.pandoc import PandocConfig, PandocDocxConverter
+from markweave.conversion.runtime_manifest import COMPONENT_VERSIONS
 from markweave.conversion.service import DocxConversionService
 from markweave.conversion.validation import PANDOC_READER
 from markweave.jobs.errors import JobProcessingCancelled
@@ -53,6 +55,8 @@ from markweave.storage import (
 )
 from markweave.templates.models import TemplateVersion
 from markweave.version import VERSION
+
+CONVERSION_CONTRACT_VERSION = "2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -284,15 +288,27 @@ def _source_integrity_error() -> ConversionError:
     )
 
 
-def build_production_processor(
-    settings: Settings, objects: ObjectStore
-) -> ProductionTemplateAwareProcessor:
-    """Compose the locked image toolchain from validated production settings."""
+@dataclass(frozen=True, slots=True)
+class DocumentEngines:
+    """One validated adapter composition shared by workers and local conversion."""
 
-    try:
-        font_manifest = settings.conversion_font_manifest_path.read_bytes()
-    except OSError:
-        raise ConfigurationError("Conversion font manifest is unavailable") from None
+    docx: DocxConversionService
+    pdf: LibreOfficePdfConverter
+    archive_limits: ArchiveLimits
+    image_limits: ImageLimits
+    pandoc: PandocConfig
+    renderer: MermaidCliRenderer
+    mermaid_limits: MermaidLimits
+
+
+def build_document_engines(
+    settings: Settings | LocalConversionSettings,
+    *,
+    libreoffice_version: str,
+    environment: Mapping[str, str],
+) -> DocumentEngines:
+    """Compose the validation, archive, image, Mermaid, Pandoc, and PDF adapters."""
+
     workspace = settings.template_engine_workspace_root
     image_limits = ImageLimits(
         settings.conversion_image_max_source_bytes,
@@ -312,16 +328,14 @@ def build_production_processor(
         max_images=settings.conversion_max_images,
         max_files=settings.conversion_max_files,
     )
-    pandoc = PandocDocxConverter(
-        PandocConfig(
-            settings.template_pandoc_executable,
-            settings.template_engine_timeout_seconds,
-            settings.template_engine_termination_grace_seconds,
-            workspace,
-            settings.conversion_pdf_cancellation_poll_seconds,
-        ),
-        os.environ,
+    pandoc_config = PandocConfig(
+        settings.template_pandoc_executable,
+        settings.template_engine_timeout_seconds,
+        settings.template_engine_termination_grace_seconds,
+        workspace,
+        settings.conversion_pdf_cancellation_poll_seconds,
     )
+    pandoc = PandocDocxConverter(pandoc_config, environment)
     renderer = MermaidCliRenderer(
         MermaidConfig(
             settings.conversion_mermaid_executable,
@@ -333,7 +347,7 @@ def build_production_processor(
             workspace,
             settings.conversion_pdf_cancellation_poll_seconds,
         ),
-        os.environ,
+        environment,
     )
     mermaid_limits = MermaidLimits(
         settings.conversion_max_diagrams,
@@ -350,7 +364,7 @@ def build_production_processor(
     pdf = LibreOfficePdfConverter(
         LibreOfficeConfig(
             settings.template_libreoffice_executable,
-            "26.2.5.2",
+            libreoffice_version,
             settings.template_engine_timeout_seconds,
             settings.template_engine_termination_grace_seconds,
             settings.conversion_pdf_cancellation_poll_seconds,
@@ -370,31 +384,50 @@ def build_production_processor(
             max_pdf_objects=settings.conversion_pdf_max_objects,
             max_pdf_object_depth=settings.conversion_pdf_max_object_depth,
         ),
-        os.environ,
+        environment,
     )
-    return ProductionTemplateAwareProcessor(
-        objects=objects,
-        presentations=PresentationProcessor(
-            pandoc_config=PandocConfig(
-                settings.template_pandoc_executable,
-                settings.template_engine_timeout_seconds,
-                settings.template_engine_termination_grace_seconds,
-                workspace,
-                settings.conversion_pdf_cancellation_poll_seconds,
-            ),
-            environment=os.environ,
-            renderer=renderer,
-            mermaid_limits=mermaid_limits,
-            archive_limits=archive_limits,
-            image_limits=image_limits,
-        ),
+    return DocumentEngines(
         docx=DocxConversionService(mermaid),
         pdf=pdf,
         archive_limits=archive_limits,
         image_limits=image_limits,
+        pandoc=pandoc_config,
+        renderer=renderer,
+        mermaid_limits=mermaid_limits,
+    )
+
+
+def build_production_processor(
+    settings: Settings, objects: ObjectStore
+) -> ProductionTemplateAwareProcessor:
+    """Compose the locked image toolchain from validated production settings."""
+
+    try:
+        font_manifest = settings.conversion_font_manifest_path.read_bytes()
+    except OSError:
+        raise ConfigurationError("Conversion font manifest is unavailable") from None
+    engines = build_document_engines(
+        settings,
+        libreoffice_version=dict(COMPONENT_VERSIONS)["libreoffice"],
+        environment=os.environ,
+    )
+    return ProductionTemplateAwareProcessor(
+        objects=objects,
+        presentations=PresentationProcessor(
+            pandoc_config=engines.pandoc,
+            environment=os.environ,
+            renderer=engines.renderer,
+            mermaid_limits=engines.mermaid_limits,
+            archive_limits=engines.archive_limits,
+            image_limits=engines.image_limits,
+        ),
+        docx=engines.docx,
+        pdf=engines.pdf,
+        archive_limits=engines.archive_limits,
+        image_limits=engines.image_limits,
         traceability=ProcessorTraceability(
             application_version=VERSION,
-            conversion_contract_version="2",
+            conversion_contract_version=CONVERSION_CONTRACT_VERSION,
             pandoc_reader=PANDOC_READER,
             font_manifest_sha256=hashlib.sha256(font_manifest).hexdigest(),
         ),

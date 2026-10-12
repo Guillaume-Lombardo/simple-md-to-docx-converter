@@ -1,6 +1,8 @@
 # PowerPoint presentations
 
-Open **2pptx**, upload Markdown or a ZIP containing Markdown and local images, and
+Open **2pptx**, upload Markdown, a ZIP containing Markdown and local images, or a Markdown file
+together with its images or folder (packaged by the browser, see
+[Markdown with local images](conversion-ui.md#markdown-with-local-images)), and
 choose **PowerPoint (PPTX)** or **PowerPoint and original source (ZIP)**. No template is required:
 Markweave uses the reference presentation bundled with its pinned Pandoc version.
 Word preferences and the system Word fallback do not override this choice.
@@ -16,6 +18,12 @@ supported. CSS, themes, backgrounds and other Marp styling directives are not re
 preview warnings identify ignored styling. The PowerPoint reference controls appearance.
 Raw HTML and remote images are rejected. Mermaid uses the existing local renderer.
 Pandoc `notes`, `columns` and `column` fenced blocks are supported.
+
+Inline `$...$` and display `$$...$$` math become native, editable PowerPoint equations (OMML).
+Raw TeX outside dollar delimiters stays ordinary text. Malformed TeX, such as `$x^$`, does not fail
+the conversion: the original source, including its dollar delimiters, stays on the slide as literal
+text. Pandoc writes a slide body that contains math as Office 2010 drawing content without a
+fallback, so an application that does not support that extension may omit the whole text box.
 
 ```markdown
 ---

@@ -11,7 +11,7 @@ import pytest
 
 from scripts.container.integrity import oci_identity
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.requires_podman]
 
 PODMAN = "/usr/bin/podman"
 

@@ -2,7 +2,7 @@
 ticket: T96
 linear_id: G1L-616
 linear_url: https://linear.app/g1lom/issue/G1L-616/t96-approve-the-2026-10-scope-changes-in-the-product-specification
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -62,6 +62,16 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
   against current main, preserved all 32 ticket mirrors, and verified their Linear identifiers,
   statuses, projects, teams and dependency relationships. Publication and independent review
   are pending; no application behavior or package version changes in this documentation work.
+
+- 2026-10-10: Completed after [PR #278](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/278)
+  squash-merged as `628fd2f310a456c6e2b94b25c071f321cbef1d6b` and its complete source tree
+  was verified on main. Independent review approved the final source. Exact-head CI
+  [38008305925](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/38008305925)
+  passed all 19 jobs, including all 10 heavy domains, security scanning and both rootless final-image
+  E2E storage profiles. The same-attempt Python qualification passed 5,106 tests with 90.14%
+  branch coverage. D1-D15 and all 32 mirrors are delivered; T98 broader optimization remains
+  incomplete. Package version stays 0.7.3. Original and superseded source aliases were removed
+  after their captured SHAs and the verified replacement merge were checked.
 
 ## Synchronization
 

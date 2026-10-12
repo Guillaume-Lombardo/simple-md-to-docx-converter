@@ -11,8 +11,8 @@ slide-oriented Markdown or Marp from edited PPTX files. It requires a separately
 [external broker](docs/reverse-broker-deployment.md). See the
 [capability matrix](docs/index.md#conversion-capabilities) for inputs, outputs, limits and guides.
 
-The project is licensed under [Apache-2.0](LICENSE). The source package version is `0.7.3`.
-The default public quickstart pins the matched published `0.7.3` backend and Next.js frontend
+The project is licensed under [Apache-2.0](LICENSE). The source package version is `0.7.5`.
+The default public quickstart pins the matched published `0.7.5` backend and Next.js frontend
 images by their verified registry digests. Do not substitute candidate or inferred digests;
 candidate testing may override both image references together with another matched immutable pair.
 
@@ -38,8 +38,8 @@ The first startup can take several minutes while ClamAV loads its signatures.
 
 For editable PowerPoint, open **2pptx** and follow the [PowerPoint guide](docs/powerpoint.md).
 The ordinary quickstart supports both forward workflows; **2md** requires the external broker.
-The currently pinned published 0.7.3 images keep Composer model setup disabled. An explicitly
-supplied, matched Composer-capable backend/frontend pair can opt in with
+The simple quickstart keeps Composer model setup disabled with the pinned published 0.7.5 images.
+An explicitly supplied, matched Composer-capable backend/frontend pair can opt in with
 `MARKWEAVE_SIMPLE_COMPOSER_SETUP=true`; the helper then includes
 `compose.simple-composer.yaml`. Its administrator can
 then open **Administration → LLM settings** to approve an HTTPS destination, enter a write-only
@@ -61,6 +61,16 @@ has no physical capacity cap. Do not expose it as a production service. The
 [quickstart operations guide](docs/quickstart.md) explains the bounded secure profile,
 Docker/Podman selection, custom ports and HTTPS proxy origins, Word templates, recovery,
 and the explicit trusted-upstream and insecure SSH-tunnel modes with their restrictions.
+
+## Convert a file without a server
+
+With the bundled engines of the final image, or Pandoc and LibreOffice installed on your host,
+`markweave convert doc.md --local --to docx,pdf -o out/` converts your own file through the same
+validation, limits, and engines as the service, without an account or upload. It records the engine
+versions in `out/doc.traceability.json`, warns when one differs from the approved pin, and
+`--require-pinned` makes that a failure. See
+[local conversion](docs/conversion-cli.md#convert-locally-without-a-server) for its settings and
+the container command.
 
 ## Use and operate Markweave
 
@@ -112,7 +122,7 @@ export PATH="$PWD/.pnpm-tools/bin:$PATH"
 export COREPACK_HOME="$PWD/.pnpm-tools/corepack-home" COREPACK_ENABLE_NETWORK=0
 pnpm install --frozen-lockfile --ignore-scripts
 pnpm run test:web
-uv run pytest -m "not requires_pandoc and not requires_mermaid and not requires_libreoffice"
+uv run pytest -m "not requires_pandoc and not requires_mermaid and not requires_libreoffice and not requires_podman"
 uv run pytest
 ```
 

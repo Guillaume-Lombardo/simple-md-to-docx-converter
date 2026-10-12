@@ -240,6 +240,12 @@ fixture, not production budgets.
 | Fontconfig and runtime libraries | Resolved at build time | Mutable UBI repositories; exact result captured separately |
 | Probe fonts | Resolved at build time | Mutable UBI repositories; exact result captured separately |
 
+This table records the original T00 probe inputs. T80 later moved the shared Mermaid CLI lock to
+11.17.0 (root integrity
+`sha512-pxF8rmheBb1gabIN4GFDCNWzIUsOzcEsSp7H5CQoL7gv7X8U8r6FFKtdMzEmZMeHmziNAq2B7J7LG+CDSfIg9w==`).
+The final image, the document-engine CI suite, and recorded job component versions use 11.17.0;
+`tests/unit/conversion/test_runtime_manifest.py` keeps the recorded versions equal to these pins.
+
 The public UBI BaseOS, AppStream, and CodeReady Builder repositories exposed by
 the pinned base image contain Fontconfig, runtime libraries, and the selected
 probe fonts. Queries for `pandoc`, `chromium`, and `libreoffice` returned no

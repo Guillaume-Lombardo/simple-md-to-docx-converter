@@ -87,11 +87,11 @@ pnpm run workspace:check
 pnpm run test:web
 ```
 
-Run the default local suite, which excludes only tests requiring Pandoc, Mermaid/Chromium, or
-LibreOffice:
+Run the default local suite, which excludes only tests requiring Pandoc, Mermaid/Chromium,
+LibreOffice, or Podman, so it also passes on a host without Podman:
 
 ```bash
-uv run pytest -m "not requires_pandoc and not requires_mermaid and not requires_libreoffice"
+uv run pytest -m "not requires_pandoc and not requires_mermaid and not requires_libreoffice and not requires_podman"
 ```
 
 Run the complete test collection when all required engines and services are available:
@@ -212,8 +212,19 @@ uv build --build-constraint build-constraints.txt --require-hashes
 
 ## External engines
 
-The default local suite excludes tests marked for Pandoc, Mermaid/Chromium, and LibreOffice. Install
-the locked engines to run their integration suites and the complete final-image tests. An unavailable
+The default local suite excludes tests marked for Pandoc, Mermaid/Chromium, LibreOffice, and
+Podman. Install the locked engines and rootless Podman to run their integration suites and the
+complete final-image tests. Tests that execute Podman carry `requires_podman`; tests that execute
+the Docker CLI carry `requires_docker` and stay in the default suite. The runtime guard
+`tests/container_runtime_guard.py`, registered by `tests/conftest.py`, audits process launches
+during each test's setup and call phases. It fails a test that launches either runtime without its
+marker before the process starts; `requires_postgres` and `requires_s3` also allow Docker for the
+disposable service stack. Detection is deliberately conservative: a `podman` or `docker` shell word in the
+executable, in any argument or in a shell command string counts as a launch, even inside quotes
+or launcher operands. The guard is a developer safety net, not a security boundary, and its error
+names the marker to add. A test that only passes a runtime name to another program uses the
+reviewed `container_runtime_guard_exempt(reason="...")` marker instead. That marker affects only the
+guard and never deselects the test. An unavailable
 engine test is skipped only through its registered marker and must never be reported as passed.
 
 ### Parallel light CI

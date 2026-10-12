@@ -28,7 +28,11 @@ has been adopted.
 
 Past release incidents, one-time transition exceptions, source SHAs, run IDs and immutable receipts
 are retained in [release history](evidence/release-migration-history.md#release-incidents-and-receipts-through-073).
-Those exceptions do not authorize another release or a replay of a completed transition.
+The Python-only `0.7.4` release and its one-time exact `0.7.4` to `0.7.5` continuation are recorded
+in the [0.7.4 incident record](evidence/release-migration-history.md#incomplete-074-container-release).
+Those exceptions do not authorize another release or a replay of a completed transition. The
+adopted `0.7.5` receipts are recorded in the
+[0.7.5 publication record](evidence/release-migration-history.md#published-075-corrective-release).
 
 ## GitHub and PyPI trust configuration
 

@@ -11,12 +11,115 @@ from typing import Any
 import pytest
 
 from markweave.config import MalwareScanningMode, Settings
+from tests.quickstart_compose_modes import SUPPORTED_MODES, ComposeMode
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.requires_docker]
 
 ROOT = Path(__file__).resolve().parents[2]
 CANDIDATE_BACKEND = "localhost/markweave-backend:t64"
 CANDIDATE_FRONTEND = "localhost/markweave-frontend:t64"
+PUBLISHED_BACKEND = (
+    "ghcr.io/guillaume-lombardo/md-converter:0.7.5@"
+    "sha256:237597e5aee89a744f29027e3ad0e10845296f435da8902d1ee5af2b7f591677"
+)
+PUBLISHED_FRONTEND = (
+    "ghcr.io/guillaume-lombardo/md-converter-web:0.7.5@"
+    "sha256:f628055556c61b04cfbd3202e32464ad38719d7b057ea87ed9b249e44c6d01ce"
+)
+
+
+def _render_mode(mode: ComposeMode, port: str) -> dict[str, Any]:
+    command = [
+        "docker",
+        "compose",
+        "--project-name",
+        "markweave-mode-contract",
+        "--project-directory",
+        str(ROOT),
+    ]
+    for name in mode.files:
+        command += ["--file", str(ROOT / name)]
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if not name.startswith(("MARKWEAVE_", "MD_CONVERTER_"))
+    } | {
+        "MARKWEAVE_INITIAL_ADMIN_PASSWORD": "compose-contract-password",
+        "MARKWEAVE_PORT": port,
+        "MARKWEAVE_PUBLIC_ORIGIN": f"http://localhost:{port}",
+        "MARKWEAVE_ROUTER_PUBLIC_HOST": f"localhost:{port}",
+        "MARKWEAVE_INSECURE_EVALUATION_MODE": str(mode.insecure).lower(),
+        "MARKWEAVE_WORK_DEVICE": "/dev/null",
+    }
+    result = subprocess.run(
+        [*command, "config", "--format", "json"],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    return json.loads(result.stdout)
+
+
+@pytest.mark.parametrize("mode", SUPPORTED_MODES, ids=lambda mode: mode.name)
+def test_supported_mode_keeps_the_reviewed_security_posture(
+    mode: ComposeMode,
+) -> None:
+    """Every supported stack renders one loopback router and its scanner boundary."""
+    services: dict[str, Any] = _render_mode(mode, "11279")["services"]
+    application = services["markweave"]
+    environment = application["environment"]
+
+    published = [
+        (name, port)
+        for name, service in services.items()
+        for port in service.get("ports", [])
+    ]
+    assert len(published) == 1
+    owner, port = published[0]
+    assert port["host_ip"] == "127.0.0.1"
+    assert port["published"] == "11279"
+    if mode.runtime == "podman" and mode.trusted_upstream:
+        assert (owner, port["target"]) == ("markweave", 3100)
+        assert application["network_mode"] == "slirp4netns"
+        assert services["router"]["network_mode"] == "service:markweave"
+        assert services["frontend"]["network_mode"] == "service:markweave"
+    else:
+        assert (owner, port["target"]) == ("router", 8080)
+        assert "network_mode" not in application
+
+    assert application["image"] == PUBLISHED_BACKEND
+    assert services["frontend"]["image"] == PUBLISHED_FRONTEND
+    assert services["router"]["image"] == PUBLISHED_FRONTEND
+    for service in services.values():
+        assert service["read_only"] is True
+        assert service["cap_drop"] == ["ALL"]
+        assert "no-new-privileges:true" in service["security_opt"]
+
+    if mode.trusted_upstream:
+        assert "clamav" not in services
+        assert "clamav" not in application.get("depends_on", {})
+        assert environment["MARKWEAVE_MALWARE_SCANNING_MODE"] == "trusted-upstream"
+    else:
+        assert "ports" not in services["clamav"]
+        assert "clamav" in application["depends_on"]
+        assert "MARKWEAVE_MALWARE_SCANNING_MODE" not in environment
+    assert environment["MARKWEAVE_INSECURE_EVALUATION_MODE"] == (
+        str(mode.insecure).lower()
+    )
+    assert ("MARKWEAVE_COMPOSER_ENABLED" in environment) is mode.composer
+    if mode.runtime == "podman":
+        assert application["healthcheck"]["disable"] is True
+        assert (
+            services["router"]["depends_on"]["markweave"]["condition"]
+            == "service_started"
+        )
+    else:
+        assert "seccomp" in " ".join(application["security_opt"])
+        assert (
+            services["router"]["depends_on"]["markweave"]["condition"]
+            == "service_healthy"
+        )
 
 
 def test_composer_candidate_overlay_does_not_change_published_quickstart(
@@ -49,7 +152,7 @@ def test_composer_candidate_overlay_does_not_change_published_quickstart(
 
     published = render([])["services"]["markweave"]
     assert published["image"].startswith(
-        "ghcr.io/guillaume-lombardo/md-converter:0.7.3@sha256:"
+        "ghcr.io/guillaume-lombardo/md-converter:0.7.5@sha256:"
     )
     assert "MARKWEAVE_COMPOSER_ENABLED" not in published["environment"]
     assert not _load_rendered_settings(
@@ -138,7 +241,7 @@ def test_trusted_upstream_podman_renders_custom_public_origin(
         {
             "mode": "ingress",
             "host_ip": "127.0.0.1",
-            "target": 8080,
+            "target": 3100,
             "published": "11279",
             "protocol": "tcp",
         }
@@ -199,8 +302,6 @@ def test_nextjs_cutover_renders_one_public_router_and_isolated_frontend() -> Non
             str(ROOT / "compose.yaml"),
             "--file",
             str(ROOT / "compose.simple.yaml"),
-            "--file",
-            str(ROOT / "compose.nextjs.yaml"),
             "config",
             "--format",
             "json",
@@ -271,10 +372,6 @@ def test_nextjs_podman_uses_staged_backend_readiness_without_compose_health() ->
             str(ROOT / "compose.simple.yaml"),
             "--file",
             str(ROOT / "compose.podman.yaml"),
-            "--file",
-            str(ROOT / "compose.nextjs.yaml"),
-            "--file",
-            str(ROOT / "compose.nextjs-podman.yaml"),
             "config",
             "--format",
             "json",
@@ -325,12 +422,6 @@ def test_nextjs_podman_shared_namespace_exposes_router_to_host_forwarding() -> N
             str(ROOT / "compose.trusted-upstream.yaml"),
             "--file",
             str(ROOT / "compose.podman-trusted-upstream.yaml"),
-            "--file",
-            str(ROOT / "compose.nextjs.yaml"),
-            "--file",
-            str(ROOT / "compose.nextjs-podman.yaml"),
-            "--file",
-            str(ROOT / "compose.nextjs-podman-trusted-upstream.yaml"),
             "config",
             "--format",
             "json",

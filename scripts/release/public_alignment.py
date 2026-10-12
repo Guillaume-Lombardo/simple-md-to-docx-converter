@@ -36,6 +36,12 @@ PARTIAL_072_SOURCE = "b28256486af4cf6d58c3aa06a27815c321df57f9"
 REPOSITORY_ID = 1343515292
 PARTIAL_072_RUN = 35723245369
 PARTIAL_072_ARTIFACT = 10692228358
+PARTIAL_074_SOURCE = "5d0ac0bb329018fa3a88d7ba516e575de9abc100"
+PARTIAL_074_RUN = 38182704382
+PARTIAL_074_ARTIFACT = 11718675473
+PARTIAL_074_ARTIFACT_DIGEST = (
+    "sha256:5f07b4b657dbb6eaa32395670b63aabb53187bd60b49da4e29e74d27b0bb36e4"
+)
 PYPI_URL = f"https://pypi.org/pypi/{PROJECT}/json"
 GITHUB_API = f"https://api.github.com/repos/{REPOSITORY}"
 GITHUB_RELEASES = f"https://github.com/{REPOSITORY}/releases/download"
@@ -56,6 +62,9 @@ IMAGE = re.compile(
 FRONTEND_IMAGE = re.compile(
     rf"{re.escape(FRONTEND_IMAGE_REPOSITORY)}:(?P<tag>[0-9A-Za-z][0-9A-Za-z._-]*)"
     r"@(?P<digest>sha256:[0-9a-f]{64})"
+)
+BACKEND_IMAGE_DEFAULT = re.compile(
+    r"\$\{MARKWEAVE_CUTOVER_BACKEND_IMAGE:-(?P<image>[^}]+)\}"
 )
 PAIRED_RELEASE_FIRST_VERSION = Version("0.6.1")
 ZERO_SHA = "0" * 40
@@ -201,6 +210,45 @@ class BaseIdentity:
 
 
 @dataclass(frozen=True)
+class PartialRelease:
+    """One reviewed Python-only release whose images were never published."""
+
+    version: str
+    source_sha: str
+    run_id: int
+    artifact_id: int
+    artifact_digest: str | None
+    continuation_version: str
+    deployed_version: str
+
+    @property
+    def state(self) -> str:
+        """Return the reported pending state for this exact continuation."""
+        return f"pending-partial-{self.version}"
+
+
+PARTIAL_072 = PartialRelease(
+    version="0.7.2",
+    source_sha=PARTIAL_072_SOURCE,
+    run_id=PARTIAL_072_RUN,
+    artifact_id=PARTIAL_072_ARTIFACT,
+    artifact_digest=None,
+    continuation_version="0.7.3",
+    deployed_version="0.7.1",
+)
+PARTIAL_074 = PartialRelease(
+    version="0.7.4",
+    source_sha=PARTIAL_074_SOURCE,
+    run_id=PARTIAL_074_RUN,
+    artifact_id=PARTIAL_074_ARTIFACT,
+    artifact_digest=PARTIAL_074_ARTIFACT_DIGEST,
+    continuation_version="0.7.5",
+    deployed_version="0.7.3",
+)
+PARTIAL_RELEASES = {partial.version: partial for partial in (PARTIAL_072, PARTIAL_074)}
+
+
+@dataclass(frozen=True)
 class RegistryCredentials:
     """Ephemeral GitHub Actions credentials for one read-only GHCR fallback."""
 
@@ -236,7 +284,11 @@ def parse_project_version(document: bytes, *, label: str = "pyproject.toml") -> 
 
 
 def parse_compose_identity(document: str) -> ComposeIdentity:
-    """Parse only the public image of the exact Compose markweave service."""
+    """Parse only the public image of the exact Compose markweave service.
+
+    The image is either the literal public reference or the public default of the
+    exact ``MARKWEAVE_CUTOVER_BACKEND_IMAGE`` interpolation used by quickstarts.
+    """
     try:
         compose = yaml.safe_load(document)
         image = compose["services"]["markweave"]["image"]
@@ -244,6 +296,8 @@ def parse_compose_identity(document: str) -> ComposeIdentity:
         raise AlignmentError(
             "compose.yaml has no valid services.markweave.image"
         ) from error
+    if isinstance(image, str) and (default := BACKEND_IMAGE_DEFAULT.fullmatch(image)):
+        image = default.group("image")
     if not isinstance(image, str) or (match := IMAGE.fullmatch(image)) is None:
         raise AlignmentError(
             "Compose markweave image must use the trusted repository, a version tag, "
@@ -254,7 +308,7 @@ def parse_compose_identity(document: str) -> ComposeIdentity:
 
 
 def parse_frontend_compose_identity(document: str) -> ComposeIdentity:
-    """Parse the shared published frontend default from the cutover overlay."""
+    """Parse the shared published frontend default from compose.yaml."""
     expression = re.compile(r"\$\{MARKWEAVE_CUTOVER_FRONTEND_IMAGE:-(?P<image>[^}]+)\}")
     try:
         compose = yaml.load(document, Loader=yaml.BaseLoader)  # noqa: S506
@@ -262,7 +316,7 @@ def parse_frontend_compose_identity(document: str) -> ComposeIdentity:
         configured = [services[role]["image"] for role in CUTOVER_FRONTEND_ROLES]
     except (yaml.YAMLError, KeyError, TypeError) as error:
         raise AlignmentError(
-            "cutover overlay has no valid frontend and router image defaults"
+            "compose.yaml has no valid frontend and router image defaults"
         ) from error
     if any(not isinstance(image, str) for image in configured):
         raise AlignmentError(
@@ -614,29 +668,40 @@ def _require_skipped_container_release(
         )
 
 
-def _require_partial_072_transition(
+def _require_partial_transition(  # noqa: PLR0913 - exact reviewed surfaces
     transport: Transport,
     *,
+    partial: PartialRelease,
     project_version: str,
     compose: ComposeIdentity,
     base: BaseIdentity | None,
     credentials: RegistryCredentials | None,
 ) -> None:
-    """Admit only the reviewed Python-only 0.7.2 to fresh 0.7.3 transition."""
+    """Admit only one reviewed Python-only release to its fresh continuation.
+
+    The reviewed records are the 0.7.2 to 0.7.3 and the 0.7.4 to 0.7.5
+    transitions. Each is bound to its exact source, failed run, sole Python
+    artifact, empty GitHub Release and structurally absent GHCR tags.
+    """
     if (
-        project_version != "0.7.3"
-        or compose.version != "0.7.1"
-        or base != BaseIdentity("0.7.2", PARTIAL_072_SOURCE)
+        project_version != partial.continuation_version
+        or compose.version != partial.deployed_version
+        or base != BaseIdentity(partial.version, partial.source_sha)
     ):
-        raise AlignmentError("repository state is not the exact 0.7.3 transition")
-    source, assets = _release_identity(transport, version="0.7.2")
-    if source != PARTIAL_072_SOURCE or assets:
-        raise AlignmentError("partial 0.7.2 release identity or empty evidence differs")
-    run_url = f"{GITHUB_API}/actions/runs/{PARTIAL_072_RUN}"
+        raise AlignmentError(
+            "repository state is not the exact "
+            f"{partial.continuation_version} transition"
+        )
+    source, assets = _release_identity(transport, version=partial.version)
+    if source != partial.source_sha or assets:
+        raise AlignmentError(
+            f"partial {partial.version} release identity or empty evidence differs"
+        )
+    run_url = f"{GITHUB_API}/actions/runs/{partial.run_id}"
     run = _json_response(transport, run_url)
     expected_run = {
-        "id": PARTIAL_072_RUN,
-        "head_sha": PARTIAL_072_SOURCE,
+        "id": partial.run_id,
+        "head_sha": partial.source_sha,
         "head_branch": "main",
         "event": "push",
         "path": ".github/workflows/release.yml",
@@ -645,7 +710,7 @@ def _require_partial_072_transition(
         "run_attempt": 1,
     }
     if any(run.get(key) != value for key, value in expected_run.items()):
-        raise AlignmentError("partial 0.7.2 failed run identity differs")
+        raise AlignmentError(f"partial {partial.version} failed run identity differs")
     artifacts = _json_response(transport, f"{run_url}/artifacts?per_page=2")
     entries = artifacts.get("artifacts")
     if (
@@ -654,30 +719,36 @@ def _require_partial_072_transition(
         or len(entries) != 1
         or not isinstance(entries[0], dict)
     ):
-        raise AlignmentError("partial 0.7.2 must have only its Python artifact")
+        raise AlignmentError(
+            f"partial {partial.version} must have only its Python artifact"
+        )
     artifact = entries[0]
-    expected_artifact = {
-        "id": PARTIAL_072_ARTIFACT,
-        "name": "python-release-v0.7.2",
+    expected_artifact: dict[str, object] = {
+        "id": partial.artifact_id,
+        "name": f"python-release-v{partial.version}",
         "expired": False,
     }
+    if partial.artifact_digest is not None:
+        expected_artifact["digest"] = partial.artifact_digest
     workflow = artifact.get("workflow_run")
     if (
         any(artifact.get(key) != value for key, value in expected_artifact.items())
         or not isinstance(workflow, dict)
-        or workflow.get("id") != PARTIAL_072_RUN
-        or workflow.get("head_sha") != PARTIAL_072_SOURCE
+        or workflow.get("id") != partial.run_id
+        or workflow.get("head_sha") != partial.source_sha
         or workflow.get("head_branch") != "main"
         or workflow.get("repository_id") != REPOSITORY_ID
         or workflow.get("head_repository_id") != REPOSITORY_ID
     ):
-        raise AlignmentError("partial 0.7.2 Python artifact identity differs")
+        raise AlignmentError(
+            f"partial {partial.version} Python artifact identity differs"
+        )
     for repository_path in (
         REGISTRY_PATH,
         FRONTEND_REGISTRY_PATH,
         REVERSE_REGISTRY_PATH,
     ):
-        for tag in ("0.7.2", f"source-{PARTIAL_072_SOURCE}"):
+        for tag in (partial.version, f"source-{partial.source_sha}"):
             _require_ghcr_tag_publicly_absent(
                 transport,
                 repository_path=repository_path,
@@ -739,12 +810,15 @@ def check_alignment(  # noqa: PLR0912, PLR0913 - explicit release transition cas
     if event_name not in KNOWN_EVENTS:
         raise AlignmentError(f"unsupported GitHub event: {event_name}")
     pypi_version = _pypi_version(transport)
-    partial_072 = pypi_version == "0.7.2" and pypi_version != compose.version
-    if partial_072:
+    partial = (
+        PARTIAL_RELEASES.get(pypi_version) if pypi_version != compose.version else None
+    )
+    if partial is not None:
         if event_name not in PENDING_EVENTS:
             raise AlignmentError("this event requires fully published alignment")
-        _require_partial_072_transition(
+        _require_partial_transition(
             transport,
+            partial=partial,
             project_version=project_version,
             compose=compose,
             base=base,
@@ -764,8 +838,8 @@ def check_alignment(  # noqa: PLR0912, PLR0913 - explicit release transition cas
             registry_credentials=registry_credentials,
         )
         return "pending-skipped-container"
-    if partial_072:
-        state = "pending-partial-0.7.2"
+    if partial is not None:
+        state = partial.state
     elif project_version != compose.version:
         if event_name not in PENDING_EVENTS:
             raise AlignmentError("this event requires fully published alignment")
@@ -834,7 +908,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
         frontend = None
         if Version(compose.version) >= PAIRED_RELEASE_FIRST_VERSION:
             frontend = parse_frontend_compose_identity(
-                (options.repository / "compose.nextjs.yaml").read_text(encoding="utf-8")
+                (options.repository / "compose.yaml").read_text(encoding="utf-8")
             )
         base = None
         if project_version != compose.version:

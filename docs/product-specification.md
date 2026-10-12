@@ -36,7 +36,7 @@ Actions workflows, and an autonomous development workflow.
 | Composer availability | A configured, enabled, and authorized OpenAI-compatible LLM connection is required to start Composer work; ordinary conversions never require one. A transient LLM failure must not remove authorized access to retained drafts, revisions, or exports |
 | Composer document execution | Backend-validated, bounded structured operations on copies of real DOCX/PPTX; no arbitrary shell, code execution, or document-controlled network access; document engines remain network-isolated |
 | Frontend topology | A separate stateless rootless Next.js process serves browser pages behind the same TLS router as FastAPI; browsers call FastAPI directly through relative same-origin exact `/api/v1` or `/api/v1/**` URLs, and the frontend has no business-service or persistence credentials |
-| Frontend runtime baseline | Linux/AMD64 UBI 9 Node.js 24 builder and minimal runtime pinned by digest, resolving to Node.js `24.19.0`; verified Corepack `0.36.0` selects pnpm `11.25.0`; Next.js `16.3.4`, TypeScript `6.0.3`, and Tailwind CSS `4.3.3` remain exact and root-lockfile-integrity pinned as reviewed on 2026-09-03 |
+| Frontend runtime baseline | Linux/AMD64 UBI 9 Node.js 24 builder and minimal runtime pinned by digest, resolving to Node.js `24.19.0`; verified Corepack `0.36.0` selects pnpm `11.25.0`; Next.js `16.3.8`, TypeScript `6.0.3`, and Tailwind CSS `4.3.3` remain exact and root-lockfile-integrity pinned as reviewed on 2026-09-03; Next.js moved from `16.3.4` to the `16.3.8` security patch on 2026-10-12 (T133) |
 | Processing | Asynchronous jobs with a persistent queue and status API |
 | Markdown to DOCX | Pandoc |
 | Markdown to PPTX | Pandoc with editable slides, a documented Marp subset, and optional immutable PowerPoint reference templates; omitted templates use Pandoc defaults |
@@ -223,7 +223,7 @@ plus nonce-bearing framework scripts and inline style elements; it forbids
 objects, framing, external resources, workers, `unsafe-inline`, and `unsafe-eval`. Authenticated
 API responses and downloads remain uncacheable. Only content-hashed `/_next/static/**` assets may
 use one-year immutable caching. No service worker, CDN data cache, analytics, remote font, or
-third-party script is allowed. On exact Next.js `16.3.4` production dynamic rendering, T60 and T64
+third-party script is allowed. On the exact pinned Next.js patch (`16.3.4` for T60 and T64, `16.3.8` since T133) production dynamic rendering, T60 and T64
 must prove a fresh nonce for each HTML document with no cache reuse, the same nonce in `script-src`
 and `style-src`, a nonce on every framework bootstrap script and inline style element, no inline
 style attribute or unnonced inline style, and no eval requirement. Content-hashed
@@ -697,6 +697,10 @@ documentation.
   unchanged. The browser and CLI clients may let a user select or drop a Markdown file together
   with its images or a folder, and package them client-side into the approved archive layout before
   upload. The server applies the same archive, image, scanning, and limit rules to that archive.
+  On 2026-10-10 the owner decided how clients find references: the CLI reuses the service's own
+  reference module through the optional `markweave[packaging]` extra, so the base CLI stays
+  standard-library only, and the browser uses markdown-it (the original of the service parser)
+  with parity proved against a service-generated fixture. Clients package only referenced images.
 - **D3 – Inline HTML allowlist (T105).** Before Pandoc, the validator translates only `<br>`,
   `<sub>`, `<sup>`, `<kbd>`, and `<u>` without attributes into equivalent Pandoc constructs and
   removes HTML comments. Every other raw HTML node, every attribute, and every malformed or
@@ -783,8 +787,8 @@ can still emit raw HTML nodes with that reader, reject raw HTML in the validated
 before invoking Pandoc. Disable user and administrator filters, user includes, and remote resources; only the reviewed
 internal cross-reference and page-break filters approved in section 3.7 (D5 and D12,
 T111) may run. Translate only the inline HTML allowlist of section
-3.7 (D3). TeX-like text is
-ordinary text for this reader; no unsupported `-raw_tex` flag is added.
+3.7 (D3). Raw TeX outside `$...$` and `$$...$$` math
+delimiters is ordinary text for this reader; no unsupported `-raw_tex` flag is added.
 
 Evaluate `pandoc --sandbox` in T00 with images and `reference.docx`; do not claim it is enabled until the complete pipeline passes. Run Pandoc from the job workspace with fixed arguments, no shell, no network, deadlines, memory limits, and an unprivileged identity.
 
@@ -962,6 +966,10 @@ readiness cheap; it must not run a conversion.
   verifies stable object references before migration/readiness, and never switches production
   traffic. The quarterly exercise consumes these commands and records evidence; test-only S3
   helpers remain forbidden for production recovery.
+- Restore accepts recovery sets created at schema revision `20260829_14` (release 0.5.0, which
+  introduced `markweave backup`) or later, verifies each against the schema of its recorded
+  revision, and migrates it to the current head; earlier and unknown, including newer, revisions
+  are refused with stable errors (owner decision, 2026-10-11, T128).
 
 ## 9. Repository and autonomous development
 
@@ -988,8 +996,23 @@ markers = [
   "requires_libreoffice: requires LibreOffice",
   "requires_postgres: requires PostgreSQL",
   "requires_s3: requires S3-compatible storage",
+  "requires_podman: requires the Podman executable and a rootless Podman runtime",
+  "requires_docker: requires the Docker CLI and Compose plugin",
+  "container_runtime_guard_exempt(reason): reviewed opt-out from the container runtime guard only",
 ]
 ```
+
+Every test that executes a container runtime carries the matching runtime marker. A runtime guard
+registered by the test configuration audits process launches during each test's setup and call
+phases and fails an unmarked test before the runtime starts. Detection is uniformly conservative:
+the runtime name as a shell word in the executable, in any argument or in a shell command string
+counts as a launch. The guard is a developer safety net, not a security boundary. A missed launch
+is silent, whereas a false positive fails loudly with a message that names the marker to add. A
+test that only passes a runtime name to another program uses the reviewed
+`container_runtime_guard_exempt(reason=...)` marker, which affects only the guard. The default local command excludes only the document engines and Podman:
+`uv run pytest -m "not requires_pandoc and not requires_mermaid and not requires_libreoffice and not requires_podman"`.
+It keeps PostgreSQL, S3, Docker, slow, integration, and E2E tests when they are runnable. CI keeps
+running Podman-marked tests in the domains that already select them.
 
 Local PostgreSQL/S3 integration tests may provision a disposable loopback-only PostgreSQL/RustFS
 Compose project when no external test-service configuration is supplied. Use pinned CI images,
@@ -1183,6 +1206,7 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T125 | Add VS Code and Obsidian integrations | T104, T114 |
 | T126 | Internationalize the browser interface (deferred by D13) | T96 |
 | T127 | Publish Linux/ARM64 images (deferred by D14) | T96 |
+| T128 | Restore recovery sets created by an older schema | — |
 
 On 2026-10-09 the owner accepted the repository analysis that created T96–T127. The owner kept
 the experimental reverse conversion and asked for its scope to be frozen (T108) rather than removed.

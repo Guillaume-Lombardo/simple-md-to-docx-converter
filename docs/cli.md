@@ -10,7 +10,7 @@ their assigned tickets.
 markweave [--json] [--non-interactive] [--timeout SECONDS] COMMAND
 
 login | logout | whoami | password change
-convert | jobs {list,show,wait,cancel,download,manifest,reverse}
+convert [--local] | jobs {list,show,wait,cancel,download,manifest,reverse}
 templates {list,search,show,create,download,update,replace,archive,delete,versions,version-download,restore,preferred,fallback}
 composer {capabilities,policy,connections,personal-permissions,drafts,messages,model-steps,proposals,revisions,authors,fill-templates,fill-plans}
 users {list,create,activate,deactivate,reset-password,require-password-change}
@@ -114,6 +114,19 @@ Remote command families use only the documented HTTP API. Authentication uses
 non-echoing password prompts and owner-only XDG profile persistence; passwords are
 never command arguments. Runtime and recovery commands are the only families
 allowed to access runtime or storage services directly.
+
+## Local conversion
+
+`markweave convert SOURCE --local` is the only business command that does not use the HTTP API
+(product decision D1). It converts your own local Markdown or ZIP file on this host through the
+service's validation and document-engine adapters with the same `MARKWEAVE_*` limits, without an
+account, persistence, storage profile, or ClamAV. It probes each required engine, records the
+actual versions in a traceability manifest, warns when one differs from its approved pin, and fails
+instead with `--require-pinned`. `--timeout`, `SIGINT`, and `SIGTERM` stop the running engine
+process group without publishing outputs. Remote options are refused in local mode, so a command
+never silently switches between the service and the host. See
+[Conversion CLI](conversion-cli.md#convert-locally-without-a-server) for configuration, outputs,
+reproducibility limits, and the container invocation with the bundled engines.
 
 ## Reverse-conversion jobs
 

@@ -2,7 +2,7 @@
 ticket: T90
 linear_id: G1L-589
 linear_url: https://linear.app/g1lom/issue/G1L-589/t90-deliver-composer-chat-proposals-and-revision-previews
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -99,6 +99,67 @@ T89.
   image transport, password/data-preserving operational preflight, live smoke, and rollback
   verification. T89 and T90 remain **In Progress**. Linear synchronization remains deferred under
   the owner's temporary authorization while OAuth is expired.
+- 2026-10-11: Completed and verified on `main`. Every acceptance criterion is evidenced:
+  - The Convert | Composer selection, chat and native DOCX/PPTX preview with a labeled PDF view,
+    durable questions, proposal accept/edit/reject, exact revision-bound preview and download,
+    history and copy-forward restore, bounded virtualized rendering, the Composer-only
+    `frame-src 'self'` allowance, and the opaque `sandbox="allow-scripts"` child were delivered
+    by PR #269 (`57521ed62eb19558b945e1109934bcc6bb967ac8`) after independent focused reviews.
+    PR CI run 35961177550 and main CI run 35964148193 passed, including both final
+    rootless-image E2E profiles and `container`.
+  - The Composer decision flows were requalified on `main` after the T104 merge. Main CI run
+    38142225187 on `d1049e8` had failed `e2e-standalone` twice in the Composer accept/reject
+    steps. The cause was a Composer workspace race that predates T104: the workspace read the
+    draft, proposals, and questions in parallel, so it could show a new proposal with an older
+    draft ETag, and the decision request returned HTTP 412. PR #292 fixed the race, so the
+    workspace reads one consistent draft snapshot before any decision; it was squash-merged as
+    `6ee903b6df9b7db2968ad9d24a53ef3346bcf5ac` after independent review approved it with no
+    findings. Full-suite main CI run 38150642257 at `6ee903b` passed, including both final
+    rootless-image E2E profiles, `container`, `compose`, `document-engines`, and both storage
+    profiles.
+  - Measured fidelity, DOCX pagination limits, complete-file download/parse behavior, hostile-
+    document containment, no egress, and same-source visual comparisons are documented in
+    `docs/composer-preview.md`. That document keeps varied document fidelity, true process peak
+    memory, PDF performance, and safe device capacity explicitly unqualified; the visual
+    evidence covers the recorded fixtures only.
+  - Owner-authorized docker-box test-instance deployment completed on 2026-10-11 with matched
+    images built from `main` `00a98ec1dc49cdc82f383dbf0e2cd05724a8d37b`, which contains T89,
+    T90, T91, and later fixes: backend
+    `sha256:96fef52ab721dc91cdd5d73c7c92b6f112e7f2fdbc31a13f30149f9b96825f87`, frontend/router
+    `sha256:cc1584ca7ee0d70960061aa1c81fb5e73b0ed75bb1a5dc62c8341bf5850e9820`, and
+    reverse-attempt
+    `sha256:eb2542a813f1aa161bafd043fbbb7f6c427261df25863928eac5a69d91979208`.
+    Qualification: a passing local standalone final-image E2E run on those exact bytes, hosted
+    CI run 38062285755 passing `e2e-standalone`, `e2e-distributed`, and `container` on
+    code-identical `b764b99`, and scheduled CI run 38130312124 passing the same jobs on
+    `00a98ec`. No local distributed E2E run used the exact deployed bytes.
+  - Before cutover, a verified recovery set was taken with the previous image and the stopped
+    data volume was copied cold and byte-verified (schema `20260923_24`, SQLite `quick_check`
+    ok, one account). The cutover migrated to `20260924_26`; account identity, password hash,
+    and Composer key were unchanged. The public HTTPS smoke passed: readiness, API version,
+    login with the existing administrator password, account listing, Composer
+    policy/drafts/capabilities/authors/fill-templates APIs, the `/convert`, `/templates`,
+    `/composer`, `/composer/authors`, `/composer/fill-templates`, `/composer/connections`, and
+    `/admin/llm` pages, template upload and scan, DOCX, PDF, PPTX-to-Markdown through the mTLS
+    broker, and logout.
+  - Rollback rehearsal: the exact previous T90 image set started against an isolated copy of
+    the cold pre-cutover volume was healthy at schema 24 with `quick_check` ok; public
+    readiness, login, listing, and logout passed and row counts were unchanged. The instance was
+    then rolled forward, re-verified, and passed the full public smoke with zero failures. A
+    post-cutover backup taken with the new image was verified and restored into an isolated
+    directory. Final state: four services healthy, broker active, public `/health/ready`
+    returning 200, and running image IDs independently confirmed.
+  - Limitations and follow-ups: restoring the pre-cutover schema-24 recovery set with the new
+    image is refused, a known defect tracked by T128 / G1L-681 (PR #290), so a real rollback
+    uses the cold copy, as the docker-box deployment notes document. The owner set the rollback
+    window to 2026-10-18. The broker mTLS certificates were renewed on 2026-10-11 and now expire
+    on 2027-10-11 at 14:02 UTC. The owner then checked the browser UI. One Composer generation
+    was refused at validation with "Markdown input contains raw HTML." because the draft
+    contained `<stack>` outside a code span; the refusal is correct, but the UI does not show
+    the failure reason, which follow-up T131 / G1L-684 covers. Distributed restore also refuses
+    recovery sets that contain jobs on superseded template versions; this defect predates the
+    deployment and is tracked by T132 / G1L-685. Intermittent final-image E2E scanner-outage
+    timeouts are tracked by T130 / G1L-683.
 
 ## Synchronization
 

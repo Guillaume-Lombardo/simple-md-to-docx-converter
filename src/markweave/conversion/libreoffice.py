@@ -227,6 +227,12 @@ class PdfTraceabilityContext:
                 raise ValueError("PDF traceability metadata must be safe and non-empty")
             if not _is_sha256(template_sha256):
                 raise ValueError("PDF traceability digests must be lowercase SHA-256")
+        elif self.template_mode == "local-file":
+            # Serverless local conversion (D1) uses an unversioned operator file.
+            if self.template_id is not None or self.template_version is not None:
+                raise ValueError("Invalid PDF template traceability mode")
+            if self.template_sha256 is None or not _is_sha256(self.template_sha256):
+                raise ValueError("PDF traceability digests must be lowercase SHA-256")
         elif self.template_mode != "pandoc-default" or any(
             value is not None for value in template_values
         ):

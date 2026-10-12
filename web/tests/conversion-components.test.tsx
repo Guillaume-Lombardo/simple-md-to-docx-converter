@@ -295,18 +295,20 @@ test("validated downloads use the server filename and dropped files reach submis
     download,
   });
   const source = new File(["# dropped"], "dropped.md");
-  const hint = await screen.findByText(/Choose or drop exactly one/);
+  const hint = await screen.findByText(/Choose or drop one \.md or \.zip file/);
   // Settle the debounced initial search before asserting later download errors.
   await vi.waitFor(() => expect(json).toHaveBeenCalledTimes(3));
   const dropZone = hint.closest("label")!;
   fireEvent.dragEnter(dropZone);
-  expect(screen.getByText("Drop the file now.")).toBeVisible();
+  expect(screen.getByText("Drop the files now.")).toBeVisible();
   fireEvent.dragLeave(dropZone);
-  expect(screen.getByText(/Choose or drop exactly one/)).toBeVisible();
+  expect(
+    screen.getByText(/Choose or drop one \.md or \.zip file/),
+  ).toBeVisible();
   fireEvent.dragEnter(dropZone);
   fireEvent.dragOver(dropZone);
   fireEvent.drop(dropZone, { dataTransfer: { files: [source] } });
-  expect(screen.getByText("Change file")).toBeVisible();
+  expect(await screen.findByText("Change file")).toBeVisible();
   expect(dropZone.querySelector('input[type="file"]')).toHaveClass("sr-only");
   expect(screen.getByText("Selected dropped.md (9 bytes).")).toBeVisible();
   expect(

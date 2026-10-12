@@ -28,7 +28,7 @@ The decision was reviewed against upstream support information on 2026-09-01:
   that still need one. The migration therefore stays on the latest reviewed 6.0 patch until the
   complete Next.js, lint, editor, binding-generation, and test toolchain validates a later line.
 - [Tailwind CSS releases](https://tailwindcss.com/blog) identify 4.3 as the current stable line.
-- Exact [Next.js 16.3.4](https://www.npmjs.com/package/next/v/16.3.4),
+- Exact [Next.js 16.3.8](https://www.npmjs.com/package/next/v/16.3.8),
   [TypeScript 6.0.3](https://www.npmjs.com/package/typescript/v/6.0.3), and
   [Tailwind CSS 4.3.3](https://www.npmjs.com/package/tailwindcss/v/4.3.3) package metadata and
   registry integrity values come from the public npm registry and are committed through the root
@@ -42,7 +42,7 @@ The initial implementation baseline is:
 | Node.js | `24.19.0` | Supplied by both approved UBI images; the build fails if `node --version` differs. Remain on Node.js 24 LTS until a reviewed upgrade. |
 | Corepack | `0.36.0` | Installed only from its exact registry tarball after SHA-512 verification; implicit package-manager download is disabled after bootstrap. |
 | pnpm | `11.25.0` | Selected by the root integrity-bound `packageManager` field; the build fails if the exact version is unavailable. |
-| Next.js | `16.3.4` | Exact Active-LTS patch, never `canary`, `rc`, or a range. |
+| Next.js | `16.3.8` | Exact Active-LTS patch, never `canary`, `rc`, or a range. T133 moved the initial `16.3.4` baseline to this security patch. |
 | TypeScript | `6.0.3` | Exact stable compatibility release; reassess TypeScript 7 only after its API/tooling boundary is compatible. |
 | Tailwind CSS | `4.3.3` | Exact stable patch; compile styles at build time with no runtime CDN. |
 
@@ -279,7 +279,7 @@ production-build tests reject deprecated `middleware.ts` or an exported function
 `middleware`.
 
 The same response nonce is passed to framework bootstrap scripts and every emitted inline style
-element. T60 must prove on exact Next.js `16.3.4` production dynamic rendering that every HTML
+element. T60 must prove on exact Next.js `16.3.4` (now `16.3.8`) production dynamic rendering that every HTML
 document response has a fresh nonce, cached HTML never reuses one, `script-src` and `style-src`
 carry that same nonce, all framework bootstrap scripts and inline style elements carry it, no
 inline style attribute or unnonced inline style is emitted, and no generated page or asset requires

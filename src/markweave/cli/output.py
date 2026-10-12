@@ -32,6 +32,11 @@ class OutputWriter:
         else:
             self._stdout.write(f"{human}\n")
 
+    def warning(self, message: str) -> None:
+        """Write one human warning to stderr; JSON results carry warnings inline."""
+        if self._output_format is OutputFormat.HUMAN:
+            self._stderr.write(f"warning: {message}\n")
+
     def error(self, error: CliError) -> None:
         """Write one safe error envelope without a traceback or error details."""
         code = error.code if isinstance(error.code, str) else "command_failed"

@@ -15,8 +15,8 @@ readonly port="${MARKWEAVE_QUICKSTART_PORT:-8080}"
 readonly public_origin="${MARKWEAVE_PUBLIC_ORIGIN:-http://localhost:$port}"
 readonly cutover_backend_supplied="${MARKWEAVE_CUTOVER_BACKEND_IMAGE+true}"
 readonly cutover_frontend_supplied="${MARKWEAVE_CUTOVER_FRONTEND_IMAGE+true}"
-readonly cutover_backend_image="${MARKWEAVE_CUTOVER_BACKEND_IMAGE:-ghcr.io/guillaume-lombardo/md-converter:0.7.3@sha256:c91f97d7c299ad84811876e52ae52350d1ad3b91bd190b4fffb801634729bc83}"
-readonly cutover_frontend_image="${MARKWEAVE_CUTOVER_FRONTEND_IMAGE:-ghcr.io/guillaume-lombardo/md-converter-web:0.7.3@sha256:edee507cf70d15681bae0fe7f9d0755b607d557725fd06e6bd43771350dba9ba}"
+readonly cutover_backend_image="${MARKWEAVE_CUTOVER_BACKEND_IMAGE:-ghcr.io/guillaume-lombardo/md-converter:0.7.5@sha256:237597e5aee89a744f29027e3ad0e10845296f435da8902d1ee5af2b7f591677}"
+readonly cutover_frontend_image="${MARKWEAVE_CUTOVER_FRONTEND_IMAGE:-ghcr.io/guillaume-lombardo/md-converter-web:0.7.5@sha256:f628055556c61b04cfbd3202e32464ad38719d7b057ea87ed9b249e44c6d01ce}"
 readonly work_volume="${project}_markweave-work"
 readonly blkid=/usr/sbin/blkid
 readonly losetup=/usr/sbin/losetup
@@ -333,9 +333,6 @@ write_runtime_env() {
 
 compose() {
   local files=(--file "$repository/compose.yaml")
-  if [[ -n "$cutover_backend_image" ]]; then
-    files+=(--file "$repository/compose.nextjs.yaml")
-  fi
   MARKWEAVE_PORT="$port" MARKWEAVE_PUBLIC_ORIGIN="$public_origin" \
     MARKWEAVE_ROUTER_PUBLIC_HOST="$(router_public_host)" \
     MARKWEAVE_CUTOVER_BACKEND_IMAGE="$cutover_backend_image" \

@@ -66,3 +66,23 @@ def template_settings(**overrides: Any) -> dict[str, Any]:
     }
     values.update(overrides)
     return values
+
+
+def local_conversion_settings(**overrides: Any) -> Any:
+    """Build T106 local settings from the same explicit test-only values."""
+    from markweave.conversion.local_settings import (  # noqa: PLC0415
+        LocalConversionSettings,
+    )
+
+    values = {
+        "conversion_upload_max_bytes": 1_000_000,
+        **{
+            name: value
+            for name, value in template_settings().items()
+            if name in LocalConversionSettings.model_fields
+        },
+        "template_pandoc_executable": "pandoc",
+        "template_libreoffice_executable": "soffice",
+    }
+    values.update(overrides)
+    return LocalConversionSettings.model_validate(values)

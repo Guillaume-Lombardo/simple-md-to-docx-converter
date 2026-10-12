@@ -38,7 +38,7 @@ Docker-compatible API. Podman's automatic Docker-API health metadata is not used
 ClamAV directly before starting Markweave, then polls Markweave's local readiness endpoint with a
 bounded timeout.
 
-The published 0.7.3 pair used by the default helper keeps Composer model setup disabled. A
+The default helper keeps Composer model setup disabled with the pinned published 0.7.5 pair. A
 matched Composer-capable candidate backend/frontend pair can explicitly opt into
 `MARKWEAVE_SIMPLE_COMPOSER_SETUP=true`; the helper then includes
 `compose.simple-composer.yaml`. A candidate preview script can supply the pair and opt-in together,
@@ -217,7 +217,23 @@ unbounded named volume. In both paths, one rootless Markweave process runs the A
 worker, `/data` is persistent, the root filesystem is read-only, and the browser port binds only
 to `127.0.0.1`. In the default mode, ClamAV has persistent signatures and no host port; its scanner
 network is internal, and only ClamAV joins the network used to refresh signatures. The
-trusted-upstream overlay removes the application dependency and keeps the ClamAV service inactive.
+trusted-upstream overlay removes the application dependency and assigns the ClamAV service to the
+inactive `local-antivirus` Compose profile.
+
+The helpers compose every supported mode from the base file and a few ordered overrides. Use the
+helpers rather than combining these files by hand.
+
+| File | Applied by | Purpose |
+| --- | --- | --- |
+| `compose.yaml` | Both helpers, always first | Markweave, local ClamAV, and the Next.js frontend and router; only the router publishes a loopback port |
+| `compose.simple.yaml` | Simple helper | Replaces the bounded ext4 `/work` volume with an unbounded named volume |
+| `compose.simple-composer.yaml` | Simple helper with `MARKWEAVE_SIMPLE_COMPOSER_SETUP=true` | Composer settings, key volume, and egress network |
+| `compose.podman.yaml` | Simple helper with rootless Podman | Podman-compatible health, seccomp, tmpfs, network, and staged browser startup settings |
+| `compose.trusted-upstream.yaml` | Simple helper with `--trust-upstream-antivirus` or `--insecure` | Trusted-upstream scanning mode; ClamAV stays inactive |
+| `compose.podman-trusted-upstream.yaml` | Simple helper with rootless Podman and either flag above | CNI-free `slirp4netns` namespace shared by the browser tier, with one loopback listener |
+
+`compose.test.yaml` is unrelated to the quickstarts. It provisions disposable PostgreSQL and S3
+services for local tests, as described in [local development](local-development.md).
 
 The Compose profile is not a production deployment. Its upload, queue, memory, retention, and
 timeout values are local evaluation limits reused from the tested final-image workflow. Do not

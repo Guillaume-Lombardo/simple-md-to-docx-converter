@@ -31,8 +31,8 @@ def test_documentation_only_change_has_no_heavy_domain() -> None:
         "compose.simple.yaml",
         "compose.simple-composer.yaml",
         "compose.podman.yaml",
-        "compose.nextjs-podman.yaml",
-        "compose.nextjs-podman-trusted-upstream.yaml",
+        "compose.podman-trusted-upstream.yaml",
+        "compose.trusted-upstream.yaml",
         "compose.yaml",
         "docs/local-development.md",
         "examples/quickstart-template.docx.base64",
@@ -172,6 +172,25 @@ def test_anydoc_corpus_selects_real_library_integration() -> None:
     """Changes to real anydoc inputs rerun the document-engine integration domain."""
 
     assert "document-engines" in select_domains(["spikes/anydoc/corpus/docx/text.docx"])
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "path",
+    [
+        "src/markweave/cli/commands/local_conversion.py",
+        "src/markweave/cli/local_outputs.py",
+        "src/markweave/conversion/engine_versions.py",
+        "src/markweave/conversion/local.py",
+        "src/markweave/conversion/local_settings.py",
+        "examples/local-conversion.env",
+        "tests/e2e/local-conversion-final-image.sh",
+        "tests/e2e/fixtures/local-publication-sync/sitecustomize.py",
+    ],
+)
+def test_local_conversion_changes_select_its_final_image_e2e(path: str) -> None:
+    """T106 local mode reruns its final-image E2E in the container domain."""
+    assert "container" in select_domains([path])
 
 
 @pytest.mark.unit

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import warnings
+from collections.abc import Iterable
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Self, get_args
@@ -23,6 +24,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class ConfigurationError(RuntimeError):
     """Raised without configuration values when startup configuration is invalid."""
+
+
+class ConflictingConfigurationError(ConfigurationError):
+    """Canonical and legacy aliases define different values for named fields."""
+
+    def __init__(self, fields: tuple[str, ...]) -> None:
+        super().__init__("Invalid application configuration")
+        self.fields = fields
 
 
 class StorageProfile(StrEnum):
@@ -263,41 +272,6 @@ class Settings(BaseSettings):
         default=None, gt=0, allow_inf_nan=False
     )
     composer_draft_retention_seconds: int | None = Field(default=None, gt=0)
-
-    @classmethod
-    def _environment_values(cls) -> tuple[dict[str, str], dict[str, str], set[str]]:
-        """Read canonical and legacy values without giving either alias precedence."""
-        environment: dict[str, list[tuple[str, str]]] = {}
-        for name, value in os.environ.items():
-            environment.setdefault(name.casefold(), []).append((name, value))
-
-        def find(name: str) -> str | None:
-            entries = environment.get(name.casefold(), [])
-            if len({value for _, value in entries}) > 1:
-                raise ConfigurationError("Invalid application configuration")
-            return entries[0][1] if entries else None
-
-        canonical: dict[str, str] = {}
-        legacy: dict[str, str] = {}
-        dual_definitions: set[str] = set()
-        for field_name in cls.model_fields:
-            suffix = field_name.upper()
-            canonical_value = find(f"MARKWEAVE_{suffix}")
-            legacy_value = find(f"MD_CONVERTER_{suffix}")
-            if canonical_value is not None:
-                canonical[field_name] = canonical_value
-            if legacy_value is not None:
-                legacy[field_name] = legacy_value
-            if canonical_value is not None and legacy_value is not None:
-                dual_definitions.add(field_name)
-        return canonical, legacy, dual_definitions
-
-    @staticmethod
-    def _is_secret(annotation: Any) -> bool:
-        """Identify values whose aliases must compare byte-for-byte as supplied."""
-        if annotation is SecretStr:
-            return True
-        return any(Settings._is_secret(argument) for argument in get_args(annotation))
 
     @field_validator("public_origin")
     @classmethod
@@ -586,19 +560,7 @@ class Settings(BaseSettings):
     def load(cls) -> Settings:
         """Load environment settings without exposing invalid values in the exception."""
         try:
-            canonical_values, legacy_values, dual_definitions = (
-                cls._environment_values()
-            )
-            canonical_settings = cls.model_validate(legacy_values | canonical_values)
-            legacy_settings = cls.model_validate(canonical_values | legacy_values)
-            for field_name in dual_definitions:
-                if cls._is_secret(cls.model_fields[field_name].annotation):
-                    if canonical_values[field_name] != legacy_values[field_name]:
-                        raise ConfigurationError("Invalid application configuration")
-                elif getattr(canonical_settings, field_name) != getattr(
-                    legacy_settings, field_name
-                ):
-                    raise ConfigurationError("Invalid application configuration")
+            settings, canonical_values, legacy_values = validated_environment_model(cls)
             if (
                 "session_idle_seconds" in canonical_values
                 or "session_idle_seconds" in legacy_values
@@ -608,9 +570,74 @@ class Settings(BaseSettings):
                     FutureWarning,
                     stacklevel=2,
                 )
-            return canonical_settings
+            return settings
         except ConfigurationError, ValidationError:
             raise ConfigurationError("Invalid application configuration") from None
+
+
+def _environment_values(
+    field_names: Iterable[str],
+) -> tuple[dict[str, str], dict[str, str], set[str]]:
+    """Read canonical and legacy values without giving either alias precedence."""
+    environment: dict[str, list[tuple[str, str]]] = {}
+    for name, value in os.environ.items():
+        environment.setdefault(name.casefold(), []).append((name, value))
+
+    def find(field_name: str, name: str) -> str | None:
+        entries = environment.get(name.casefold(), [])
+        if len({value for _, value in entries}) > 1:
+            raise ConflictingConfigurationError((field_name,))
+        return entries[0][1] if entries else None
+
+    canonical: dict[str, str] = {}
+    legacy: dict[str, str] = {}
+    dual_definitions: set[str] = set()
+    for field_name in field_names:
+        suffix = field_name.upper()
+        canonical_value = find(field_name, f"MARKWEAVE_{suffix}")
+        legacy_value = find(field_name, f"MD_CONVERTER_{suffix}")
+        if canonical_value is not None:
+            canonical[field_name] = canonical_value
+        if legacy_value is not None:
+            legacy[field_name] = legacy_value
+        if canonical_value is not None and legacy_value is not None:
+            dual_definitions.add(field_name)
+    return canonical, legacy, dual_definitions
+
+
+def _is_secret(annotation: Any) -> bool:
+    """Identify values whose aliases must compare byte-for-byte as supplied."""
+    if annotation is SecretStr:
+        return True
+    return any(_is_secret(argument) for argument in get_args(annotation))
+
+
+def validated_environment_model[ModelT: BaseSettings](
+    model: type[ModelT],
+) -> tuple[ModelT, dict[str, str], dict[str, str]]:
+    """Validate canonical ``MARKWEAVE_*`` and legacy aliases for one settings model.
+
+    Conflicting dual definitions raise ``ConflictingConfigurationError`` naming only
+    fields; invalid values raise pydantic's ``ValidationError``. Callers must not
+    expose either exception's input values.
+    """
+    canonical_values, legacy_values, dual_definitions = _environment_values(
+        model.model_fields
+    )
+    canonical_settings = model.model_validate(legacy_values | canonical_values)
+    legacy_settings = model.model_validate(canonical_values | legacy_values)
+    conflicts: list[str] = []
+    for field_name in sorted(dual_definitions):
+        if _is_secret(model.model_fields[field_name].annotation):
+            if canonical_values[field_name] != legacy_values[field_name]:
+                conflicts.append(field_name)
+        elif getattr(canonical_settings, field_name) != getattr(
+            legacy_settings, field_name
+        ):
+            conflicts.append(field_name)
+    if conflicts:
+        raise ConflictingConfigurationError(tuple(conflicts))
+    return canonical_settings, canonical_values, legacy_values
 
 
 _MAX_BROKER_CERTIFICATE_PINS = 2
