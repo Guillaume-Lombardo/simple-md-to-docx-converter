@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import secrets
 import subprocess
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
@@ -79,7 +79,7 @@ def _port(value: str) -> int:
 
 
 @contextmanager
-def distributed_services() -> Iterator[None]:
+def distributed_services() -> Generator[None]:
     """Reuse explicit services or acquire, initialize and remove a private test stack."""
     if configured_environment(os.environ):
         yield

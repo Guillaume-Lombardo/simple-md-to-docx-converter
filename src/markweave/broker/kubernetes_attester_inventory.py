@@ -6,7 +6,7 @@ import hashlib
 import hmac
 import json
 import sqlite3
-from collections.abc import Iterator, Sequence
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
@@ -296,7 +296,7 @@ class SQLiteNodeAttesterLedger:
             return True
 
     @contextmanager
-    def _connect(self) -> Iterator[sqlite3.Connection]:
+    def _connect(self) -> Generator[sqlite3.Connection]:
         connection = sqlite3.connect(self._path, timeout=10, isolation_level=None)
         try:
             connection.row_factory = sqlite3.Row
@@ -308,7 +308,7 @@ class SQLiteNodeAttesterLedger:
             connection.close()
 
     @contextmanager
-    def _transaction(self) -> Iterator[sqlite3.Connection]:
+    def _transaction(self) -> Generator[sqlite3.Connection]:
         try:
             with self._connect() as connection:
                 connection.execute("BEGIN IMMEDIATE")
@@ -323,7 +323,7 @@ class SQLiteNodeAttesterLedger:
             raise KubernetesRuntimeError("Kubernetes attester ledger failed") from None
 
     @contextmanager
-    def _verified(self) -> Iterator[sqlite3.Connection]:
+    def _verified(self) -> Generator[sqlite3.Connection]:
         try:
             with self._connect() as connection:
                 self._verify_all(connection)

@@ -9,7 +9,7 @@ import json
 import os
 import shutil
 import sqlite3
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Generator, Iterator, Mapping
 from contextlib import closing, contextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime
@@ -787,7 +787,7 @@ class S3RecoveryAdapter:
 
 
 @contextmanager
-def filesystem_lock(path: Path) -> Iterator[None]:
+def filesystem_lock(path: Path) -> Generator[None]:
     """Acquire a non-blocking symlink-safe local recovery lock."""
 
     try:

@@ -26,7 +26,7 @@ def _pdf(*, pages: int = 1, width: float = 72, height: float = 36) -> bytes:
 
 
 def test_pdfium_version_is_locked_and_rgba_render_is_deterministic() -> None:
-    assert version("pypdfium2") == "5.13.0"
+    assert version("pypdfium2") == "5.14.0"
     first = render_pdf(_pdf(), dpi=144, max_pdf_bytes=100_000, limits=LIMITS)
     second = render_pdf(_pdf(), dpi=144, max_pdf_bytes=100_000, limits=LIMITS)
     assert first == second

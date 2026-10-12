@@ -40,7 +40,7 @@ publication, cancellation, and expiration compensate or remove both objects toge
 ## Validation boundary
 
 Unit tests cover validation, failure normalization, resource limits, cleanup, and process-group
-logic. Real tests run Pandoc, LibreOffice 26.2.5.2, and PDFium 5.13.0 under an arbitrary UID with a
+logic. Real tests run Pandoc, LibreOffice 26.2.5.2, and PDFium 5.14.0 under an arbitrary UID with a
 read-only root filesystem, no capabilities, `no-new-privileges`, no network, bounded memory/CPU/
 PIDs, and bounded writable mounts. They cover success, concurrent isolated profiles, output
 failures, timeout, cancellation, descendant cleanup, and exact raster golden comparison.

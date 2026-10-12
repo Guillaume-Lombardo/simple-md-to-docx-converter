@@ -1,6 +1,6 @@
 """Application bootstrap and lifespan ownership."""
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import replace
 
@@ -51,7 +51,7 @@ def build_lifespan(
     """Build the exact worker-before-components application lifespan."""
 
     @asynccontextmanager
-    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         del _app
         worker_started = False
         try:
