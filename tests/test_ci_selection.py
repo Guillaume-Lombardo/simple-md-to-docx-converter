@@ -8,12 +8,19 @@ from pathlib import Path
 import pytest
 
 from scripts.ci.select_domains import (
+    COMPOSE_DOMAINS,
     DOMAIN_PATTERNS,
+    E2E_DOMAINS,
+    IMAGE_DOMAIN_ROLES,
+    IMAGE_ROLES,
     classify_domains,
     load_registry,
     main,
+    partition_domains,
     select_domains,
 )
+
+E2E = sorted(E2E_DOMAINS)
 
 
 @pytest.mark.unit
@@ -40,24 +47,57 @@ def test_documentation_only_change_has_no_heavy_domain() -> None:
         "scripts/quickstart-simple.sh",
         "scripts/quickstart.sh",
         "scripts/e2e/run-compose-all.sh",
-        "scripts/e2e/run-compose-simple.sh",
-        "scripts/e2e/run-compose-podman-insecure.sh",
         "tests/test_quickstart_compose.py",
     ],
 )
 def test_quickstart_inputs_select_active_compose_e2e(path: str) -> None:
-    """Every casual quickstart input executes the real pinned Compose workflow."""
-    assert "compose" in select_domains([path])
+    """Every casual quickstart input executes every real pinned Compose suite."""
+    assert set(COMPOSE_DOMAINS) <= set(select_domains([path]))
 
 
 @pytest.mark.unit
-def test_compose_domain_is_active_and_uses_the_isolated_runner() -> None:
+def test_compose_sub_suites_are_active_independent_domains() -> None:
+    """The four Compose sub-suites run as separate jobs with their own runners."""
     registry = load_registry(Path(".github/ci/domains.json"))
-    assert registry["compose"] == {
-        "activation_ticket": "T23",
-        "command": ["bash", "scripts/e2e/run-compose-all.sh"],
-        "status": "active",
+    assert {domain: registry[domain] for domain in COMPOSE_DOMAINS} == {
+        "compose-podman-insecure": {
+            "activation_ticket": "T23",
+            "command": ["bash", "scripts/e2e/run-compose-podman-insecure.sh"],
+            "status": "active",
+        },
+        "compose-secure": {
+            "activation_ticket": "T23",
+            "command": ["bash", "scripts/e2e/run-compose.sh"],
+            "status": "active",
+        },
+        "compose-simple-docker": {
+            "activation_ticket": "T23",
+            "command": [
+                "env",
+                "MARKWEAVE_SIMPLE_E2E_RUNTIME=docker",
+                "bash",
+                "scripts/e2e/run-compose-simple.sh",
+            ],
+            "status": "active",
+        },
+        "compose-simple-podman": {
+            "activation_ticket": "T23",
+            "command": [
+                "env",
+                "MARKWEAVE_SIMPLE_E2E_RUNTIME=podman",
+                "bash",
+                "scripts/e2e/run-compose-simple.sh",
+            ],
+            "status": "active",
+        },
     }
+    aggregate = Path("scripts/e2e/run-compose-all.sh").read_text(encoding="utf-8")
+    for domain in COMPOSE_DOMAINS:
+        command = registry[domain]["command"]
+        assert isinstance(command, list)
+        # The aggregate local runner executes exactly the same four commands.
+        runner = " ".join(argument for argument in command if argument != "env")
+        assert runner in aggregate
 
 
 @pytest.mark.unit
@@ -65,7 +105,9 @@ def test_source_change_selects_all_application_domains_except_container() -> Non
     """Shared Python behavior affects functional, storage, engine, and E2E suites."""
     selected = select_domains(["src/markweave/service.py"])
     assert selected == sorted(
-        set(DOMAIN_PATTERNS) - {"ci-infrastructure", "compose", "container", "frontend"}
+        set(DOMAIN_PATTERNS)
+        - {"ci-infrastructure", "container", "frontend", "supply-chain"}
+        - set(COMPOSE_DOMAINS)
     )
 
 
@@ -87,11 +129,7 @@ def test_complete_suite_selects_every_domain_without_paths() -> None:
 @pytest.mark.unit
 def test_root_containerfile_selects_container_domain() -> None:
     """Final-image changes run container validation and both image E2E profiles."""
-    assert select_domains(["Containerfile"]) == [
-        "container",
-        "e2e-distributed",
-        "e2e-standalone",
-    ]
+    assert select_domains(["Containerfile"]) == ["container", *E2E, "supply-chain"]
 
 
 @pytest.mark.unit
@@ -108,9 +146,9 @@ def test_root_containerfile_selects_container_domain() -> None:
 def test_t20_asset_changes_select_container_domain(path: str) -> None:
     selected = select_domains([path])
     assert "container" in selected
+    assert "supply-chain" in selected
     if path != "tests/container/test_container_assets.py":
-        assert "e2e-distributed" in selected
-        assert "e2e-standalone" in selected
+        assert set(E2E) <= set(selected)
 
 
 @pytest.mark.unit
@@ -164,7 +202,7 @@ def test_reverse_attempt_inputs_select_container_validation(path: str) -> None:
     ],
 )
 def test_broker_service_deployment_selects_only_container_domain(path: str) -> None:
-    assert select_domains([path]) == ["container"]
+    assert select_domains([path]) == ["container", "supply-chain"]
 
 
 @pytest.mark.unit
@@ -207,8 +245,7 @@ def test_recovery_behavior_changes_select_final_image_validation(path: str) -> N
     """Recovery behavior always exercises both profiles in the final image."""
     selected = select_domains([path])
     assert "container" in selected
-    assert "e2e-distributed" in selected
-    assert "e2e-standalone" in selected
+    assert set(E2E) <= set(selected)
 
 
 @pytest.mark.unit
@@ -279,6 +316,7 @@ def test_t06_functional_domain_is_active_and_runnable() -> None:
         "web/server.mjs",
         "openapi/v1.json",
         "scripts/container/build-frontend.sh",
+        "scripts/container/ci_images.py",
         "scripts/container/pull-base-images.sh",
     ],
 )
@@ -290,7 +328,12 @@ def test_frontend_inputs_select_rootless_frontend_smoke(path: str) -> None:
     assert "frontend" in runnable
     assert registry["frontend"] == {
         "activation_ticket": "T60",
-        "command": ["bash", "web/scripts/run-rootless-smoke.sh"],
+        "command": [
+            "bash",
+            "web/scripts/run-rootless-smoke.sh",
+            "localhost/md-converter-web:ci",
+            "--existing",
+        ],
         "status": "active",
     }
 
@@ -322,8 +365,7 @@ def test_golden_infrastructure_selects_active_document_engine_domain(
     selected = select_domains([path])
     assert "document-engines" in selected
     if path.startswith("tests/corpus/"):
-        assert "e2e-distributed" in selected
-        assert "e2e-standalone" in selected
+        assert set(E2E) <= set(selected)
 
 
 @pytest.mark.unit
@@ -341,8 +383,7 @@ def test_browser_workflow_changes_select_document_engine_domain(path: str) -> No
     selected = select_domains([path])
     if path == "package.json":
         assert "document-engines" in selected
-    assert "e2e-distributed" in selected
-    assert "e2e-standalone" in selected
+    assert set(E2E) <= set(selected)
 
 
 @pytest.mark.unit
@@ -369,18 +410,30 @@ def test_t04_document_engine_domain_runs_current_integration_boundaries() -> Non
 
 @pytest.mark.unit
 def test_t21_e2e_domains_are_active_and_profile_specific() -> None:
-    """Each final-image profile runs through its own reviewed matrix command."""
+    """Each final-image profile runs as complementary shards on loaded images."""
     registry = load_registry(Path(".github/ci/domains.json"))
-    assert registry["e2e-standalone"] == {
-        "activation_ticket": "T21",
-        "command": ["bash", "scripts/e2e/run.sh", "standalone"],
-        "status": "active",
+    assert E2E_DOMAINS == {
+        "e2e-standalone-1": ("standalone", 1),
+        "e2e-standalone-2": ("standalone", 2),
+        "e2e-distributed-1": ("distributed", 1),
+        "e2e-distributed-2": ("distributed", 2),
     }
-    assert registry["e2e-distributed"] == {
-        "activation_ticket": "T21",
-        "command": ["bash", "scripts/e2e/run.sh", "distributed"],
-        "status": "active",
-    }
+    for domain, (profile, shard) in E2E_DOMAINS.items():
+        assert registry[domain] == {
+            "activation_ticket": "T21",
+            "command": [
+                "env",
+                f"MARKWEAVE_E2E_SHARD={shard}",
+                "MARKWEAVE_E2E_LOCAL_IMAGE=localhost/md-converter:ci",
+                "MARKWEAVE_E2E_LOCAL_FRONTEND_IMAGE=localhost/md-converter-web:ci",
+                "MARKWEAVE_E2E_LOCAL_REVERSE_ATTEMPT_IMAGE="
+                "localhost/md-converter-reverse-attempt:ci",
+                "bash",
+                "scripts/e2e/run.sh",
+                profile,
+            ],
+            "status": "active",
+        }
 
 
 @pytest.mark.unit
@@ -408,29 +461,33 @@ def test_t21_e2e_domains_are_active_and_profile_specific() -> None:
 def test_final_image_inputs_select_both_t21_profiles(path: str) -> None:
     """No final-image, driver, deployment, or E2E change can skip one profile."""
     selected = select_domains([path])
-    assert "e2e-standalone" in selected
-    assert "e2e-distributed" in selected
+    assert set(E2E) <= set(selected)
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    "path",
+    ("path", "expected"),
     [
-        "scripts/e2e/run-compose.sh",
-        "scripts/e2e/run-compose-all.sh",
-        "scripts/e2e/run-compose-simple.sh",
-        "scripts/e2e/run-compose-podman-insecure.sh",
+        ("scripts/e2e/run-compose.sh", ["compose-secure"]),
+        ("scripts/e2e/run-compose-all.sh", sorted(COMPOSE_DOMAINS)),
+        (
+            "scripts/e2e/run-compose-simple.sh",
+            ["compose-simple-docker", "compose-simple-podman"],
+        ),
+        ("scripts/e2e/run-compose-podman-insecure.sh", ["compose-podman-insecure"]),
     ],
 )
-def test_compose_runner_changes_select_only_the_compose_domain(path: str) -> None:
+def test_compose_runner_changes_select_only_the_compose_domain(
+    path: str, expected: list[str]
+) -> None:
     """Self-contained Compose runners never execute in the final-image profiles."""
-    assert select_domains([path]) == ["compose"]
+    assert select_domains([path]) == expected
 
 
 @pytest.mark.unit
 def test_compose_runner_exclusion_does_not_hide_other_final_image_inputs() -> None:
     selected = select_domains(["scripts/e2e/run-compose.sh", "scripts/e2e/run.sh"])
-    assert selected == ["compose", "e2e-distributed", "e2e-standalone"]
+    assert selected == ["compose-secure", *E2E]
 
 
 @pytest.mark.unit
@@ -534,9 +591,66 @@ def test_cli_writes_compact_github_outputs(tmp_path: Path) -> None:
         line.split("=", maxsplit=1) for line in output.read_text().splitlines()
     )
     assert json.loads(values["selected-domains"]) == sorted(
-        set(DOMAIN_PATTERNS) - {"ci-infrastructure", "compose", "container", "frontend"}
+        set(DOMAIN_PATTERNS)
+        - {"ci-infrastructure", "container", "frontend", "supply-chain"}
+        - set(COMPOSE_DOMAINS)
     )
     assert json.loads(values["runnable-domains"]) == []
+    assert json.loads(values["heavy-domains"]) == []
+    assert json.loads(values["image-domains"]) == []
+    assert json.loads(values["image-roles"]) == []
+
+
+@pytest.mark.unit
+def test_cli_partitions_runnable_domains_between_heavy_and_image_jobs(
+    tmp_path: Path,
+) -> None:
+    """Runnable domains are split exhaustively and image roles are derived."""
+    paths = tmp_path / "paths"
+    paths.write_bytes(b"web/server.mjs\0compose.yaml\0")
+    output = tmp_path / "output"
+    assert (
+        main(
+            [
+                "--paths-file",
+                str(paths),
+                "--registry",
+                ".github/ci/domains.json",
+                "--github-output",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    values = {
+        key: json.loads(value)
+        for key, value in (
+            line.split("=", maxsplit=1) for line in output.read_text().splitlines()
+        )
+    }
+    assert values["heavy-domains"] == sorted(COMPOSE_DOMAINS)
+    assert values["image-domains"] == ["frontend"]
+    assert values["image-roles"] == ["frontend"]
+    assert (
+        sorted(values["heavy-domains"] + values["image-domains"])
+        == (values["runnable-domains"])
+    )
+
+
+@pytest.mark.unit
+def test_partition_covers_every_domain_exactly_once_with_known_roles() -> None:
+    heavy, image, roles = partition_domains(sorted(DOMAIN_PATTERNS))
+    assert sorted(heavy + image) == sorted(DOMAIN_PATTERNS)
+    assert not set(heavy) & set(image)
+    assert image == sorted(IMAGE_DOMAIN_ROLES)
+    assert roles == sorted(IMAGE_ROLES)
+    assert set(IMAGE_DOMAIN_ROLES) <= set(DOMAIN_PATTERNS)
+    assert partition_domains(["supply-chain", "functional"]) == (
+        ["functional"],
+        ["supply-chain"],
+        ["backend", "reverse-attempt"],
+    )
+    assert partition_domains([]) == ([], [], [])
 
 
 @pytest.mark.unit

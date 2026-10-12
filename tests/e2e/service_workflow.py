@@ -1583,6 +1583,50 @@ def checkpoint(arguments: argparse.Namespace) -> None:
     )
 
 
+def seed_browser_prerequisites(arguments: argparse.Namespace) -> None:
+    """Seed a fresh deployment with the state the browser shard expects.
+
+    The service phase normally leaves a system fallback template and an audited
+    idle-session policy at revision 2. A browser shard that starts from a fresh
+    deployment re-creates exactly that state instead of sharing it implicitly.
+    """
+    client = ServiceClient(arguments.base_url)
+    client.login(arguments.admin_username, arguments.admin_password)
+    template = create_template(
+        client, arguments.template, run_id=f"seed-{uuid.uuid4().hex[:10]}"
+    )
+    template_id = required_string(template, "id", "seed template")
+    fallback = client.request(
+        "PUT", f"/api/v1/templates/{template_id}/system-fallback", mutate=True
+    )
+    expect(fallback, 204, "seed system fallback")
+    current_result = client.request("GET", "/api/v1/admin/session-policy")
+    expect(current_result, 200, "seed policy baseline")
+    current = decode_object(current_result, "seed policy baseline")
+    if current.get("revision") != 0:
+        raise WorkflowFailure("seed policy baseline: deployment is not fresh")
+    etag = current_result.headers.get("etag")
+    if etag is None:
+        raise WorkflowFailure("seed policy baseline: ETag is missing")
+    json_request(
+        client,
+        "PUT",
+        "/api/v1/admin/session-policy",
+        {"user_idle_minutes": 300, "admin_idle_minutes": 60},
+        expected=200,
+        operation="seed policy update",
+        headers={"If-Match": etag},
+    )
+    state = {
+        "schema": "t135-browser-seed-v1",
+        "profile": arguments.profile,
+        "template_id": template_id,
+        **checkpoint_policy_evidence(client),
+    }
+    validate_policy_state(state)
+    write_state(arguments.state_file, state)
+
+
 def exercise_mermaid(arguments: argparse.Namespace) -> None:
     """Complete one real Mermaid conversion through the deployed service."""
     client = ServiceClient(arguments.base_url)
@@ -1827,6 +1871,7 @@ def build_parser() -> argparse.ArgumentParser:
             "verify-checkpoint",
             "submit-recovery",
             "verify-recovery",
+            "seed-browser-prerequisites",
         ),
     )
     parser.add_argument("--base-url", required=True)
@@ -1872,6 +1917,7 @@ def validate_arguments(
         "exercise-mermaid",
         "checkpoint",
         "submit-recovery",
+        "seed-browser-prerequisites",
     }:
         if arguments.template is None:
             parser.error("--template is required for this command")
@@ -1884,6 +1930,7 @@ def validate_arguments(
             "verify-checkpoint",
             "submit-recovery",
             "verify-recovery",
+            "seed-browser-prerequisites",
         }
         and arguments.state_file is None
     ):
@@ -1926,27 +1973,21 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     arguments = parser.parse_args(argv)
     validate_arguments(parser, arguments)
+    commands = {
+        "exercise": exercise,
+        "exercise-security-boundaries": exercise_security_boundaries,
+        "exercise-mermaid": exercise_mermaid,
+        "verify-login-origin": verify_login_origin,
+        "verify-disabled-login-origin": verify_disabled_login_origin,
+        "verify-session-expiration": verify_session_expiration,
+        "checkpoint": checkpoint,
+        "verify-checkpoint": verify_checkpoint,
+        "submit-recovery": submit_recovery,
+        "verify-recovery": verify_recovery,
+        "seed-browser-prerequisites": seed_browser_prerequisites,
+    }
     try:
-        if arguments.command == "exercise":
-            exercise(arguments)
-        elif arguments.command == "exercise-security-boundaries":
-            exercise_security_boundaries(arguments)
-        elif arguments.command == "exercise-mermaid":
-            exercise_mermaid(arguments)
-        elif arguments.command == "verify-login-origin":
-            verify_login_origin(arguments)
-        elif arguments.command == "verify-disabled-login-origin":
-            verify_disabled_login_origin(arguments)
-        elif arguments.command == "verify-session-expiration":
-            verify_session_expiration(arguments)
-        elif arguments.command == "checkpoint":
-            checkpoint(arguments)
-        elif arguments.command == "verify-checkpoint":
-            verify_checkpoint(arguments)
-        elif arguments.command == "submit-recovery":
-            submit_recovery(arguments)
-        else:
-            verify_recovery(arguments)
+        commands[arguments.command](arguments)
     except WorkflowFailure as error:
         message = str(error)
         write_failure_artifact(

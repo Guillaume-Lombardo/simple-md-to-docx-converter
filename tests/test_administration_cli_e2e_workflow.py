@@ -212,7 +212,13 @@ def test_administration_e2e_launcher_dispatches_modes(monkeypatch, mocker) -> No
 
 
 def test_administration_e2e_modes_are_wired_at_healthy_and_failed_boundaries() -> None:
-    runner = Path("scripts/e2e/run.sh").read_text(encoding="utf-8")
+    source = Path("scripts/e2e/run.sh").read_text(encoding="utf-8")
+    # The service phase holds these scenarios; compare them without its indentation.
+    start = source.index("\ne2e_phase_service() {\n")
+    end = source.index("\n}\n", start)
+    runner = "\n".join(
+        line.removeprefix("  ") for line in source[start:end].splitlines()
+    )
 
     exercise = runner.index(
         'tests.e2e.administration_cli_workflow \\\n  --container "$application_name"\n'

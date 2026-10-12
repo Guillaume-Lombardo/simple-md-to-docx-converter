@@ -16,7 +16,14 @@ from packaging.version import InvalidVersion, Version
 from yaml.constructor import ConstructorError
 from yaml.resolver import BaseResolver
 
-from scripts.ci.select_domains import DOMAIN_PATTERNS, load_registry
+from scripts.ci import e2e_shards
+from scripts.ci.select_domains import (
+    DOMAIN_PATTERNS,
+    E2E_DOMAINS,
+    E2E_SHARD_COUNT,
+    load_registry,
+)
+from scripts.container.ci_images import ROLE_IMAGES
 from scripts.release.artifacts import MANIFEST_NAME as RELEASE_MANIFEST_NAME
 
 if TYPE_CHECKING:
@@ -42,8 +49,9 @@ TRUSTED_LIBREOFFICE_DEB_CACHE_WRITE = (
     "&& github.ref == 'refs/heads/main' && github.repository == "
     "'Guillaume-Lombardo/simple-md-to-docx-converter' }}"
 )
+BACKEND_IMAGE_ROLE = "contains(fromJSON(needs.detect.outputs.image-roles), 'backend')"
 TRUSTED_LIBREOFFICE_RPM_CACHE_WRITE = (
-    "${{ matrix.domain == 'container' && github.event_name == 'push' && "
+    f"${{{{ {BACKEND_IMAGE_ROLE} && github.event_name == 'push' && "
     "github.ref == 'refs/heads/main' && github.repository == "
     "'Guillaume-Lombardo/simple-md-to-docx-converter' }}"
 )
@@ -80,6 +88,27 @@ MAX_RELEASE_TIMEOUT_MINUTES = 60
 LIGHT_SHARD_TIMEOUT_MINUTES = 15
 HEAVY_MAX_PARALLEL = 8
 HEAVY_UV_CACHE_SUFFIX = "py314-heavy"
+FINAL_IMAGE_TIMEOUT_MINUTES = 30
+PODMAN_ASSERTION = (
+    "set -euo pipefail\n"
+    "podman_version=\"$(podman version --format '{{.Client.Version}}')\"\n"
+    '[[ "$podman_version" =~ ^([0-9]+)\\.[0-9]+\\.[0-9]+ ]]\n'
+    "(( BASH_REMATCH[1] >= 4 ))\n"
+    'echo "Using preinstalled Podman $podman_version"\n'
+    "podman info --format '{{.Host.Security.Rootless}}' | grep -Fx true\n"
+)
+IMAGE_ARCHIVE_ROLES = ("backend", "frontend", "reverse-attempt")
+IMAGE_ARCHIVE_DOMAIN_CONDITIONS = {
+    "backend": (
+        "matrix.domain == 'container' || matrix.domain == 'supply-chain' || "
+        "startsWith(matrix.domain, 'e2e-')"
+    ),
+    "frontend": "matrix.domain == 'frontend' || startsWith(matrix.domain, 'e2e-')",
+    "reverse-attempt": (
+        "matrix.domain == 'container' || matrix.domain == 'supply-chain' || "
+        "startsWith(matrix.domain, 'e2e-')"
+    ),
+}
 PUBLISH_STEP_COUNT = 3
 PARTIAL_TAG_CHECK_COUNT = 2
 RELEASE_CONCURRENCY_GROUP = "release-${{ github.ref }}"
@@ -102,7 +131,10 @@ READ_ONLY_ENV_STEPS = frozenset(
         ("light", "Verify public release alignment"),
         ("domain-plan", "Report runnable and explicitly planned suites"),
         ("heavy", "Prepare verified LibreOffice DEB archive"),
-        ("heavy", "Prepare verified LibreOffice RPM archive"),
+        ("build-images", "Prepare verified LibreOffice RPM archive"),
+        ("build-images", "Build, export and verify each selected final image once"),
+        ("final-image", "Load verified final images"),
+        ("final-image", "Run selected final-image suite without a shell"),
         ("heavy", "Install verified Pandoc for document-engine tests"),
         (
             "heavy",
@@ -116,7 +148,12 @@ READ_ONLY_ENV_STEPS = frozenset(
         ("mutation", "Run the reviewed full mutation campaign"),
     }
 )
-READ_ONLY_ID_STEPS = frozenset({("detect", "Select affected domains")})
+READ_ONLY_ID_STEPS = frozenset(
+    {
+        ("detect", "Select affected domains"),
+        ("build-images", "Build, export and verify each selected final image once"),
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -187,6 +224,8 @@ READ_ONLY_WORKFLOW_POLICIES = {
             "python-coverage": 5,
             "domain-plan": 5,
             "heavy": 45,
+            "build-images": FINAL_IMAGE_TIMEOUT_MINUTES,
+            "final-image": FINAL_IMAGE_TIMEOUT_MINUTES,
             "mutation": 30,
             "gate": 5,
         },
@@ -243,6 +282,30 @@ READ_ONLY_WORKFLOW_POLICIES = {
                     "timeout-minutes",
                 }
             ),
+            "build-images": frozenset(
+                {
+                    "if",
+                    "name",
+                    "needs",
+                    "outputs",
+                    "permissions",
+                    "runs-on",
+                    "steps",
+                    "timeout-minutes",
+                }
+            ),
+            "final-image": frozenset(
+                {
+                    "if",
+                    "name",
+                    "needs",
+                    "permissions",
+                    "runs-on",
+                    "steps",
+                    "strategy",
+                    "timeout-minutes",
+                }
+            ),
             "mutation": frozenset(
                 {"name", "needs", "runs-on", "steps", "timeout-minutes"}
             ),
@@ -251,7 +314,9 @@ READ_ONLY_WORKFLOW_POLICIES = {
             ),
         },
         job_conditions={
-            "heavy": "${{ needs.detect.outputs.runnable-domains != '[]' }}",
+            "heavy": "${{ needs.detect.outputs.heavy-domains != '[]' }}",
+            "build-images": "${{ needs.detect.outputs.image-domains != '[]' }}",
+            "final-image": "${{ needs.detect.outputs.image-domains != '[]' }}",
             "gate": "${{ always() }}",
         },
         step_conditions={
@@ -291,32 +356,30 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Save verified LibreOffice DEB archive",
             ): TRUSTED_LIBREOFFICE_DEB_CACHE_WRITE,
             (
-                "heavy",
+                "build-images",
                 "Restore verified LibreOffice RPM archive",
-            ): (
-                "${{ matrix.domain == 'container' || "
-                "startsWith(matrix.domain, 'e2e-') }}"
-            ),
+            ): f"${{{{ {BACKEND_IMAGE_ROLE} }}}}",
             (
-                "heavy",
+                "build-images",
                 "Prepare verified LibreOffice RPM archive",
-            ): (
-                "${{ matrix.domain == 'container' || "
-                "startsWith(matrix.domain, 'e2e-') }}"
-            ),
+            ): f"${{{{ {BACKEND_IMAGE_ROLE} }}}}",
             (
-                "heavy",
+                "build-images",
                 "Save verified LibreOffice RPM archive",
             ): TRUSTED_LIBREOFFICE_RPM_CACHE_WRITE,
+            **{
+                ("build-images", f"Publish the {role} archive to this run"): (
+                    "${{ contains(fromJSON(needs.detect.outputs.image-roles), "
+                    f"'{role}') }}}}"
+                )
+                for role in IMAGE_ARCHIVE_ROLES
+            },
             (
                 "heavy",
-                "Verify preinstalled rootless Podman for container validation",
-            ): (
-                "${{ matrix.domain == 'compose' || matrix.domain == 'container' || "
-                "matrix.domain == 'frontend' || startsWith(matrix.domain, 'e2e-') }}"
-            ),
+                "Verify preinstalled rootless Podman for Compose validation",
+            ): "${{ startsWith(matrix.domain, 'compose-') }}",
             (
-                "heavy",
+                "final-image",
                 "Set up pinned Node for frontend smoke",
             ): "${{ matrix.domain == 'frontend' }}",
             (
@@ -332,18 +395,18 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Set up the pinned Node runtime for Mermaid tests",
             ): "${{ matrix.domain == 'document-engines' }}",
             (
-                "heavy",
+                "final-image",
                 "Set up pinned Node for rootless E2E",
             ): "${{ startsWith(matrix.domain, 'e2e-') }}",
             (
-                "heavy",
+                "final-image",
                 "Bootstrap verified Corepack and pnpm for workspace domains",
             ): (
                 "${{ matrix.domain == 'frontend' || "
                 "startsWith(matrix.domain, 'e2e-') }}"
             ),
             (
-                "heavy",
+                "final-image",
                 "Restore the exact pnpm store cache for workspace domains",
             ): (
                 "${{ matrix.domain == 'frontend' || "
@@ -358,20 +421,29 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Prepare the RustFS test bucket",
             ): "${{ matrix.domain == 'storage-distributed' }}",
             (
-                "heavy",
+                "final-image",
                 "Install the locked E2E browser driver",
             ): "${{ startsWith(matrix.domain, 'e2e-') }}",
+            **{
+                ("final-image", f"Download the {role} archive"): (
+                    f"${{{{ {IMAGE_ARCHIVE_DOMAIN_CONDITIONS[role]} }}}}"
+                )
+                for role in IMAGE_ARCHIVE_ROLES
+            },
             (
-                "heavy",
+                "final-image",
                 "Retain failed E2E evidence",
             ): "${{ failure() && startsWith(matrix.domain, 'e2e-') }}",
             (
-                "heavy",
+                "final-image",
                 "Retain final-image verification evidence",
-            ): "${{ always() && matrix.domain == 'container' }}",
+            ): (
+                "${{ always() && (matrix.domain == 'container' || "
+                "matrix.domain == 'supply-chain') }}"
+            ),
             ("mutation", "Retain mutation evidence"): "${{ always() }}",
         },
-        canonical_digest="19f0a5576914c0ff7f680e7bdffcf773e2f6218872b8287765f09a5fd0021c01",
+        canonical_digest="edf0501162b813342903c38db451a25fd2f909153cdba735f03764d742145c8f",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -607,6 +679,8 @@ def _validate_read_only_job_permissions(
     expected = {
         "light": {"contents": "read", "packages": "read"},
         "heavy": {"contents": "read"},
+        "build-images": {"contents": "read"},
+        "final-image": {"contents": "read"},
     }.get(job_name)
     if expected is not None and job.get("permissions") != expected:
         return [
@@ -852,6 +926,8 @@ def _validate_light_sharding(workflow: Mapping[str, Any]) -> list[str]:
         "python-coverage",
         "domain-plan",
         "heavy",
+        "build-images",
+        "final-image",
         "mutation",
     ]:
         errors.append(
@@ -967,28 +1043,171 @@ def _validate_light_sharding(workflow: Mapping[str, Any]) -> list[str]:
 def _validate_heavy_matrix(workflow: Mapping[str, Any]) -> list[str]:
     """Bound heavy-domain parallelism and share one dependency cache entry."""
     jobs = _mapping(workflow.get("jobs")) or {}
-    heavy = _mapping(jobs.get("heavy")) or {}
     errors = []
-    if heavy.get("strategy") != {
-        "fail-fast": False,
-        "max-parallel": HEAVY_MAX_PARALLEL,
-        "matrix": {"domain": "${{ fromJSON(needs.detect.outputs.runnable-domains) }}"},
-    }:
-        errors.append(
-            "heavy domains must run the reviewed matrix with max-parallel "
-            f"{HEAVY_MAX_PARALLEL}"
-        )
-    setups = [
-        step
-        for step in _job_steps(workflow, "heavy")
-        if step.get("name") == "Set up uv with a lock-keyed cache"
-    ]
-    options = _mapping(setups[0].get("with")) if len(setups) == 1 else None
-    if options is None or options.get("cache-suffix") != HEAVY_UV_CACHE_SUFFIX:
-        errors.append(
-            f"heavy domains must share the {HEAVY_UV_CACHE_SUFFIX!r} uv cache suffix"
-        )
+    for job_name, output in (
+        ("heavy", "heavy-domains"),
+        ("final-image", "image-domains"),
+    ):
+        job = _mapping(jobs.get(job_name)) or {}
+        if job.get("strategy") != {
+            "fail-fast": False,
+            "max-parallel": HEAVY_MAX_PARALLEL,
+            "matrix": {"domain": f"${{{{ fromJSON(needs.detect.outputs.{output}) }}}}"},
+        }:
+            errors.append(
+                "heavy domains must run the reviewed matrix with max-parallel "
+                f"{HEAVY_MAX_PARALLEL}"
+            )
+    for job_name in ("heavy", "build-images", "final-image"):
+        setups = [
+            step
+            for step in _job_steps(workflow, job_name)
+            if step.get("name") == "Set up uv with a lock-keyed cache"
+        ]
+        options = _mapping(setups[0].get("with")) if len(setups) == 1 else None
+        if options is None or options.get("cache-suffix") != HEAVY_UV_CACHE_SUFFIX:
+            errors.append(
+                f"heavy domains must share the {HEAVY_UV_CACHE_SUFFIX!r} uv cache suffix"
+            )
     return errors
+
+
+def _validate_final_image_transfer(workflow: Mapping[str, Any]) -> list[str]:
+    """Bind every final-image consumer to the archives built once in this run."""
+    jobs = _mapping(workflow.get("jobs")) or {}
+    build = _mapping(jobs.get("build-images")) or {}
+    consumer = _mapping(jobs.get("final-image")) or {}
+    errors = []
+    if build.get("needs") != "detect" or consumer.get("needs") != [
+        "detect",
+        "build-images",
+    ]:
+        errors.append("final-image domains must consume the run's single image build")
+    if build.get("outputs") != {
+        "archive-attempt": "${{ github.run_attempt }}",
+        **{
+            f"{role}-image-id": f"${{{{ steps.build.outputs.{role}-image-id }}}}"
+            for role in IMAGE_ARCHIVE_ROLES
+        },
+    }:
+        errors.append("the image build must publish exactly the built image IDs")
+    contracts: list[tuple[str, str, str, object]] = [
+        (
+            "build-images",
+            "Build, export and verify each selected final image once",
+            "env",
+            {
+                "IMAGE_ROLES": "${{ needs.detect.outputs.image-roles }}",
+                "MARKWEAVE_TOOLCHAIN_CACHE_DIRECTORY": (
+                    "${{ runner.temp }}/markweave-toolchain"
+                ),
+            },
+        ),
+        (
+            "final-image",
+            "Load verified final images",
+            "env",
+            {
+                "BACKEND_IMAGE_ID": "${{ needs.build-images.outputs.backend-image-id }}",
+                "CI_DOMAIN": "${{ matrix.domain }}",
+                "FRONTEND_IMAGE_ID": (
+                    "${{ needs.build-images.outputs.frontend-image-id }}"
+                ),
+                "REVERSE_ATTEMPT_IMAGE_ID": (
+                    "${{ needs.build-images.outputs.reverse-attempt-image-id }}"
+                ),
+            },
+        ),
+    ]
+    for role in IMAGE_ARCHIVE_ROLES:
+        contracts.extend(
+            (
+                (
+                    "build-images",
+                    f"Publish the {role} archive to this run",
+                    "with",
+                    {
+                        "name": (
+                            f"final-image-{role}-${{{{ github.run_id }}}}-"
+                            "${{ github.run_attempt }}"
+                        ),
+                        "path": f"${{{{ runner.temp }}}}/final-images/{role}.oci.tar",
+                        "compression-level": 0,
+                        "if-no-files-found": "error",
+                        "retention-days": 1,
+                    },
+                ),
+                (
+                    "final-image",
+                    f"Download the {role} archive",
+                    "with",
+                    {
+                        "name": (
+                            f"final-image-{role}-${{{{ github.run_id }}}}-"
+                            "${{ needs.build-images.outputs.archive-attempt }}"
+                        ),
+                        "path": "${{ runner.temp }}/final-images",
+                    },
+                ),
+            )
+        )
+    for job_name, step_name, field, expected in contracts:
+        matches = [
+            step
+            for step in _job_steps(workflow, job_name)
+            if step.get("name") == step_name
+        ]
+        if len(matches) != 1 or matches[0].get(field) != expected:
+            errors.append(f"final-image transfer contract mismatch: {step_name}")
+    consumer_steps = [step.get("name") for step in _job_steps(workflow, "final-image")]
+    loader = "Load verified final images"
+    runner = "Run selected final-image suite without a shell"
+    downloads = [f"Download the {role} archive" for role in IMAGE_ARCHIVE_ROLES]
+    if (
+        loader not in consumer_steps
+        or runner not in consumer_steps
+        or any(name not in consumer_steps for name in downloads)
+        or max(consumer_steps.index(name) for name in downloads)
+        > consumer_steps.index(loader)
+        or consumer_steps.index(loader) > consumer_steps.index(runner)
+    ):
+        errors.append("final images must be verified and loaded before any suite runs")
+    return errors
+
+
+def _validate_gate_bindings(workflow: Mapping[str, Any]) -> list[str]:
+    """Bind the final gate to the actual job results and domain partitions."""
+    gate_steps = list(_job_steps(workflow, "gate"))
+    expected = {
+        "BUILD_IMAGES_RESULT": "${{ needs.build-images.result }}",
+        "DETECT_RESULT": "${{ needs.detect.result }}",
+        "DOMAIN_PLAN_RESULT": "${{ needs.domain-plan.result }}",
+        "FINAL_IMAGE_RESULT": "${{ needs.final-image.result }}",
+        "HEAVY_DOMAINS": "${{ needs.detect.outputs.heavy-domains }}",
+        "HEAVY_RESULT": "${{ needs.heavy.result }}",
+        "IMAGE_DOMAINS": "${{ needs.detect.outputs.image-domains }}",
+        "LIGHT_RESULT": "${{ needs.light.result }}",
+        "MUTATION_RESULT": "${{ needs.mutation.result }}",
+        "PYTHON_TESTS_RESULT": "${{ needs.python-tests.result }}",
+        "PYTHON_COVERAGE_RESULT": "${{ needs.python-coverage.result }}",
+        "RUNNABLE_DOMAINS": "${{ needs.detect.outputs.runnable-domains }}",
+    }
+    if len(gate_steps) != 1 or gate_steps[0].get("env") != expected:
+        return ["final gate must bind every job result and domain partition"]
+    detect = _mapping((_mapping(workflow.get("jobs")) or {}).get("detect")) or {}
+    if detect.get("outputs") != {
+        name: f"${{{{ steps.select.outputs.{name} }}}}"
+        for name in (
+            "selected-domains",
+            "planned-domains",
+            "runnable-domains",
+            "heavy-domains",
+            "image-domains",
+            "image-roles",
+        )
+    }:
+        return ["domain detection must publish the reviewed partitions"]
+    return []
 
 
 def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
@@ -1058,15 +1277,36 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             "pnpm --filter @markweave/web run build\n"
             "pnpm --filter @markweave/web run test:production\n"
         ),
-        ("heavy", "Verify preinstalled rootless Podman for container validation"): (
-            "set -euo pipefail\n"
-            "podman_version=\"$(podman version --format '{{.Client.Version}}')\"\n"
-            '[[ "$podman_version" =~ ^([0-9]+)\\.[0-9]+\\.[0-9]+ ]]\n'
-            "(( BASH_REMATCH[1] >= 4 ))\n"
-            'echo "Using preinstalled Podman $podman_version"\n'
-            "podman info --format '{{.Host.Security.Rootless}}' | grep -Fx true\n"
+        **dict.fromkeys(
+            (
+                ("heavy", "Verify preinstalled rootless Podman for Compose validation"),
+                (
+                    "build-images",
+                    "Verify preinstalled rootless Podman for image builds",
+                ),
+                (
+                    "final-image",
+                    "Verify preinstalled rootless Podman for container validation",
+                ),
+            ),
+            PODMAN_ASSERTION,
         ),
-        ("heavy", "Install the locked E2E browser driver"): (
+        ("build-images", "Build, export and verify each selected final image once"): (
+            "uv run python -m scripts.container.ci_images build "
+            '--roles "$IMAGE_ROLES" --output-directory "$RUNNER_TEMP/final-images" '
+            '--github-output "$GITHUB_OUTPUT"'
+        ),
+        ("final-image", "Load verified final images"): (
+            "uv run python -m scripts.container.ci_images load "
+            '--domain "$CI_DOMAIN" --archive-directory "$RUNNER_TEMP/final-images" '
+            '--backend-image-id "$BACKEND_IMAGE_ID" '
+            '--frontend-image-id "$FRONTEND_IMAGE_ID" '
+            '--reverse-attempt-image-id "$REVERSE_ATTEMPT_IMAGE_ID"'
+        ),
+        ("final-image", "Run selected final-image suite without a shell"): (
+            'uv run python -m scripts.ci.run_domain "$CI_DOMAIN"'
+        ),
+        ("final-image", "Install the locked E2E browser driver"): (
             "pnpm install --frozen-lockfile --ignore-scripts "
             "--filter md-converter-web-tests"
         ),
@@ -1082,9 +1322,20 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
         ("gate", "Require every implemented CI stage"): (
             'set -euo pipefail\n[[ "$DETECT_RESULT" == "success" ]]\n'
             '[[ "$DOMAIN_PLAN_RESULT" == "success" ]]\n'
-            'if [[ "$RUNNABLE_DOMAINS" == "[]" ]]; then\n'
+            "jq --exit-status --null-input \\\n"
+            '  --argjson heavy "$HEAVY_DOMAINS" --argjson image "$IMAGE_DOMAINS" \\\n'
+            '  --argjson runnable "$RUNNABLE_DOMAINS" \\\n'
+            "  '(($heavy + $image) | sort) == ($runnable | sort) and "
+            "($heavy - $image) == $heavy' \\\n"
+            "  >/dev/null\n"
+            'if [[ "$HEAVY_DOMAINS" == "[]" ]]; then\n'
             '  [[ "$HEAVY_RESULT" == "skipped" ]]\nelse\n'
             '  [[ "$HEAVY_RESULT" == "success" ]]\nfi\n'
+            'if [[ "$IMAGE_DOMAINS" == "[]" ]]; then\n'
+            '  [[ "$BUILD_IMAGES_RESULT" == "skipped" ]]\n'
+            '  [[ "$FINAL_IMAGE_RESULT" == "skipped" ]]\nelse\n'
+            '  [[ "$BUILD_IMAGES_RESULT" == "success" ]]\n'
+            '  [[ "$FINAL_IMAGE_RESULT" == "success" ]]\nfi\n'
             '[[ "$LIGHT_RESULT" == "success" ]]\n'
             '[[ "$MUTATION_RESULT" == "success" ]]\n'
             '[[ "$PYTHON_TESTS_RESULT" == "success" ]]\n'
@@ -1101,6 +1352,8 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             errors.append(f"missing required workflow command: {expected_command!r}")
 
     errors.extend(_validate_heavy_matrix(workflow))
+    errors.extend(_validate_final_image_transfer(workflow))
+    errors.extend(_validate_gate_bindings(workflow))
     errors.extend(_validate_no_legacy_browser_command(workflow))
     errors.extend(_validate_chrome_downgrade_install(workflow))
     errors.extend(_validate_public_alignment_credentials(workflow))
@@ -1111,20 +1364,19 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             "${{ github.event_name == 'pull_request' || "
             "github.event_name == 'merge_group' }}"
         ),
-        ("heavy", "Verify preinstalled rootless Podman for container validation"): (
-            "${{ matrix.domain == 'compose' || matrix.domain == 'container' || "
-            "matrix.domain == 'frontend' || startsWith(matrix.domain, 'e2e-') }}"
+        ("heavy", "Verify preinstalled rootless Podman for Compose validation"): (
+            "${{ startsWith(matrix.domain, 'compose-') }}"
         ),
-        ("heavy", "Set up pinned Node for frontend smoke"): (
+        ("final-image", "Set up pinned Node for frontend smoke"): (
             "${{ matrix.domain == 'frontend' }}"
         ),
         ("heavy", "Set up the pinned Node runtime for Mermaid tests"): (
             "${{ matrix.domain == 'document-engines' }}"
         ),
-        ("heavy", "Set up pinned Node for rootless E2E"): (
+        ("final-image", "Set up pinned Node for rootless E2E"): (
             "${{ startsWith(matrix.domain, 'e2e-') }}"
         ),
-        ("heavy", "Retain failed E2E evidence"): (
+        ("final-image", "Retain failed E2E evidence"): (
             "${{ failure() && startsWith(matrix.domain, 'e2e-') }}"
         ),
     }
@@ -1141,7 +1393,7 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
 
     frontend_node_steps = [
         step
-        for step in _job_steps(workflow, "heavy")
+        for step in _job_steps(workflow, "final-image")
         if step.get("name") == "Set up pinned Node for frontend smoke"
     ]
     frontend_node_options = (
@@ -1163,14 +1415,14 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
 
     evidence_steps = [
         step
-        for step in _job_steps(workflow, "heavy")
+        for step in _job_steps(workflow, "final-image")
         if step.get("name") == "Retain failed E2E evidence"
     ]
     evidence_options = (
         _mapping(evidence_steps[0].get("with")) if len(evidence_steps) == 1 else None
     )
     expected_evidence_path = (
-        "artifacts/e2e/${{ matrix.domain == 'e2e-standalone' && "
+        "artifacts/e2e/${{ startsWith(matrix.domain, 'e2e-standalone-') && "
         "'standalone' || 'distributed' }}"
     )
     if (
@@ -1193,6 +1445,8 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
         False,
         False,
         TRUSTED_CACHE_WRITE.removeprefix("save-cache: "),
+        False,
+        False,
     ]:
         errors.append("cache writes must be limited to trusted pushes on main")
     libreoffice_cache_writes = [
@@ -2406,6 +2660,53 @@ def validate_registry_text(text: str) -> list[str]:
     return []
 
 
+def final_image_commands() -> dict[str, list[str]]:
+    """Return the reviewed commands of every domain that consumes built images."""
+    commands = {
+        "container": ["bash", "scripts/container/run-ci.sh"],
+        "frontend": [
+            "bash",
+            "web/scripts/run-rootless-smoke.sh",
+            ROLE_IMAGES["frontend"],
+            "--existing",
+        ],
+        "supply-chain": ["bash", "scripts/container/run-ci-supply-chain.sh"],
+    }
+    for domain, (profile, shard) in E2E_DOMAINS.items():
+        commands[domain] = [
+            "env",
+            f"MARKWEAVE_E2E_SHARD={shard}",
+            f"MARKWEAVE_E2E_LOCAL_IMAGE={ROLE_IMAGES['backend']}",
+            f"MARKWEAVE_E2E_LOCAL_FRONTEND_IMAGE={ROLE_IMAGES['frontend']}",
+            "MARKWEAVE_E2E_LOCAL_REVERSE_ATTEMPT_IMAGE="
+            f"{ROLE_IMAGES['reverse-attempt']}",
+            "bash",
+            "scripts/e2e/run.sh",
+            profile,
+        ]
+    return commands
+
+
+def validate_final_image_registry(text: str) -> list[str]:
+    """Require every image consumer to run its reviewed command on loaded images."""
+    try:
+        data: Any = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, dict):
+        return []
+    errors = []
+    for domain, command in final_image_commands().items():
+        entry = data.get(domain)
+        if (
+            not isinstance(entry, dict)
+            or entry.get("status") != "active"
+            or entry.get("command") != command
+        ):
+            errors.append(f"final-image domain {domain} must run its reviewed command")
+    return errors
+
+
 def validate_workflow_files(paths: Iterable[Path]) -> list[str]:
     """Validate every committed workflow against its filename-specific policy."""
     errors: list[str] = []
@@ -2488,7 +2789,14 @@ def main() -> int:
         f"missing allowlisted workflow: {workflow_name}"
         for workflow_name in sorted(missing_workflows)
     )
-    errors.extend(validate_registry_text(registry.read_text(encoding="utf-8")))
+    registry_text = registry.read_text(encoding="utf-8")
+    errors.extend(validate_registry_text(registry_text))
+    errors.extend(validate_final_image_registry(registry_text))
+    errors.extend(
+        e2e_shards.validate_files(
+            [root / e2e_shards.RUN_SCRIPT], expected_count=E2E_SHARD_COUNT
+        )
+    )
     errors.extend(validate_python_imports(discover_python_sources(root)))
     try:
         load_registry(registry)

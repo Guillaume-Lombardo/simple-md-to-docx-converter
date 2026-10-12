@@ -18,6 +18,7 @@ from scripts.ci.validate_ci import (
     main,
     validate_container_publish_pair_text,
     validate_container_release_workflow_text,
+    validate_final_image_registry,
     validate_production_release_workflow_text,
     validate_python_imports,
     validate_registry_text,
@@ -247,26 +248,57 @@ def test_approved_complete_suite_schedule_and_parallelism_are_fixed() -> None:
     assert workflow["jobs"]["light"]["timeout-minutes"] == 20
     assert workflow["jobs"]["heavy"]["timeout-minutes"] == 45
     assert workflow["jobs"]["heavy"]["strategy"]["max-parallel"] == 8
+    assert workflow["jobs"]["build-images"]["timeout-minutes"] == 30
+    assert workflow["jobs"]["final-image"]["timeout-minutes"] == 30
+    assert workflow["jobs"]["final-image"]["strategy"]["max-parallel"] == 8
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
     ("needle", "replacement", "message"),
     [
-        (
-            "      max-parallel: 8\n      matrix:\n        domain:",
-            "      max-parallel: 2\n      matrix:\n        domain:",
-            "heavy domains must run the reviewed matrix with max-parallel 8",
+        *(
+            (
+                "      max-parallel: 8\n      matrix:\n        domain: "
+                f"${{{{ fromJSON(needs.detect.outputs.{output}) }}}}",
+                "      max-parallel: 2\n      matrix:\n        domain: "
+                f"${{{{ fromJSON(needs.detect.outputs.{output}) }}}}",
+                "heavy domains must run the reviewed matrix with max-parallel 8",
+            )
+            for output in ("heavy-domains", "image-domains")
         ),
-        (
-            "          cache-suffix: py314-heavy",
-            "          cache-suffix: py314-${{ matrix.domain }}",
-            "heavy domains must share the 'py314-heavy' uv cache suffix",
+        *(
+            (
+                f"          cache-suffix: py314-heavy\n{following}",
+                f"          cache-suffix: py314-${{{{ matrix.domain }}}}\n{following}",
+                "heavy domains must share the 'py314-heavy' uv cache suffix",
+            )
+            for following in (
+                "          save-cache: ${{ github.event_name == 'push'",
+                "          save-cache: false\n      - name: Synchronize locked "
+                "dependencies\n        run: uv sync --locked --all-groups\n"
+                "      - name: Restore verified LibreOffice RPM archive",
+                "          save-cache: false\n      - name: Synchronize locked "
+                "dependencies\n        run: uv sync --locked --all-groups\n"
+                "      - name: Verify preinstalled rootless Podman for container",
+            )
         ),
-        (
-            "          (( BASH_REMATCH[1] >= 4 ))\n",
-            "          sudo apt-get update\n          sudo apt-get install --yes podman\n",
-            "missing required workflow command",
+        *(
+            (
+                f"      - name: {step}\n        run: |\n          set -euo pipefail\n"
+                '          podman_version="$(podman version --format '
+                "'{{.Client.Version}}')\"\n"
+                '          [[ "$podman_version" =~ ^([0-9]+)\\.[0-9]+\\.[0-9]+ ]]\n'
+                "          (( BASH_REMATCH[1] >= 4 ))\n",
+                f"      - name: {step}\n        run: |\n          set -euo pipefail\n"
+                "          sudo apt-get update\n          sudo apt-get install --yes "
+                "podman\n",
+                "missing required workflow command",
+            )
+            for step in (
+                "Verify preinstalled rootless Podman for image builds",
+                "Verify preinstalled rootless Podman for container validation",
+            )
         ),
     ],
 )
@@ -285,15 +317,17 @@ def test_heavy_jobs_assert_the_preinstalled_podman_instead_of_installing_it() ->
         Path(".github/workflows/ci.yml").read_text(encoding="utf-8"),
         Loader=WorkflowLoader,  # noqa: S506 - no Python object constructors
     )
-    step = next(
-        step
-        for step in workflow["jobs"]["heavy"]["steps"]
-        if step["name"]
-        == "Verify preinstalled rootless Podman for container validation"
-    )
-    assert "apt-get" not in step["run"]
-    assert "podman version --format '{{.Client.Version}}'" in step["run"]
-    assert "grep -Fx true" in step["run"]
+    for job, name in (
+        ("heavy", "Verify preinstalled rootless Podman for Compose validation"),
+        ("build-images", "Verify preinstalled rootless Podman for image builds"),
+        ("final-image", "Verify preinstalled rootless Podman for container validation"),
+    ):
+        step = next(
+            step for step in workflow["jobs"][job]["steps"] if step["name"] == name
+        )
+        assert "apt-get" not in step["run"]
+        assert "podman version --format '{{.Client.Version}}'" in step["run"]
+        assert "grep -Fx true" in step["run"]
 
 
 @pytest.mark.unit
@@ -305,7 +339,7 @@ def test_ci_upload_artifact_pin_and_comment_are_canonical() -> None:
         for line in workflow.splitlines()
         if "uses: actions/upload-artifact@" in line
     ]
-    assert upload_lines == [f"uses: {UPLOAD_ARTIFACT_PIN}"] * 5
+    assert upload_lines == [f"uses: {UPLOAD_ARTIFACT_PIN}"] * 8
     assert "archive: false" not in workflow
 
     drifted = workflow.replace(
@@ -323,7 +357,7 @@ def test_ci_upload_artifact_pin_and_comment_are_canonical() -> None:
 def test_ci_uses_only_github_hosted_runners() -> None:
     """The upload-artifact v7 runner floor is delegated to GitHub-hosted images."""
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
-    assert workflow.count("runs-on: ubuntu-24.04") == 9
+    assert workflow.count("runs-on: ubuntu-24.04") == 11
     assert "self-hosted" not in workflow
 
 
@@ -443,15 +477,12 @@ def test_validator_rejects_stale_legacy_browser_workflow() -> None:
 @pytest.mark.unit
 def test_e2e_matrix_installs_rootless_runtime_and_retains_only_failures() -> None:
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
-    assert (
-        "matrix.domain == 'compose' || matrix.domain == 'container' || "
-        "matrix.domain == 'frontend' || startsWith(matrix.domain, 'e2e-')" in workflow
-    )
+    assert "if: ${{ startsWith(matrix.domain, 'compose-') }}" in workflow
     assert "matrix.domain == 'document-engines'" in workflow
     assert "Set up pinned Node for rootless E2E" in workflow
     assert "failure() && startsWith(matrix.domain, 'e2e-')" in workflow
     assert (
-        "artifacts/e2e/${{ matrix.domain == 'e2e-standalone' "
+        "artifacts/e2e/${{ startsWith(matrix.domain, 'e2e-standalone-') "
         "&& 'standalone' || 'distributed' }}" in workflow
     )
 
@@ -544,10 +575,12 @@ def test_validator_rejects_broad_libreoffice_cache_writes() -> None:
     """Toolchain archives must never be written by pull requests or forks."""
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
     weakened = workflow.replace(
-        "matrix.domain == 'container' && github.event_name == 'push'",
+        "contains(fromJSON(needs.detect.outputs.image-roles), 'backend') && "
+        "github.event_name == 'push'",
         "github.event_name != 'pull_request'",
         1,
     )
+    assert weakened != workflow
 
     assert "LibreOffice cache writes must be limited to trusted main domains" in (
         validate_workflow_text(weakened)
@@ -555,16 +588,55 @@ def test_validator_rejects_broad_libreoffice_cache_writes() -> None:
 
 
 @pytest.mark.unit
-def test_gate_rejects_skipped_active_domain() -> None:
+@pytest.mark.parametrize(
+    ("needle", "replacement", "message"),
+    [
+        (
+            'if [[ "$HEAVY_DOMAINS" == "[]" ]]; then',
+            'if [[ "$HEAVY_RESULT" == "skipped" ]]; then',
+            "HEAVY_DOMAINS",
+        ),
+        (
+            'if [[ "$IMAGE_DOMAINS" == "[]" ]]; then',
+            'if [[ "$BUILD_IMAGES_RESULT" == "skipped" ]]; then',
+            "IMAGE_DOMAINS",
+        ),
+        (
+            '  [[ "$FINAL_IMAGE_RESULT" == "success" ]]\n',
+            "",
+            "FINAL_IMAGE_RESULT",
+        ),
+        (
+            '  [[ "$BUILD_IMAGES_RESULT" == "success" ]]\n',
+            "",
+            "BUILD_IMAGES_RESULT",
+        ),
+        (
+            "'(($heavy + $image) | sort) == ($runnable | sort) and "
+            "($heavy - $image) == $heavy'",
+            "'true'",
+            "RUNNABLE_DOMAINS",
+        ),
+        (
+            "FINAL_IMAGE_RESULT: ${{ needs.final-image.result }}",
+            "FINAL_IMAGE_RESULT: success",
+            "final gate must bind every job result and domain partition",
+        ),
+        (
+            "IMAGE_DOMAINS: ${{ needs.detect.outputs.image-domains }}",
+            'IMAGE_DOMAINS: "[]"',
+            "final gate must bind every job result and domain partition",
+        ),
+    ],
+)
+def test_gate_rejects_skipped_active_domain(
+    needle: str, replacement: str, message: str
+) -> None:
     """A selected active domain cannot be accepted as planned or skipped by the gate."""
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
-    weakened = workflow.replace(
-        'if [[ "$RUNNABLE_DOMAINS" == "[]" ]]; then',
-        'if [[ "$HEAVY_RESULT" == "skipped" ]]; then',
-    )
-    assert any(
-        "RUNNABLE_DOMAINS" in error for error in validate_workflow_text(weakened)
-    )
+    assert workflow.count(needle) == 1
+    weakened = workflow.replace(needle, replacement)
+    assert any(message in error for error in validate_workflow_text(weakened))
 
 
 @pytest.mark.unit
@@ -2173,8 +2245,15 @@ def test_python_source_discovery_excludes_installed_package_managers(
             "PYTHON_COVERAGE_RESULT: success",
         ),
         (
-            "needs: [detect, light, python-tests, python-coverage, domain-plan, heavy, mutation]",
+            "needs: [detect, light, python-tests, python-coverage, domain-plan, heavy, "
+            "build-images, final-image, mutation]",
             "needs: [detect, light, domain-plan, heavy]",
+        ),
+        (
+            "needs: [detect, light, python-tests, python-coverage, domain-plan, heavy, "
+            "build-images, final-image, mutation]",
+            "needs: [detect, light, python-tests, python-coverage, domain-plan, heavy, "
+            "mutation]",
         ),
     ],
 )
@@ -2251,3 +2330,92 @@ def test_split_jobs_reuse_dependencies_and_only_trusted_main_writes_compiler_cac
     assert "github.event_name == 'push'" in save["if"]
     assert "github.ref == 'refs/heads/main'" in save["if"]
     assert validate_workflow_text(text.replace(save["if"], "${{ always() }}"))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("needle", "replacement", "message"),
+    [
+        (
+            "path: ${{ runner.temp }}/final-images/backend.oci.tar\n"
+            "          compression-level: 0",
+            "path: ${{ runner.temp }}/final-images/backend.oci.tar\n"
+            "          compression-level: 6",
+            "final-image transfer contract mismatch: Publish the backend archive",
+        ),
+        (
+            "final-images/frontend.oci.tar\n          compression-level: 0\n"
+            "          if-no-files-found: error\n          retention-days: 1",
+            "final-images/frontend.oci.tar\n          compression-level: 0\n"
+            "          if-no-files-found: error\n          retention-days: 30",
+            "final-image transfer contract mismatch: Publish the frontend archive",
+        ),
+        (
+            "name: final-image-reverse-attempt-${{ github.run_id }}-"
+            "${{ needs.build-images.outputs.archive-attempt }}",
+            "name: final-image-reverse-attempt-${{ github.run_id }}-"
+            "${{ github.run_attempt }}",
+            "final-image transfer contract mismatch: Download the reverse-attempt",
+        ),
+        (
+            "BACKEND_IMAGE_ID: ${{ needs.build-images.outputs.backend-image-id }}",
+            "BACKEND_IMAGE_ID: ${{ needs.build-images.outputs.frontend-image-id }}",
+            "final-image transfer contract mismatch: Load verified final images",
+        ),
+        (
+            "backend-image-id: ${{ steps.build.outputs.backend-image-id }}",
+            "backend-image-id: ${{ steps.build.outputs.frontend-image-id }}",
+            "the image build must publish exactly the built image IDs",
+        ),
+        (
+            "    needs: [detect, build-images]\n",
+            "    needs: detect\n",
+            "final-image domains must consume the run's single image build",
+        ),
+        (
+            "      - name: Load verified final images\n",
+            "      - name: Load unverified final images\n",
+            "final images must be verified and loaded before any suite runs",
+        ),
+        (
+            "IMAGE_ROLES: ${{ needs.detect.outputs.image-roles }}",
+            "IMAGE_ROLES: '[\"backend\"]'",
+            "final-image transfer contract mismatch: Build, export and verify",
+        ),
+        (
+            "      image-roles: ${{ steps.select.outputs.image-roles }}\n",
+            "",
+            "domain detection must publish the reviewed partitions",
+        ),
+    ],
+)
+def test_final_images_are_built_once_and_loaded_only_by_verified_id(
+    needle: str, replacement: str, message: str
+) -> None:
+    """Consumers cannot rebind, substitute, or skip the single verified build."""
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert workflow.count(needle) == 1
+    errors = validate_workflow_text(workflow.replace(needle, replacement))
+    assert any(message in error for error in errors), errors
+
+
+@pytest.mark.unit
+def test_final_image_domains_run_their_reviewed_commands() -> None:
+    """Every image consumer runs exactly its reviewed command on loaded images."""
+    text = Path(".github/ci/domains.json").read_text(encoding="utf-8")
+    assert validate_final_image_registry(text) == []
+    registry = json.loads(text)
+    registry["e2e-standalone-2"]["command"] = [
+        "bash",
+        "scripts/e2e/run.sh",
+        "standalone",
+    ]
+    registry["frontend"]["command"] = ["bash", "web/scripts/run-rootless-smoke.sh"]
+    registry["supply-chain"]["status"] = "planned"
+    assert validate_final_image_registry(json.dumps(registry)) == [
+        "final-image domain frontend must run its reviewed command",
+        "final-image domain supply-chain must run its reviewed command",
+        "final-image domain e2e-standalone-2 must run its reviewed command",
+    ]
+    assert validate_final_image_registry("{") == []
+    assert validate_final_image_registry("[]") == []

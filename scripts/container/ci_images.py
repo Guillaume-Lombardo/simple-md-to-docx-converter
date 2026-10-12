@@ -1,0 +1,300 @@
+"""Build the final CI images once and load them elsewhere only by verified ID.
+
+`CI / build images` builds each required image role once per workflow run,
+exports it with `podman save --format oci-archive`, verifies that the archive's
+image configuration digest is the built image ID, and publishes that ID as a job
+output. Every consumer job downloads only the archives its domain needs and,
+before tagging anything, requires the archive configuration digest, the image
+ID reported by `podman load`, and the ID of the tagged image to equal the build
+output. A missing, renamed, substituted, or partially loaded archive fails
+closed.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from scripts.ci.select_domains import IMAGE_DOMAIN_ROLES, IMAGE_ROLES
+from scripts.container.integrity import IntegrityError, oci_identity
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping, Sequence
+
+ROLE_IMAGES: Mapping[str, str] = {
+    "backend": "localhost/md-converter:ci",
+    "frontend": "localhost/md-converter-web:ci",
+    "reverse-attempt": "localhost/md-converter-reverse-attempt:ci",
+}
+ROLE_CONTAINERFILES: Mapping[str, str] = {
+    "backend": "Containerfile",
+    "frontend": "web/Containerfile",
+    "reverse-attempt": "containers/reverse-attempt/Containerfile",
+}
+IMAGE_ID = re.compile(r"[0-9a-f]{64}")
+EXPECTED_IMAGE_ID = re.compile(r"sha256:([0-9a-f]{64})")
+LOADED_IMAGE_LINE = re.compile(r"^Loaded image(?:\(s\))?:\s*(.+)$")
+LOADED_REFERENCE = re.compile(r"(?:sha256:)?([0-9a-f]{64})")
+
+type Runner = Callable[..., subprocess.CompletedProcess[str]]
+
+
+class ImageTransferError(RuntimeError):
+    """Raised when a final image cannot be built, exported, or loaded exactly."""
+
+
+def archive_name(role: str) -> str:
+    """Return the archive file name that carries one image role."""
+    if role not in ROLE_IMAGES:
+        raise ImageTransferError(f"unknown image role: {role!r}")
+    return f"{role}.oci.tar"
+
+
+def parse_roles(text: str) -> tuple[str, ...]:
+    """Parse the detector's JSON role list into canonical build order."""
+    try:
+        value: Any = json.loads(text)
+    except json.JSONDecodeError as error:
+        raise ImageTransferError("image roles must be a JSON array") from error
+    if (
+        not isinstance(value, list)
+        or not value
+        or not all(isinstance(role, str) for role in value)
+    ):
+        raise ImageTransferError("image roles must be a non-empty JSON string array")
+    unknown = sorted(set(value).difference(ROLE_IMAGES))
+    if unknown:
+        raise ImageTransferError(f"unknown image roles: {unknown!r}")
+    if len(set(value)) != len(value):
+        raise ImageTransferError("image roles must not repeat")
+    return tuple(role for role in IMAGE_ROLES if role in value)
+
+
+def _run(runner: Runner, arguments: Sequence[str]) -> str:
+    completed = runner(list(arguments), check=False, capture_output=True, text=True)
+    if completed.returncode != 0:
+        raise ImageTransferError(
+            f"command failed with status {completed.returncode}: "
+            f"{' '.join(arguments[:3])}\n{completed.stderr.strip()}"
+        )
+    return completed.stdout
+
+
+def _stream(runner: Runner, arguments: Sequence[str]) -> None:
+    completed = runner(list(arguments), check=False)
+    if completed.returncode != 0:
+        raise ImageTransferError(
+            f"command failed with status {completed.returncode}: "
+            f"{' '.join(arguments[:3])}"
+        )
+
+
+def _image_id(runner: Runner, reference: str) -> str:
+    image_id = _run(
+        runner, ["podman", "image", "inspect", reference, "--format", "{{.Id}}"]
+    ).strip()
+    if IMAGE_ID.fullmatch(image_id) is None:
+        raise ImageTransferError(f"image {reference} has no unambiguous image ID")
+    return image_id
+
+
+def _require_rootless(runner: Runner) -> None:
+    rootless = _run(
+        runner, ["podman", "info", "--format", "{{.Host.Security.Rootless}}"]
+    ).strip()
+    if rootless != "true":
+        raise ImageTransferError("final images must use a rootless Podman runtime")
+
+
+def _verified_archive_id(archive: Path, expected_id: str) -> None:
+    try:
+        _manifest, config = oci_identity(archive)
+    except IntegrityError as error:
+        raise ImageTransferError(f"{archive.name}: {error}") from error
+    if config != f"sha256:{expected_id}":
+        raise ImageTransferError(
+            f"{archive.name}: archive image configuration {config} does not match "
+            f"the expected image ID sha256:{expected_id}"
+        )
+
+
+def _build_command(role: str, source_date_epoch: str) -> list[str]:
+    image = ROLE_IMAGES[role]
+    if role == "backend":
+        return ["bash", "scripts/container/build.sh", image]
+    if role == "reverse-attempt":
+        return ["bash", "scripts/container/build-reverse-attempt.sh", image]
+    return ["bash", "scripts/container/build-frontend.sh", image, source_date_epoch]
+
+
+def build(
+    roles: Sequence[str],
+    output_directory: Path,
+    github_output: Path,
+    *,
+    runner: Runner = subprocess.run,
+    clock: Callable[[], float] = time.monotonic,
+) -> dict[str, str]:
+    """Build each role once, export it, and publish its verified image ID."""
+    if output_directory.exists() or output_directory.is_symlink():
+        raise ImageTransferError("the archive directory must not already exist")
+    output_directory.mkdir(mode=0o700, parents=False)
+    _require_rootless(runner)
+    source_date_epoch = _run(runner, ["git", "show", "-s", "--format=%ct", "HEAD"])
+    source_date_epoch = source_date_epoch.strip()
+    if not source_date_epoch.isdecimal():
+        raise ImageTransferError("the reviewed commit has no build timestamp")
+    _stream(
+        runner,
+        [
+            "bash",
+            "scripts/container/pull-base-images.sh",
+            *(ROLE_CONTAINERFILES[role] for role in roles),
+        ],
+    )
+    identities: dict[str, str] = {}
+    for role in roles:
+        started = clock()
+        _stream(runner, _build_command(role, source_date_epoch))
+        built = clock()
+        image_id = _image_id(runner, ROLE_IMAGES[role])
+        archive = output_directory / archive_name(role)
+        _run(
+            runner,
+            [
+                "podman",
+                "save",
+                "--format",
+                "oci-archive",
+                "--output",
+                str(archive),
+                image_id,
+            ],
+        )
+        _verified_archive_id(archive, image_id)
+        exported = clock()
+        identities[role] = f"sha256:{image_id}"
+        print(
+            f"built role={role} image_id=sha256:{image_id} "
+            f"archive_bytes={archive.stat().st_size} "
+            f"build_seconds={built - started:.1f} "
+            f"export_seconds={exported - built:.1f}",
+            flush=True,
+        )
+    with github_output.open("a", encoding="utf-8") as output:
+        for role, image_id in identities.items():
+            output.write(f"{role}-image-id={image_id}\n")
+    return identities
+
+
+def load(  # noqa: PLR0913 - explicit expected-identity and test seams
+    domain: str,
+    archive_directory: Path,
+    expected: Mapping[str, str],
+    *,
+    names: Mapping[str, str] = ROLE_IMAGES,
+    runner: Runner = subprocess.run,
+    clock: Callable[[], float] = time.monotonic,
+) -> dict[str, str]:
+    """Load only a domain's archives and tag them after exact ID checks."""
+    try:
+        roles = IMAGE_DOMAIN_ROLES[domain]
+    except KeyError as error:
+        raise ImageTransferError(
+            f"domain {domain!r} consumes no final image"
+        ) from error
+    _require_rootless(runner)
+    loaded: dict[str, str] = {}
+    for role in roles:
+        match = EXPECTED_IMAGE_ID.fullmatch(expected.get(role, ""))
+        if match is None:
+            raise ImageTransferError(
+                f"no built image ID was published for the {role} image"
+            )
+        image_id = match.group(1)
+        archive = archive_directory / archive_name(role)
+        if archive.is_symlink() or not archive.is_file():
+            raise ImageTransferError(f"the {role} archive was not downloaded")
+        _verified_archive_id(archive, image_id)
+        name = names[role]
+        exists = runner(
+            ["podman", "image", "exists", name], check=False, capture_output=True
+        )
+        if exists.returncode == 0:
+            raise ImageTransferError(f"refusing to replace the existing image {name}")
+        started = clock()
+        output = _run(runner, ["podman", "load", "--input", str(archive)])
+        reported = {
+            reference.group(1)
+            for line in output.splitlines()
+            if (entry := LOADED_IMAGE_LINE.match(line.strip())) is not None
+            for item in entry.group(1).split(",")
+            if (reference := LOADED_REFERENCE.fullmatch(item.strip())) is not None
+        }
+        if reported != {image_id}:
+            raise ImageTransferError(
+                f"podman load did not report exactly the expected {role} image ID"
+            )
+        if _image_id(runner, image_id) != image_id:
+            raise ImageTransferError(f"the loaded {role} image ID differs")
+        _run(runner, ["podman", "tag", image_id, name])
+        if _image_id(runner, name) != image_id:
+            raise ImageTransferError(f"{name} does not resolve to the built image")
+        loaded[role] = name
+        print(
+            f"loaded role={role} image={name} image_id=sha256:{image_id} "
+            f"archive_bytes={archive.stat().st_size} "
+            f"load_seconds={clock() - started:.1f}",
+            flush=True,
+        )
+    return loaded
+
+
+def _arguments(arguments: Sequence[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    build_parser = commands.add_parser("build")
+    build_parser.add_argument("--roles", required=True)
+    build_parser.add_argument("--output-directory", type=Path, required=True)
+    build_parser.add_argument("--github-output", type=Path, required=True)
+    load_parser = commands.add_parser("load")
+    load_parser.add_argument("--domain", required=True)
+    load_parser.add_argument("--archive-directory", type=Path, required=True)
+    for role in IMAGE_ROLES:
+        load_parser.add_argument(f"--{role}-image-id", default="")
+    return parser.parse_args(arguments)
+
+
+def main(arguments: Sequence[str] | None = None) -> int:
+    """Run one build or load phase for GitHub Actions."""
+    options = _arguments(arguments)
+    try:
+        if options.command == "build":
+            build(
+                parse_roles(options.roles),
+                options.output_directory,
+                options.github_output,
+            )
+        else:
+            load(
+                options.domain,
+                options.archive_directory,
+                {
+                    role: getattr(options, f"{role.replace('-', '_')}_image_id")
+                    for role in IMAGE_ROLES
+                },
+            )
+    except ImageTransferError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover - exercised by GitHub Actions
+    raise SystemExit(main())
