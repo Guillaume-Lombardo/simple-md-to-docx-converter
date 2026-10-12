@@ -101,8 +101,13 @@ def _png(width: int, height: int) -> bytes:
     return output.getvalue()
 
 
-def test_real_mermaid_chromium_output_is_normalized_and_deterministic() -> None:
-    source = "flowchart LR\n    Input[Markdown] --> Output[DOCX]\n"
+@pytest.mark.parametrize("direction", ["LR", "TD"])
+def test_real_mermaid_chromium_output_is_normalized_and_deterministic(
+    direction: str,
+) -> None:
+    source = (
+        f"flowchart {direction}\n" + " --> ".join(f"Node{i}" for i in range(20)) + "\n"
+    )
     renderer = _renderer()
 
     first = render_mermaid(
@@ -123,8 +128,8 @@ def test_real_mermaid_chromium_output_is_normalized_and_deterministic() -> None:
     with Image.open(io.BytesIO(first_png)) as image:
         assert image.format == "PNG"
         assert image.info == {}
-        assert image.width <= IMAGE_LIMITS.max_width_pixels
-        assert image.height <= IMAGE_LIMITS.max_height_pixels
+        assert image.width <= 600
+        assert image.height <= 600
         assert image.width * image.height <= IMAGE_LIMITS.max_pixels
 
 
@@ -292,5 +297,5 @@ def test_real_mermaid_versions_match_t00_artifacts() -> None:
         capture_output=True,
         text=True,
     ).stdout.strip()
-    assert mmdc == "11.17.0"
+    assert mmdc == "12.0.0"
     assert chrome == "Google Chrome 151.0.7922.173"

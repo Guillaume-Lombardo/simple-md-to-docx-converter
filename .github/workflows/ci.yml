@@ -526,7 +526,7 @@ jobs:
           npm ci --prefix toolchain/document-engines --omit=dev --ignore-scripts
           echo "$GITHUB_WORKSPACE/toolchain/document-engines/node_modules/.bin" >> "$GITHUB_PATH"
           test "$(node --version)" = "v22.23.1"
-          test "$(toolchain/document-engines/node_modules/.bin/mmdc --version)" = "11.17.0"
+          test "$(toolchain/document-engines/node_modules/.bin/mmdc --version)" = "12.0.0"
           test "$(google-chrome-stable --version | awk '{$1=$1; print}')" \
             = "Google Chrome 151.0.7922.173"
       - name: Run selected domain suite without a shell

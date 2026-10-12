@@ -541,3 +541,15 @@ The existing Dependabot head and current main are ancestors of each local branch
 - T22 remains In Progress while Mermaid #274 awaits its adapter migration
   and engine/golden/final-image qualification. The published version remains
   0.7.5 and Compose receipt digests remain unchanged.
+
+
+## Mermaid 12 qualification (#274)
+
+- Replace removed width/height options with a fixed size bounded by the smaller
+  configured axis; retain aspect-ratio normalization and physical document caps.
+- Fix the default theme and Liberation Sans family to avoid Mermaid 12 choosing
+  diagram-specific themes/fonts outside the reviewed system-font contract.
+- Synchronize runtime version reporting, future golden generation and smoke checks;
+  preserve historical golden artifacts and provenance.
+- Native engine, golden and final-image qualification remain required.
+- No project version or published image-pin change is included.

@@ -426,8 +426,12 @@ def test_mermaid_config_rejects_missing_workspace(tmp_path: Path) -> None:
         MermaidConfig("mmdc", "chrome", 1.0, 1.0, 1, 1, tmp_path / "missing")
 
 
+@pytest.mark.parametrize(
+    ("width", "height", "size"),
+    [(800, 600, "600"), (480, 960, "480"), (500, 500, "500")],
+)
 def test_cli_uses_fixed_arguments_environment_and_private_workspace(
-    tmp_path: Path, mocker
+    tmp_path: Path, mocker, width: int, height: int, size: str
 ) -> None:
     process = mocker.Mock()
     process.pid = 2345
@@ -453,10 +457,8 @@ def test_cli_uses_fixed_arguments_environment_and_private_workspace(
                 "png",
                 "--backgroundColor",
                 "transparent",
-                "--width",
-                "800",
-                "--height",
-                "600",
+                "--size",
+                size,
                 "--scale",
                 "1",
             ]
@@ -479,7 +481,9 @@ def test_cli_uses_fixed_arguments_environment_and_private_workspace(
             "pipe": True,
         }
         assert json.loads((workspace / "mermaid.json").read_text()) == {
-            "securityLevel": "strict"
+            "securityLevel": "strict",
+            "theme": "default",
+            "fontFamily": "Liberation Sans",
         }
         assert (workspace / "diagram.mmd").read_text() == "flowchart LR"
         (workspace / "diagram.png").write_bytes(RAW_OUTPUT)
@@ -492,7 +496,8 @@ def test_cli_uses_fixed_arguments_environment_and_private_workspace(
         "markweave.conversion.mermaid.os.killpg", side_effect=ProcessLookupError
     )
     renderer = MermaidCliRenderer(
-        _config(tmp_path), {"PATH": "/fixed/path", "SECRET": "not-allowed"}
+        MermaidConfig("mmdc", "/usr/bin/chrome", 5.0, 0.5, width, height, tmp_path),
+        {"PATH": "/fixed/path", "SECRET": "not-allowed"},
     )
     assert renderer.render("flowchart LR", 100_000) == RAW_OUTPUT
     assert popen.call_count == 1
