@@ -77,7 +77,7 @@ RELEASE_FORBIDDEN_TRIGGERS = frozenset(
 )
 RELEASE_TRIGGER_CANDIDATES = frozenset({"push", "release"})
 MAX_RELEASE_TIMEOUT_MINUTES = 60
-LIGHT_SHARD_TIMEOUT_MINUTES = 40
+LIGHT_SHARD_TIMEOUT_MINUTES = 15
 HEAVY_MAX_PARALLEL = 8
 HEAVY_UV_CACHE_SUFFIX = "py314-heavy"
 PUBLISH_STEP_COUNT = 3
@@ -371,7 +371,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
             ): "${{ always() && matrix.domain == 'container' }}",
             ("mutation", "Retain mutation evidence"): "${{ always() }}",
         },
-        canonical_digest="437e1b98184267b5638ef4d98701219f5f2d0d82657355f3357add341920d162",
+        canonical_digest="19f0a5576914c0ff7f680e7bdffcf773e2f6218872b8287765f09a5fd0021c01",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -841,7 +841,7 @@ def _validate_light_sharding(workflow: Mapping[str, Any]) -> list[str]:
     }:
         errors.append("light Python tests must run both complementary shards")
     if tests.get("timeout-minutes") != LIGHT_SHARD_TIMEOUT_MINUTES:
-        errors.append("light Python shards must use the reviewed 40-minute bound")
+        errors.append("light Python shards must use the reviewed 15-minute bound")
     if coverage.get("needs") != [
         "python-tests",
         "python-distributed-coverage",
@@ -1003,7 +1003,7 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
     required_commands = {
         ("python-tests", "Run a complementary light test shard"): (
             "uv run python -m scripts.ci.engine_userns_gate -- "
-            'uv run pytest -m "unit or light_coverage" '
+            'uv run pytest -m "unit or light_coverage" -n auto --dist loadgroup '
             "-p no:scripts.ci.pytest_branch_coverage "
             "-p scripts.ci.light_sharding --light-shard-count=2 "
             '--light-shard-index="$SHARD_INDEX" --cov-fail-under=0 --cov-report='

@@ -5,15 +5,17 @@ from __future__ import annotations
 import json
 import os
 import pwd
-from collections.abc import Callable
+import shutil
+from collections.abc import Callable, Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from pytest_mock import MockerFixture
 
+from markweave.broker import process as broker_process
 from markweave.broker.dispatch import BrokerDispatcher
 from markweave.broker.models import AuthenticatedPrincipal
 from markweave.broker.mtls_transport import (
@@ -449,9 +451,23 @@ def test_rejects_nonempty_hooks_directory(tmp_path: Path) -> None:
         load_broker_process_config(path)
 
 
+@pytest.fixture
+def private_authority_directory(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    """Take the real authority lock under a per-test name in the runtime root.
+
+    The production name is shared by every broker of this user, so a running
+    host broker or a parallel test worker would otherwise hold it.
+    """
+    name = f"markweave-broker-test-{uuid4().hex}"
+    monkeypatch.setattr(broker_process, "_AUTHORITY_DIRECTORY_NAME", name)
+    directory = Path(f"/run/user/{os.geteuid()}") / name
+    yield directory
+    shutil.rmtree(directory, ignore_errors=True)
+
+
 @pytest.mark.unit
 def test_factory_uses_derived_identity_capacity_and_hermetic_commands(
-    tmp_path: Path, mocker: MockerFixture
+    tmp_path: Path, mocker: MockerFixture, private_authority_directory: Path
 ) -> None:
     path, _ = _configuration(tmp_path)
     config = load_broker_process_config(path)
@@ -468,6 +484,7 @@ def test_factory_uses_derived_identity_capacity_and_hermetic_commands(
         built = build_broker_server(config)
     finally:
         os.umask(old_umask)
+    assert (private_authority_directory / "broker-authority.lock").is_file()
 
     assert built is server.return_value
     inventory.assert_called_once_with(
@@ -498,7 +515,7 @@ def test_factory_uses_derived_identity_capacity_and_hermetic_commands(
 
 @pytest.mark.unit
 def test_factory_selects_mtls_with_exact_loaded_identity_and_workspace_limits(
-    tmp_path: Path, mocker: MockerFixture
+    tmp_path: Path, mocker: MockerFixture, private_authority_directory: Path
 ) -> None:
     path, _ = _mtls_configuration(tmp_path)
     config = load_broker_process_config(path)
@@ -531,6 +548,7 @@ def test_factory_selects_mtls_with_exact_loaded_identity_and_workspace_limits(
     mocker.patch("markweave.broker.process.BoundedCommandRunner")
 
     built = build_broker_server(config)
+    assert (private_authority_directory / "broker-authority.lock").is_file()
 
     assert built is mtls_server.return_value
     unix_server.assert_not_called()

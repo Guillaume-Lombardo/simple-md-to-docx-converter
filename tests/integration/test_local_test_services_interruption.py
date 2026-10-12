@@ -117,6 +117,8 @@ class Fake:
 
     root: Path
     releases: list[str] = field(default_factory=list)
+    stop: threading.Event = field(default_factory=threading.Event)
+    threads: list[threading.Thread] = field(default_factory=list)
 
     def path(self, name: str) -> Path:
         return self.root / name
@@ -176,6 +178,9 @@ def fake(
     mocker.patch.object(services, "_close_lock", side_effect=checked_close)
     previous = signal.signal(signal.SIGINT, signal.default_int_handler)
     yield result
+    result.stop.set()
+    for thread in result.threads:
+        thread.join(timeout=5)
     signal.signal(signal.SIGINT, previous)
     for process in services._UNSETTLED.values():
         services.stop_process_group(process)
@@ -188,17 +193,27 @@ def fake(
 
 
 def _interrupt_after_child_start(fake: Fake, delays: tuple[float, ...]) -> None:
-    """Send SIGINT after each delay, counted from the startup child's launch."""
+    """Send SIGINT after each delay, counted from the startup child's launch.
+
+    The thread only waits on its own event, never on the ``time`` module, so it
+    cannot consume values from a later test that patches ``time.monotonic``,
+    and the fixture stops and joins it before the test ends.
+    """
+    if not delays:
+        return
 
     def interrupt() -> None:
-        deadline = time.monotonic() + 30
-        while not fake.path("child").exists() and time.monotonic() < deadline:
-            time.sleep(0.01)
+        for _ in range(3000):
+            if fake.path("child").exists() or fake.stop.wait(0.01):
+                break
         for delay in delays:
-            time.sleep(delay)
+            if fake.stop.wait(delay):
+                return
             os.kill(os.getpid(), signal.SIGINT)
 
-    threading.Thread(target=interrupt, daemon=True).start()
+    thread = threading.Thread(target=interrupt, daemon=True)
+    fake.threads.append(thread)
+    thread.start()
 
 
 @dataclass(frozen=True)

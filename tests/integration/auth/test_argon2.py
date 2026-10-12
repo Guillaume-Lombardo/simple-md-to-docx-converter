@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from statistics import median
-from time import perf_counter_ns
+from time import thread_time_ns
 
 import pytest
 from argon2 import PasswordHasher
@@ -65,14 +65,17 @@ def test_failed_authentication_medians_have_no_legacy_or_malformed_fast_path() -
     names = list(candidates)
 
     current.verify_and_rehash(current_hash, "warmup-wrong-password")
+    # Measure the CPU time of this thread, which runs every single-lane Argon2
+    # computation, so a fast path shows up as missing work while CPU contention
+    # from parallel test workers or other processes cannot skew the medians.
     for round_index in range(7):
         ordered = names[round_index % len(names) :] + names[: round_index % len(names)]
         for name in ordered:
-            started = perf_counter_ns()
+            started = thread_time_ns()
             assert current.verify_and_rehash(
                 candidates[name], "deliberately-wrong-password"
             ) == (False, None)
-            samples[name].append(perf_counter_ns() - started)
+            samples[name].append(thread_time_ns() - started)
 
     medians = {name: median(values) for name, values in samples.items()}
     assert max(medians.values()) / min(medians.values()) <= 1.6, medians

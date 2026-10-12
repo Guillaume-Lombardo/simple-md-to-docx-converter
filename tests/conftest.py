@@ -1,6 +1,7 @@
 """Shared fixtures for the reference corpus."""
 
 import gc
+import logging
 import os
 import sys
 import traceback
@@ -11,6 +12,7 @@ from typing import Any
 import pytest
 from fastapi.dependencies import models as fastapi_dependency_models
 
+from markweave.observability import JsonLogFormatter
 from markweave.persistence import sql as sql_persistence
 from scripts.testing.services import (
     configured_environment,
@@ -25,6 +27,7 @@ DISTRIBUTED_SERVICES_GROUP = "distributed-services"
 SESSION_LEAKS = pytest.StashKey[list[str]]()
 WORKER_LEAKS_OUTPUT = "markweave_session_resource_leaks"
 WORKER_CRASHED = pytest.StashKey[bool]()
+APPLICATION_LOGGER = "md_converter.application"
 FASTAPI_DEPENDENCY_CACHES = (
     "_is_gen_callable_cached",
     "_is_async_gen_callable_cached",
@@ -134,6 +137,27 @@ def clear_fastapi_dependency_caches() -> None:
         cache = getattr(fastapi_dependency_models, name, None)
         if cache is not None:
             cache.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def isolate_application_log_handlers() -> Iterator[None]:
+    """Remove application log handlers a test installs once the test ends.
+
+    The application logger is configured lazily with a handler bound to the
+    current ``sys.stdout``. Inside a test that is pytest's per-test capture
+    stream, which is closed afterwards, so a handler that outlived its test
+    wrote "I/O operation on closed file" errors into whichever later test
+    logged next on the same worker; xdist ordering made that test vary.
+    """
+    logger = logging.getLogger(APPLICATION_LOGGER)
+    before = list(logger.handlers)
+    yield
+    # pytest attaches and detaches its own capture handlers on non-propagating
+    # loggers around every phase; only the application's handlers are ours.
+    for handler in logger.handlers[:]:
+        if handler not in before and isinstance(handler.formatter, JsonLogFormatter):
+            logger.removeHandler(handler)
+            handler.close()
 
 
 def _collect_frozen_garbage() -> list[str]:

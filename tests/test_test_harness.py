@@ -227,3 +227,32 @@ def test_fastapi_dependency_caches_still_exist_and_are_cleared() -> None:
     assert sum(cache.cache_info().currsize for cache in caches) > 0
     conftest.clear_fastapi_dependency_caches()
     assert sum(cache.cache_info().currsize for cache in caches) == 0
+
+
+@pytest.mark.integration
+@pytest.mark.light_coverage
+@MODES
+def test_application_log_handler_never_outlives_its_capture_stream(
+    pytester: pytest.Pytester,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: tuple[str, ...],
+) -> None:
+    """A later test logs cleanly after an earlier one configured the logger."""
+    _project(pytester, monkeypatch)
+    pytester.makeconftest(
+        HARNESS_CONFTEST
+        + "from tests.conftest import isolate_application_log_handlers\n"
+    )
+    pytester.makepyfile(
+        test_sample=(
+            "from markweave.observability import log_event\n\n\n"
+            "def test_configures_logger_inside_capture(capsys):\n"
+            '    log_event("readiness_failed")\n'
+            '    assert "readiness_failed" in capsys.readouterr().out\n\n\n'
+            "def test_logs_again_without_stale_stream(capsys):\n"
+            '    log_event("readiness_failed")\n'
+            '    assert capsys.readouterr().err == ""\n'
+        )
+    )
+    result = _run(pytester, mode)
+    result.assert_outcomes(passed=2)
