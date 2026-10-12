@@ -341,6 +341,10 @@ names the marker to add. A test that only passes a runtime name to another progr
 reviewed `container_runtime_guard_exempt(reason="...")` marker instead. That marker affects only the
 guard and never deselects the test. An unavailable
 engine test is skipped only through its registered marker and must never be reported as passed.
+Every test under `tests/` also carries one category marker: `unit`, `functional`, `integration` or
+`e2e`. CI selects Python tests only by marker expression, so `tests/category_marker_guard.py`,
+registered through `addopts` in `pyproject.toml`, reports each uncategorized test as a collection
+error before any marker or shard deselection, and the session fails.
 
 ### Parallel light CI
 

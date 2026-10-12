@@ -655,6 +655,7 @@ def test_frontend_compose_parser_requires_one_exact_shared_public_default() -> N
         parse_frontend_compose_identity(divergent)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("invalid_image", ["[]", "{}"])
 def test_frontend_compose_parser_rejects_non_string_named_images(
     invalid_image: str,
