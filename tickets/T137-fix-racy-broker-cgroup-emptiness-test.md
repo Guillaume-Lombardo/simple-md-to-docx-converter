@@ -189,3 +189,47 @@ that stays populated past the bound raises `Podman stable unit cgroup is not emp
       failures are again only in the untouched `test_local_test_services_interruption.py`, which
       passes alone (15 passed).
     - Changed application lines are 100% covered (57/57); branch coverage is 90.53%.
+- 2026-10-13: Review round 2 (two findings). Hosted CI run 38314831565 passed at `b46e272`.
+  - Major finding, fixed: the emptiness wait got a fresh quarter-timeout bound even after the
+    kill and inspections had used most of the dispatch. A slow command followed by the wait could
+    still trip the fatal watchdog.
+    - New `src/markweave/broker/operation_deadline.py`. Each Unix and mTLS dispatch publishes an
+      absolute budget equal to the dispatch deadline minus a tenth of
+      `transport.operation_timeout_seconds`; the tenth is kept for the response and for reaping a
+      cancelled command.
+    - `BoundedCommandRunner` clamps every Podman and `systemctl` command to that budget and
+      refuses to start one once the budget is spent.
+    - `PodmanIsolationRuntime._call` refuses commands once the budget is spent, which also covers
+      injected command doubles.
+    - The emptiness wait is shortened to the time remaining.
+    - This follows the Kubernetes attester precedent, which bounds each exchange by
+      `min(request timeout, remaining readiness time)`.
+    - The owner-approved optional keys and the quarter ceiling remain the policy limits.
+    - Dispatches outside a transport, such as startup reconciliation, keep their previous bounds.
+  - Regression coverage on both transports, against real rootless Podman. A slow-podman wrapper,
+    run through the real `BoundedCommandRunner`, delays one subcommand. Scenarios: a persistent
+    slice member, a 3.4 s kill, 1.3 s inspections, and a removal delayed past the budget.
+    - Each scenario returns `TERMINATION_UNPROVEN` within the 4 s deadline; the server is neither
+      failed nor stopping and still answers `READY`.
+    - After the delays are removed, reconciliation completes the termination, restores readiness
+      and leaves the unit `REMOVED` with its proof.
+    - With the budget disabled, the three slow-command scenarios fail through the watchdog.
+    - Unit tests cover the budget scope, the runner's clamp and its refusal before spawning, the
+      runtime's refusal, and the clamped wait. Transport tests on both servers prove that a
+      dispatch observes a budget below 90% of its deadline.
+  - Minor finding, fixed: `tests/integration/broker/cgroup_events.py` now accepts a later
+    observation only when both its pause and its read finished within the bound. Deterministic
+    tests cover an overslept pause and a read that finishes after the bound.
+  - Verification (2026-10-13), after the round-2 fixes, with images rebuilt through
+    `scripts.container.ci_images build` because every broker dispatch is now budgeted:
+    - `e2e-standalone-2` passed in 8 min 14 s: reverse-lifecycle 96 s, browser-workspaces 191 s,
+      browser-runtime 179 s.
+    - `e2e-distributed-2` passed in 8 min 34 s: reverse-lifecycle 98 s, browser-workspaces 192 s,
+      browser-runtime 191 s.
+    - The real rootless Podman module passed 18 of 18 in three consecutive runs.
+    - `ruff format --check`, `ruff check`, `ty check`, `scripts.ci.e2e_shards` and `validate_ci`
+      all pass.
+    - The default canonical command: 6,197 passed and 8 failed, with 94.36% total coverage. The 8
+      failures are only in the untouched `test_local_test_services_interruption.py`, which passes
+      alone.
+    - Changed application lines are 100% covered (99/99); branch coverage is 90.49%.
