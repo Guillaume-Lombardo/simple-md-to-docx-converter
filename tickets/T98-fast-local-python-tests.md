@@ -169,6 +169,15 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
   times out of five with `-n auto` while the production broker lock was held, and both CI
   shards passed five times out of five with `-n auto --dist loadgroup` and CI coverage flags
   (shard 0 3,060 tests in about 44 s, shard 1 2,697 tests in about 58 s on the 4-vCPU host).
+- 2026-10-12: First PR CI run with parallel shards (38280813643 on `926817a`): shard 1 passed
+  in 1m56s and distributed coverage in 2m58s; shard 0 failed in 2m14s because
+  `tests/unit/composer/test_egress_guards.py::test_busy_slot_and_invalid_json_result` ran with
+  the fixture's 50 ms provider budget, which building a TLS context exceeded under four busy
+  workers. The fixture now uses a generous 5 s budget; tests that exercise deadlines already set
+  their own. `CI / light` failed in the unrelated web test
+  `tests/composer-generation-workspace-coverage.test.tsx` ("a rejected template version requires
+  an explicit refreshed choice before retry"), which also failed once on `e5543f7` and passed
+  locally and on `358dca6`; T98 does not touch `web/`.
 
 ## Synchronization
 
