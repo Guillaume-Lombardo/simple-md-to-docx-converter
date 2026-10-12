@@ -89,8 +89,6 @@ if [[ -n "$local_image" ]]; then
     exit 2
   fi
 fi
-readonly base_digest=sha256:194df4e35e0e5467e1b57266f4d61f821e1b1f567135f074d23066d3604ae653
-readonly base_image="registry.access.redhat.com/ubi9/python-314@$base_digest"
 readonly image="${published_image:-${local_image:-localhost/md-converter:t21-$profile}}"
 readonly prefix="md-converter-t21-$profile"
 readonly network_name="$prefix"
@@ -1127,10 +1125,19 @@ elif [[ -n "$local_image" ]]; then
   podman image exists "$image"
   podman image exists "$frontend_image"
 else
-  bash scripts/ci/pull-immutable-image.sh "$base_image" "$base_digest"
+  # Acquire every pinned base with bounded retries before the long builds; the
+  # build scripts then run with `--pull=never` and reuse these verified images.
+  bash scripts/container/pull-base-images.sh \
+    Containerfile containers/reverse-attempt/Containerfile web/Containerfile
   bash scripts/container/build.sh "$image"
-  podman build --format oci --tag "$frontend_image" --file web/Containerfile .
+  bash scripts/container/build-frontend.sh "$frontend_image"
   bash scripts/container/build-reverse-attempt.sh "$reverse_attempt_image"
+fi
+if [[ "$profile" == distributed ]]; then
+  # Acquire the digest-pinned storage services with bounded retries so the
+  # later `podman run --pull=never` never depends on an implicit pull.
+  bash scripts/ci/pull-immutable-image.sh "$postgres_image" "${postgres_image##*@}"
+  bash scripts/ci/pull-immutable-image.sh "$rustfs_image" "${rustfs_image##*@}"
 fi
 
 
@@ -1322,7 +1329,7 @@ else
   created=("$postgres_name" "${created[@]}")
   e2e_run_in_harness_directory \
     "$temporary_directory" "$temporary_directory_identity" \
-    podman run --detach --name "$postgres_name" --network "$network_name" \
+    podman run --detach --pull=never --name "$postgres_name" --network "$network_name" \
     --network-alias postgres --ip "$postgres_static_address" \
     --env POSTGRES_DB=md_converter_e2e \
     --env POSTGRES_PASSWORD=e2e-postgres-password \
@@ -1331,7 +1338,7 @@ else
   created=("$rustfs_name" "${created[@]}")
   e2e_run_in_harness_directory \
     "$temporary_directory" "$temporary_directory_identity" \
-    podman run --detach --name "$rustfs_name" --network "$network_name" \
+    podman run --detach --pull=never --name "$rustfs_name" --network "$network_name" \
     --network-alias rustfs --ip "$rustfs_static_address" --publish 127.0.0.1::9000 \
     --env RUSTFS_ACCESS_KEY=e2eaccess --env RUSTFS_SECRET_KEY=e2esecret \
     --env RUSTFS_ADDRESS=0.0.0.0:9000 --env RUSTFS_CONSOLE_ENABLE=false \

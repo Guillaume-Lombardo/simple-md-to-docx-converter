@@ -17,7 +17,7 @@ cleanup() {
 trap cleanup EXIT
 
 if [[ "$mode" == build ]]; then
-  podman build --format oci --tag "$image" --file web/Containerfile .
+  bash scripts/container/build-frontend.sh "$image"
 else
   podman image exists "$image"
 fi

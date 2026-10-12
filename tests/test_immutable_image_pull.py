@@ -25,6 +25,9 @@ def _fake_podman(tmp_path: Path) -> tuple[Path, Path]:
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
         'printf "%s\\n" "$*" >>"$FAKE_PODMAN_LOG"\n'
+        'if [[ "$1" == image && "$2" == exists ]]; then\n'
+        '  [[ "${FAKE_IMAGE_PRESENT:-false}" == true ]]; exit\n'
+        "fi\n"
         'if [[ "$1" == pull ]]; then\n'
         '  count_file="${FAKE_PODMAN_LOG}.count"\n'
         '  count=0; [[ -f "$count_file" ]] && count="$(cat "$count_file")"\n'
@@ -42,16 +45,20 @@ def _fake_podman(tmp_path: Path) -> tuple[Path, Path]:
     )
     podman.chmod(0o755)
     sleep = fake_bin / "sleep"
-    sleep.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    sleep.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$1" >>"${FAKE_PODMAN_LOG}.sleep"\n',
+        encoding="utf-8",
+    )
     sleep.chmod(0o755)
     return fake_bin, call_log
 
 
 def _run_puller(
-    tmp_path: Path, mode: str, *, digest: str = DIGEST
+    tmp_path: Path, mode: str, *, digest: str = DIGEST, present: bool = False
 ) -> subprocess.CompletedProcess[str]:
     fake_bin, call_log = _fake_podman(tmp_path)
     environment = os.environ | {
+        "FAKE_IMAGE_PRESENT": str(present).lower(),
         "FAKE_INSPECT_DIGEST": digest,
         "FAKE_PODMAN_LOG": str(call_log),
         "FAKE_PULL_MODE": mode,
@@ -97,7 +104,8 @@ def test_puller_retries_a_transient_transport_failure_then_verifies_digest(
     result = _run_puller(tmp_path, "transient-then-success")
 
     assert result.returncode == 0
-    assert "attempt 1/3 failed with a transient transport error" in result.stderr
+    assert "attempt 1/4 failed with a transient transport error" in result.stderr
+    assert "retrying in 5s" in result.stderr
     assert "X-Amz-Signature" not in result.stderr
     assert f"verified digest {DIGEST}" in result.stdout
     calls = (tmp_path / "podman.log").read_text(encoding="utf-8").splitlines()
@@ -111,9 +119,11 @@ def test_puller_fails_deterministically_after_bounded_transient_retries(
     result = _run_puller(tmp_path, "transient")
 
     assert result.returncode == 1
-    assert "exhausted 3 transient transport attempts" in result.stderr
+    assert "exhausted 4 transient transport attempts" in result.stderr
     calls = (tmp_path / "podman.log").read_text(encoding="utf-8").splitlines()
-    assert sum(call.startswith("pull ") for call in calls) == 3
+    assert sum(call.startswith("pull ") for call in calls) == 4
+    delays = (tmp_path / "podman.log.sleep").read_text(encoding="utf-8").split()
+    assert delays == ["5", "15", "45"]
 
 
 def test_puller_does_not_retry_permanent_or_integrity_failures(tmp_path: Path) -> None:
@@ -131,3 +141,30 @@ def test_puller_does_not_retry_permanent_or_integrity_failures(tmp_path: Path) -
             (tmp_path / name / "podman.log").read_text(encoding="utf-8").splitlines()
         )
         assert sum(call.startswith("pull ") for call in calls) == 1
+
+
+def test_puller_reuses_a_local_image_only_when_its_digest_matches(
+    tmp_path: Path,
+) -> None:
+    reused = _run_puller(tmp_path / "reused", "success", present=True)
+    mismatched = _run_puller(
+        tmp_path / "mismatched",
+        "success",
+        digest="sha256:" + "b" * 64,
+        present=True,
+    )
+
+    assert reused.returncode == 0
+    assert f"Using local immutable image {IMAGE}" in reused.stdout
+    reused_calls = (
+        (tmp_path / "reused" / "podman.log").read_text(encoding="utf-8").splitlines()
+    )
+    assert not any(call.startswith("pull ") for call in reused_calls)
+    assert mismatched.returncode == 1
+    assert "digest verification failed" in mismatched.stderr
+    mismatched_calls = (
+        (tmp_path / "mismatched" / "podman.log")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    )
+    assert sum(call.startswith("pull ") for call in mismatched_calls) == 1

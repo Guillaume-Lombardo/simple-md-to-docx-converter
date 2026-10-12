@@ -8,7 +8,11 @@ mkdir -p "$font_dir" "$notice_dir" "$work_dir"
 
 fetch() {
     local url=$1 expected=$2 destination=$3
-    curl --fail --location --silent --show-error "$url" --output "$destination"
+    # Bounded retries absorb transient upstream failures; the pinned checksum
+    # below still rejects any incomplete or altered archive.
+    curl --fail --location --silent --show-error \
+        --connect-timeout 20 --max-time 120 --retry 5 --retry-all-errors \
+        "$url" --output "$destination"
     echo "$expected  $destination" | sha256sum --check --strict
 }
 

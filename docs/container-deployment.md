@@ -4,7 +4,10 @@ The final UBI 9/Python 3.14 image is built with `scripts/container/build.sh`. Th
 base manifest, every downloaded engine archive, the Google signing key and Chrome RPM signature,
 the Mermaid npm graph, the `uv` binary, the Python lock, and the complete resolved RPM inventory.
 Use `SOURCE_DATE_EPOCH` only when intentionally producing a new reviewed image identity; the
-default is fixed for reproducibility.
+default is fixed for reproducibility. Every build helper first acquires its digest-pinned base
+images through `scripts/container/pull-base-images.sh`, which retries transient registry transport
+failures with bounded backoff and verifies each digest, and then builds with `--pull=never`; the
+frontend image uses `scripts/container/build-frontend.sh` for the same contract.
 
 The build helper keeps the official LibreOffice RPM archive in
 `${XDG_CACHE_HOME:-$HOME/.cache}/markweave/toolchain` by default. It verifies the reviewed SHA-256
@@ -153,7 +156,9 @@ JSON SBOMs, retains the complete fixed and unfixed Grype report, and separately 
 findings with an available fix. Unfixed Critical findings remain explicit and require mitigation or
 rollback evidence before release; they are never silently filtered. CI retains both SBOMs, the
 report, and bounded image metadata/digests for 30 days as verification evidence. Scanner databases
-remain time-varying evidence. Release publication, provenance, and registry attachment are covered
+remain time-varying evidence: each invocation fetches the current Grype database into a private
+temporary directory with bounded retries, scans only against that database with automatic updates
+disabled, and never reuses it in a later invocation. Release publication, provenance, and registry attachment are covered
 by [releasing.md](releasing.md).
 
 ## Production conversion runtime

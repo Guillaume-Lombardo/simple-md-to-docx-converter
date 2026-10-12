@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tarfile
@@ -221,11 +222,13 @@ def test_container_workflow_rejects_structured_capability_drift(
         "container/entrypoint.sh",
         "container/preflight.sh",
         "scripts/container/build.sh",
+        "scripts/container/build-frontend.sh",
         "scripts/container/blocking-mmdc.sh",
         "scripts/container/api-smoke.sh",
         "scripts/container/distributed-api-smoke.sh",
         "scripts/container/recovery-cli-smoke.sh",
         "scripts/container/run-ci.sh",
+        "scripts/container/pull-base-images.sh",
         "scripts/container/smoke.sh",
         "scripts/container/supply-chain.sh",
         "scripts/container/wait-for-fake-clamav.sh",
@@ -522,25 +525,68 @@ def test_checksum_pinned_container_downloads_use_bounded_transient_retries() -> 
     reverse_attempt = Path("containers/reverse-attempt/Containerfile").read_text(
         encoding="utf-8"
     )
-    retry = "--connect-timeout 20 --max-time 180 --retry 3 --retry-delay 2 --retry-max-time 120"
+    retry = (
+        "--connect-timeout 20 --max-time 180 --retry 3 --retry-delay 2 "
+        "--retry-max-time 600 \\\n        --retry-all-errors \\\n"
+    )
 
     assert containerfile.count(retry) == 4
     assert reverse_attempt.count(retry) == 1
-    assert "--retry-all-errors" not in containerfile
-    assert "--retry-all-errors" not in reverse_attempt
     for source in (containerfile, reverse_attempt):
         assert "sha256sum --check --strict" in source
+        # A retry budget below one transfer bound would make curl give up after a
+        # timed-out attempt instead of retrying it.
+        for match in re.finditer(
+            r"--max-time (\d+) --retry \d+ --retry-delay \d+ --retry-max-time (\d+)",
+            source,
+        ):
+            assert int(match.group(2)) >= 3 * int(match.group(1))
+        assert source.count("curl --fail") == source.count("--retry-all-errors")
 
 
 def test_final_image_e2e_pulls_and_verifies_the_pinned_base_before_build() -> None:
-    script = Path("scripts/e2e/run.sh").read_text(encoding="utf-8")
     containerfile = Path("Containerfile").read_text(encoding="utf-8")
     digest = "194df4e35e0e5467e1b57266f4d61f821e1b1f567135f074d23066d3604ae653"
     assert f"sha256:{digest}" in containerfile
-    assert f"readonly base_digest=sha256:{digest}" in script
-    pull = 'bash scripts/ci/pull-immutable-image.sh "$base_image" "$base_digest"'
-    build = 'bash scripts/container/build.sh "$image"'
-    assert script.index(pull) < script.index(build)
+    pull = re.compile(
+        r"bash scripts/container/pull-base-images\.sh \\\n\s+"
+        r"Containerfile containers/reverse-attempt/Containerfile web/Containerfile\n"
+    )
+    for script_path, build in (
+        (Path("scripts/e2e/run.sh"), 'bash scripts/container/build.sh "$image"'),
+        (
+            Path("scripts/container/run-ci.sh"),
+            'bash scripts/container/build.sh "$final_image"',
+        ),
+    ):
+        script = script_path.read_text(encoding="utf-8")
+        matches = list(pull.finditer(script))
+        assert len(matches) == 1
+        assert matches[0].start() < script.index(build)
+        assert "base_digest" not in script
+
+
+def test_distributed_e2e_acquires_pinned_storage_services_before_running_them() -> None:
+    script = Path("scripts/e2e/run.sh").read_text(encoding="utf-8")
+    ci = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    for name in ("postgres", "rustfs"):
+        image_line = next(
+            line
+            for line in script.splitlines()
+            if line.startswith(f"readonly {name}_image=")
+        )
+        reference = image_line.split("=", 1)[1]
+        assert "@sha256:" in reference
+        assert reference in ci
+        pull = (
+            f'bash scripts/ci/pull-immutable-image.sh "${name}_image" '
+            f'"${{{name}_image##*@}}"'
+        )
+        run = f'podman run --detach --pull=never --name "${name}_name"'
+        assert script.count(pull) == 1
+        assert script.count(run) == 1
+        assert script.index(pull) < script.index(run)
+        assert f'"${name}_image" >/dev/null' in script
 
 
 def test_final_image_e2e_accepts_only_an_immutable_published_image_override() -> None:
@@ -779,20 +825,118 @@ def test_supply_chain_produces_in_private_staging_before_atomic_publication() ->
 
 
 def test_every_frontend_image_build_command_requests_oci_format() -> None:
-    sources = (
-        Path(".github/workflows/container-release.yml").read_text(encoding="utf-8"),
+    release = Path(".github/workflows/container-release.yml").read_text(
+        encoding="utf-8"
+    )
+    helper = Path("scripts/container/build-frontend.sh").read_text(encoding="utf-8")
+    callers = (
+        Path("scripts/container/run-ci.sh").read_text(encoding="utf-8"),
         Path("scripts/e2e/run.sh").read_text(encoding="utf-8"),
         Path("web/scripts/run-rootless-smoke.sh").read_text(encoding="utf-8"),
     )
 
-    for source in sources:
-        assert "podman build --format oci" in source
+    assert "podman build --format oci" in release
+    assert "build_options=(--pull=never --format oci)" in helper
+    assert 'podman build "${build_options[@]}"' in helper
+    for source in (release, helper, *callers):
         assert "podman build --format docker" not in source
+    for source in callers:
+        assert "bash scripts/container/build-frontend.sh " in source
+        assert "--file web/Containerfile" not in source
+
+
+def test_every_ci_image_build_uses_only_pre_acquired_pinned_bases() -> None:
+    puller = Path("scripts/container/pull-base-images.sh").read_text(encoding="utf-8")
+    builds = {
+        "Containerfile": Path("scripts/container/build.sh"),
+        "containers/reverse-attempt/Containerfile": Path(
+            "scripts/container/build-reverse-attempt.sh"
+        ),
+        "web/Containerfile": Path("scripts/container/build-frontend.sh"),
+    }
+
+    assert 'bash "$repository/scripts/ci/pull-immutable-image.sh"' in puller
+    for containerfile, script_path in builds.items():
+        script = script_path.read_text(encoding="utf-8")
+        acquire = f"bash scripts/container/pull-base-images.sh {containerfile}\n"
+        assert script.count(acquire) == 1
+        assert script.index(acquire) < script.index("podman build")
+        assert "--pull=never" in script
+        assert "--pull=false" not in script
+        assert "--pull=missing" not in script
+        assert "--pull=always" not in script
+
+
+def test_base_image_acquisition_reads_every_pinned_containerfile_base(
+    tmp_path: Path,
+) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    calls = tmp_path / "calls.log"
+    (fake_bin / "podman").write_text(
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "$*" >>"$FAKE_CALLS"\n'
+        '[[ "$1" == image && "$2" == exists ]] && exit 0\n'
+        'reference="${@: -3:1}"\n'
+        'printf "%s\\n" "${reference##*@}"\n',
+        encoding="utf-8",
+    )
+    (fake_bin / "podman").chmod(0o755)
+    environment = os.environ | {
+        "FAKE_CALLS": str(calls),
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+    }
+    result = subprocess.run(
+        [
+            "bash",
+            "scripts/container/pull-base-images.sh",
+            "Containerfile",
+            "containers/reverse-attempt/Containerfile",
+            "web/Containerfile",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+    assert result.returncode == 0, result.stderr
+    expected = [
+        line.split("=", 1)[1]
+        for containerfile in (
+            "Containerfile",
+            "containers/reverse-attempt/Containerfile",
+            "web/Containerfile",
+        )
+        for line in Path(containerfile).read_text(encoding="utf-8").splitlines()
+        if line.startswith("ARG ") and "_IMAGE=" in line
+    ]
+    unique = list(dict.fromkeys(expected))
+    assert len(unique) == 3
+    assert all("@sha256:" in reference for reference in unique)
+    for reference in unique:
+        assert f"Using local immutable image {reference}" in result.stdout
+    assert result.stdout.count("Using local immutable image") == len(unique)
+
+    unpinned = tmp_path / "Containerfile"
+    unpinned.write_text(
+        "ARG BASE_IMAGE=registry.example.test/base:latest\nFROM ${BASE_IMAGE}\n",
+        encoding="utf-8",
+    )
+    rejected = subprocess.run(
+        ["bash", "scripts/container/pull-base-images.sh", str(unpinned)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    assert rejected.returncode == 1
+    assert "declares no digest-pinned base image" in rejected.stderr
 
 
 def test_container_ci_exports_and_verifies_real_frontend_oci_identity() -> None:
     script = Path("scripts/container/run-ci.sh").read_text(encoding="utf-8")
-    build = 'podman build --format oci --timestamp "$source_date_epoch"'
+    build = 'bash scripts/container/build-frontend.sh "$frontend_image" "$source_date_epoch"'
     resolve = "podman image inspect \"$frontend_image\" --format '{{.Id}}'"
     export = (
         'podman save --format oci-archive --output "$frontend_archive" '
@@ -1230,3 +1374,110 @@ def test_oci_identity_is_derived_from_verified_archive(tmp_path: Path) -> None:
         _add_tar_bytes(archive, f"blobs/sha256/{config_hex}", tampered)
     with pytest.raises(integrity.IntegrityError, match="digest mismatch"):
         integrity.oci_identity(archive_path)
+
+
+def _supply_chain_function(script: str, name: str) -> str:
+    body = script.split(f"{name}() {{", 1)[1].split("\n}\n", 1)[0]
+    return f"{name}() {{{body}\n}}\n"
+
+
+def test_supply_chain_scans_only_a_freshly_fetched_private_grype_database() -> None:
+    script = Path("scripts/container/supply-chain.sh").read_text(encoding="utf-8")
+
+    assert "GRYPE_DB_AUTO_UPDATE=true" not in script
+    assert 'readonly grype_database_directory="$tool_directory/grype-db"' in script
+    assert script.index('tool_directory="$(mktemp -d)"') < script.index(
+        "readonly grype_database_directory"
+    )
+    assert 'rm -rf -- "$tool_directory"' in script
+    scan = _supply_chain_function(script, "scan_vulnerabilities")
+    assert (
+        'GRYPE_DB_AUTO_UPDATE=false GRYPE_DB_CACHE_DIR="$grype_database_directory"'
+        in scan
+    )
+    update_call = script.index("\nupdate_grype_database\n")
+    assert script.index('install_tool grype "$grype_version"') < update_call
+    scans = [
+        index
+        for index in range(len(script))
+        if script.startswith('scan_vulnerabilities "sbom:', index)
+    ]
+    assert len(scans) == 2
+    assert all(update_call < index for index in scans)
+    assert '"$tool_directory/grype" "sbom:' not in script
+
+
+@pytest.mark.parametrize(
+    ("failures", "expected_code", "expected_delays"),
+    [(0, 0, []), (2, 0, ["5", "15"]), (4, 1, ["5", "15", "45"])],
+)
+def test_supply_chain_retries_only_the_grype_database_download(
+    tmp_path: Path, failures: int, expected_code: int, expected_delays: list[str]
+) -> None:
+    script = Path("scripts/container/supply-chain.sh").read_text(encoding="utf-8")
+    delays_line = next(
+        line
+        for line in script.splitlines()
+        if line.startswith("readonly grype_database_retry_delays_seconds=")
+    )
+    update = _supply_chain_function(script, "update_grype_database")
+    tool_directory = tmp_path / "tools"
+    tool_directory.mkdir()
+    calls = tmp_path / "grype.log"
+    sleeps = tmp_path / "sleep.log"
+    grype = tool_directory / "grype"
+    grype.write_text(
+        "#!/usr/bin/env bash\n"
+        'printf "%s %s\\n" "$GRYPE_DB_CACHE_DIR" "$*" >>"$FAKE_CALLS"\n'
+        'if [[ "$2" == update ]]; then\n'
+        '  count="$(grep -c " db update$" "$FAKE_CALLS")"\n'
+        "  (( count > FAKE_FAILURES ))\n"
+        "fi\n",
+        encoding="utf-8",
+    )
+    grype.chmod(0o755)
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            "set -euo pipefail\n"
+            'tool_directory="$1"\n'
+            'readonly grype_database_directory="$tool_directory/grype-db"\n'
+            f"{delays_line}\n"
+            'sleep() { printf "%s\\n" "$1" >>"$FAKE_SLEEPS"; }\n'
+            f"{update}"
+            "update_grype_database",
+            "bash",
+            str(tool_directory),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ
+        | {
+            "FAKE_CALLS": str(calls),
+            "FAKE_FAILURES": str(failures),
+            "FAKE_SLEEPS": str(sleeps),
+        },
+    )
+
+    assert result.returncode == expected_code
+    lines = calls.read_text(encoding="utf-8").splitlines()
+    database = f"{tool_directory}/grype-db"
+    attempts = min(failures + 1, 4)
+    assert lines.count(f"{database} db update") == attempts
+    assert (f"{database} db status" in lines) is (expected_code == 0)
+    recorded = sleeps.read_text(encoding="utf-8").split() if sleeps.exists() else []
+    assert recorded == expected_delays
+    if expected_code:
+        assert "Grype database update failed after 4 attempts." in result.stderr
+
+
+def test_document_engine_font_downloads_retry_before_checksum_verification() -> None:
+    installer = Path("toolchain/document-engines/fonts/install-fonts.sh").read_text(
+        encoding="utf-8"
+    )
+    fetch = installer.split("fetch() {", 1)[1].split("\n}\n", 1)[0]
+
+    assert "--connect-timeout 20 --max-time 120 --retry 5 --retry-all-errors" in fetch
+    assert fetch.index("curl --fail") < fetch.index("sha256sum --check --strict")
