@@ -685,13 +685,58 @@ def test_validator_rejects_removed_changed_line_coverage() -> None:
 
 
 @pytest.mark.unit
-def test_validator_rejects_ungated_functional_engine_domain() -> None:
-    """Native functional tests must retain the document-engine namespace preflight."""
+def test_validator_rejects_ungated_document_engine_domain() -> None:
+    """Native document-engine tests must retain the namespace preflight."""
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
-    weakened = workflow.replace(' || "$CI_DOMAIN" == "functional"', "", 1)
-    assert any(
-        "scripts.ci.engine_userns_gate" in error
-        for error in validate_workflow_text(weakened)
+    weakened = workflow.replace(
+        'if [[ "$CI_DOMAIN" == "document-engines" ]]; then',
+        'if [[ "$CI_DOMAIN" == "unknown" ]]; then',
+        1,
+    )
+    assert weakened != workflow
+    _assert_reports(
+        validate_workflow_text(weakened),
+        "missing required workflow command: "
+        '\'if [[ "$CI_DOMAIN" == "document-engines" ]]; then\\n'
+        "  uv run python -m scripts.ci.engine_userns_gate",
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("original", "replacement", "message"),
+    [
+        (
+            "      rustfs:\n        image: ghcr.io/rustfs/",
+            "      minio:\n        image: ghcr.io/rustfs/",
+            "distributed coverage must use the pinned storage services",
+        ),
+        (
+            "      MARKWEAVE_TEST_S3_REGION: us-east-1\n",
+            "",
+            "distributed coverage must use the pinned storage services",
+        ),
+        (
+            "postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8",
+            "postgres:18-alpine",
+            "distributed coverage postgres must match the pinned service",
+        ),
+        (
+            '          --health-cmd "curl -fsS http://127.0.0.1:9000/health"\n',
+            "",
+            "distributed coverage rustfs must match the pinned service",
+        ),
+    ],
+    ids=["unknown-service", "missing-variable", "unpinned-image", "no-health-check"],
+)
+def test_distributed_coverage_keeps_the_pinned_storage_services(
+    original: str, replacement: str, message: str
+) -> None:
+    """The only CI owner of PostgreSQL and S3 tests keeps their pinned services."""
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert workflow.count(original) == 1
+    _assert_reports(
+        validate_workflow_text(workflow.replace(original, replacement, 1)), message
     )
 
 

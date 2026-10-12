@@ -258,13 +258,16 @@ the report, an incomplete array, or an inconsistent count fails closed. A valid 
 only excluded or non-executable lines remains 100% (`0/0`). Full history is checked out only where
 commit comparison requires it.
 
-Changed paths are mapped conservatively to functional, document-engine, storage-profile,
-container, and E2E domains by `scripts/ci/select_domains.py`. Domain lifecycle metadata lives in
+Changed paths are mapped conservatively to CI infrastructure, document-engine, Compose,
+container, frontend, supply-chain and E2E domains by `scripts/ci/select_domains.py`. Functional,
+authentication, SQLite, PostgreSQL and S3 tests have no domain: the light shards and the distributed
+coverage job run them on every pull request, whatever the changed paths, so path selection cannot
+omit them. The category marker guard also requires every test under `tests/functional`,
+`tests/integration/auth` and `tests/integration/sqlite` to carry `unit` or `light_coverage`. Domain lifecycle metadata lives in
 `.github/ci/domains.json`. A planned domain is reported in the Actions summary but is never counted
 as executed. Activate a domain only in the ticket that delivers its real suite by changing its
 status to `active` and adding the reviewed command as an argument array; the matrix runner invokes
-that array without a shell. Scheduled, release, and manual runs select every domain, including both
-storage profiles. The four Compose sub-suites (`compose-secure`, `compose-simple-docker`,
+that array without a shell. Scheduled, release, and manual runs select every domain. The four Compose sub-suites (`compose-secure`, `compose-simple-docker`,
 `compose-simple-podman`, and `compose-podman-insecure`) are separate domains. Shared quickstart
 inputs select all of them, and each self-contained `scripts/e2e/run-compose*.sh` runner selects
 only the domains that execute it; every other `scripts/e2e/` change still selects every
@@ -354,9 +357,10 @@ selection but runs in two separate jobs. A stable SHA-256 of each pytest functio
 assigns all its cases to exactly one partition; neither job installs document engines.
 The marker also selects local SQLite, filesystem, loopback HTTP/TLS, and functional
 boundary tests. A separate, always-run coverage job uses the pinned PostgreSQL and
-RustFS services to run the `storage-distributed` test selection. This job runs for
-every pull request, even when affected-domain selection omits the heavier storage
-suite. Each light shard runs its partition on every runner core with
+RustFS services to run every PostgreSQL and S3 test (`tests/integration/postgres`,
+`tests/integration/s3` and `tests/integration/test_local_test_services_lifecycle.py`, selected
+by `requires_postgres or requires_s3`). This job runs for every pull request and is the only CI
+job that runs those tests. Each light shard runs its partition on every runner core with
 `-n auto --dist loadgroup` and has a 15-minute job bound; pytest-cov combines the
 worker data on the shard controller, so each shard still uploads one raw coverage file.
 The distributed coverage job stays serial: its PostgreSQL and S3 tests share one

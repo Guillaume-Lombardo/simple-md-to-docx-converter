@@ -17,6 +17,7 @@ MARKERS_INI = (
     "[pytest]\nmarkers =\n"
     "    unit: unit\n    functional: functional\n"
     "    integration: integration\n    e2e: e2e\n    other: other\n"
+    "    light_coverage: light coverage\n"
 )
 
 
@@ -93,6 +94,62 @@ def test_tests_outside_the_repository_test_tree_are_not_checked(
 
     result = pytester.runpytest(
         "-p", "no:cacheprovider", plugins=[category_marker_guard]
+    )
+
+    result.assert_outcomes(passed=1)
+
+
+def _run_light_shard_suite(
+    pytester: pytest.Pytester, directory: str, markers: str
+) -> pytest.RunResult:
+    pytester.makeini(MARKERS_INI)
+    suite = pytester.mkdir("tests")
+    for part in directory.split("/")[1:]:
+        suite = suite / part
+        suite.mkdir()
+    (suite / "test_suite.py").write_text(
+        f"import pytest\n\npytestmark = [{markers}]\n\ndef test_x():\n    pass\n"
+    )
+    return pytester.runpytest("-p", "no:cacheprovider", plugins=[category_marker_guard])
+
+
+@pytest.mark.parametrize("directory", category_marker_guard.LIGHT_SHARD_ONLY_PATHS)
+def test_light_shard_only_suites_must_match_the_light_expression(
+    pytester: pytest.Pytester, directory: str
+) -> None:
+    result = _run_light_shard_suite(
+        pytester, directory, "pytest.mark.integration, pytest.mark.functional"
+    )
+
+    assert result.ret == pytest.ExitCode.INTERRUPTED
+    result.assert_outcomes(errors=1)
+    result.stdout.fnmatch_lines(
+        [f"*{directory}/test_suite.py::test_x is not selected by the light shards*"]
+    )
+
+
+@pytest.mark.parametrize(
+    "markers",
+    [
+        "pytest.mark.integration, pytest.mark.light_coverage",
+        "pytest.mark.functional, pytest.mark.light_coverage",
+        "pytest.mark.unit",
+    ],
+    ids=["integration-light", "functional-light", "unit"],
+)
+def test_light_shard_only_suites_accept_light_markers(
+    pytester: pytest.Pytester, markers: str
+) -> None:
+    result = _run_light_shard_suite(pytester, "tests/integration/sqlite", markers)
+
+    result.assert_outcomes(passed=1)
+
+
+def test_other_integration_suites_need_no_light_marker(
+    pytester: pytest.Pytester,
+) -> None:
+    result = _run_light_shard_suite(
+        pytester, "tests/integration/postgres", "pytest.mark.integration"
     )
 
     result.assert_outcomes(passed=1)
