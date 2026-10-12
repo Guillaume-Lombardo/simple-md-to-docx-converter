@@ -99,7 +99,8 @@ def _running(pid: int) -> bool:
     """Return whether a process exists and is not a zombie awaiting reaping."""
     try:
         stat = Path(f"/proc/{pid}/stat").read_text()
-    except FileNotFoundError:
+    except FileNotFoundError, ProcessLookupError:
+        # A process that exits while its entry is read yields ESRCH.
         return False
     return stat.rsplit(")", 1)[1].split()[0] != "Z"
 
