@@ -52,10 +52,10 @@ def _report(scenario: str, unit_id: str, **overrides: object) -> dict[str, Any]:
         "final_state": "removed",
         "released_at": RELEASED.isoformat(),
         "baseline_metrics": _metrics(transport=1),
-        "held_metrics": _metrics(ready=0, fault=1, transport=2)
+        "held_metrics": _metrics(ready=0, fault=1, transport=1, unproven=1)
         if persistent
         else _metrics(transport=1),
-        "final_metrics": _metrics(transport=2 if persistent else 1),
+        "final_metrics": _metrics(transport=1, unproven=1 if persistent else 0),
         "timings_millis": {},
     }
     report.update(overrides)
@@ -159,9 +159,16 @@ def test_transient_member_publishes_on_the_first_attempt(
         (
             "member-transient",
             1,
-            {"held_metrics": _metrics(transport=2)},
+            {"held_metrics": _metrics(transport=1, unproven=1)},
             1,
             "degraded the broker",
+        ),
+        (
+            "member-transient",
+            1,
+            {"final_metrics": _metrics(transport=2)},
+            1,
+            "past its deadline",
         ),
         (
             "member-persistent",
@@ -169,6 +176,13 @@ def test_transient_member_publishes_on_the_first_attempt(
             {"held_metrics": _metrics(ready=0, fault=1, transport=1)},
             1,
             "did not fault the broker",
+        ),
+        (
+            "member-persistent",
+            2,
+            {"held_metrics": _metrics(ready=0, fault=1, transport=2, unproven=1)},
+            1,
+            "past its deadline",
         ),
         (
             "member-persistent",

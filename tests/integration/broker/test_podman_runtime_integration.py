@@ -6,12 +6,13 @@ import subprocess
 import time
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from pytest_mock import MockerFixture
 
 from markweave.broker import podman_runtime
+from markweave.broker.dispatch import BrokerDispatcher
 from markweave.broker.errors import BrokerError, BrokerErrorCategory
 from markweave.broker.inventory import SQLiteBrokerInventory
 from markweave.broker.models import (
@@ -22,6 +23,14 @@ from markweave.broker.models import (
     RuntimeChannelLimits,
     RuntimeLimits,
 )
+from markweave.broker.mtls_transport import (
+    MtlsBrokerClient,
+    MtlsBrokerServer,
+    MtlsEndpoint,
+    MtlsLocalIdentity,
+    MtlsPeerIdentity,
+    MtlsTransportLimits,
+)
 from markweave.broker.podman_runtime import (
     BoundedCommandRunner,
     CgroupEmptinessWait,
@@ -30,13 +39,39 @@ from markweave.broker.podman_runtime import (
     PodmanRuntimeError,
     SystemdCgroupRemover,
 )
+from markweave.broker.process import podman_emptiness_wait
+from markweave.broker.protocol import (
+    BrokerOperation,
+    CreateRequest,
+    CreateResponse,
+    ErrorResponse,
+    ReadyRequest,
+    ReadyResponse,
+    TerminateRequest,
+)
+from markweave.broker.reconciliation_protocol import (
+    ReconciliationRequest,
+    ReconciliationResponse,
+)
 from markweave.broker.service import IsolationBrokerService
+from markweave.broker.unix_transport import (
+    UnixBrokerClient,
+    UnixBrokerServer,
+    UnixTransportLimits,
+)
 from markweave.reversions.models import (
     ReverseAttemptFailure,
     ReverseAttemptRequest,
     ReverseContentLimits,
 )
 from tests.integration.broker.cgroup_events import await_cgroup_events
+from tests.integration.broker.test_mtls_transport_integration import (
+    CLIENT_URI,
+    SERVER_URI,
+    _ca,
+    _issue,
+    _pin,
+)
 
 pytestmark = pytest.mark.requires_podman
 
@@ -67,6 +102,8 @@ UNIT_IDS = (
     UUID("44444444-4444-4444-8444-444444444446"),
     UUID("44444444-4444-4444-8444-444444444447"),
     UUID("44444444-4444-4444-8444-444444444448"),
+    UUID("44444444-4444-4444-8444-444444444449"),
+    UUID("44444444-4444-4444-8444-44444444444a"),
 )
 
 
@@ -951,4 +988,163 @@ def test_terminate_refuses_proof_until_reconciliation_after_a_member_outlives_th
         ManagedUnitState.REMOVED
     )
     assert runtime.discover(limit=1) == ()
+    _assert_systemd_slice_clean(unit_id)
+
+
+TRANSPORT_OPERATION_SECONDS = 4.0
+SERVER_PRINCIPAL = AuthenticatedPrincipal(UUID("55555555-5555-4555-8555-555555555555"))
+
+
+@pytest.fixture(scope="module")
+def transport_certificates(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> dict[str, Path]:
+    root = tmp_path_factory.mktemp("t137-mtls")
+    ca = _ca(root, "ca")
+    server_certificate, server_key = _issue(
+        root, name="server", ca_name="ca", uri=SERVER_URI, eku="serverAuth"
+    )
+    client_certificate, client_key = _issue(
+        root, name="client", ca_name="ca", uri=CLIENT_URI, eku="clientAuth"
+    )
+    return {
+        "ca": ca,
+        "server_certificate": server_certificate,
+        "server_key": server_key,
+        "client_certificate": client_certificate,
+        "client_key": client_key,
+    }
+
+
+def _transport_pair(
+    transport: str,
+    tmp_path: Path,
+    dispatcher: BrokerDispatcher,
+    certificates: dict[str, Path],
+) -> tuple[
+    UnixBrokerServer | MtlsBrokerServer,
+    Callable[[], UnixBrokerClient | MtlsBrokerClient],
+]:
+    """Return a real server and a client factory to call once it is bound."""
+    if transport == "unix":
+        sockets = tmp_path / "socket"
+        sockets.mkdir(mode=0o700)
+        path = sockets / "broker.sock"
+        unix_server = UnixBrokerServer(
+            path,
+            expected_client_uid=os.geteuid(),
+            principal=PRINCIPAL,
+            dispatcher=dispatcher,
+            limits=UnixTransportLimits(TRANSPORT_OPERATION_SECONDS, 2, 2, 2),
+        )
+        return unix_server, lambda: UnixBrokerClient(
+            path,
+            expected_server_uid=os.geteuid(),
+            expected_principal=PRINCIPAL,
+            operation_timeout_seconds=TRANSPORT_OPERATION_SECONDS + 2,
+        )
+    mtls_server = MtlsBrokerServer(
+        MtlsEndpoint("127.0.0.1", 0),
+        local_identity=MtlsLocalIdentity(
+            certificates["ca"],
+            certificates["server_certificate"],
+            certificates["server_key"],
+            SERVER_URI,
+            SERVER_PRINCIPAL,
+        ),
+        client_identity=MtlsPeerIdentity(
+            CLIENT_URI, (_pin(certificates["client_certificate"]),), PRINCIPAL
+        ),
+        dispatcher=dispatcher,
+        limits=MtlsTransportLimits(TRANSPORT_OPERATION_SECONDS, 2, 4, 4, 4, 4),
+    )
+    return mtls_server, lambda: MtlsBrokerClient(
+        mtls_server.endpoint,
+        local_identity=MtlsLocalIdentity(
+            certificates["ca"],
+            certificates["client_certificate"],
+            certificates["client_key"],
+            CLIENT_URI,
+            PRINCIPAL,
+        ),
+        server_identity=MtlsPeerIdentity(
+            SERVER_URI, (_pin(certificates["server_certificate"]),), SERVER_PRINCIPAL
+        ),
+        operation_timeout_seconds=TRANSPORT_OPERATION_SECONDS + 2,
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("transport", "unit_id"), [("unix", UNIT_IDS[8]), ("mtls", UNIT_IDS[9])]
+)
+def test_persistent_member_refusal_returns_within_the_transport_deadline(
+    tmp_path: Path,
+    controlled_image: tuple[str, str],
+    transport_certificates: dict[str, Path],
+    transport: str,
+    unit_id: UUID,
+) -> None:
+    repository, digest = controlled_image
+    wait = podman_emptiness_wait(TRANSPORT_OPERATION_SECONDS)
+    assert wait == CgroupEmptinessWait(1.0, 0.05)
+    inventory = SQLiteBrokerInventory(
+        tmp_path / "inventory.sqlite3", b"i" * 32, max_records=8
+    )
+    hooks = tmp_path / "hooks"
+    hooks.mkdir(mode=0o700)
+    service = IsolationBrokerService(
+        inventory,
+        _runtime(repository, hooks, emptiness_wait=wait),
+        _policy(digest),
+        max_discovered_units=8,
+        unit_id_factory=lambda: unit_id,
+    )
+    server, client_factory = _transport_pair(
+        transport, tmp_path, BrokerDispatcher(service), transport_certificates
+    )
+    release = tmp_path / "release-member"
+    attempt_id = uuid4()
+    server.start()
+    try:
+        client = client_factory()
+        created = client.request(CreateRequest(uuid4(), 1, attempt_id))
+        assert isinstance(created, CreateResponse)
+        assert created.unit_id == unit_id
+        member = _start_slice_member(unit_id, tmp_path, release)
+        try:
+            terminate = TerminateRequest(uuid4(), 1, attempt_id, unit_id)
+            started = time.monotonic()
+            refused = client.request(terminate)
+            elapsed = time.monotonic() - started
+
+            assert refused == ErrorResponse(
+                terminate.request_id,
+                BrokerOperation.TERMINATE,
+                BrokerErrorCategory.TERMINATION_UNPROVEN,
+            )
+            assert wait.timeout_seconds <= elapsed < TRANSPORT_OPERATION_SECONDS
+            # The dispatch watchdog never fired: the broker still serves.
+            assert server.failed is False
+            assert server.stopping is False
+            ready = ReadyRequest(uuid4(), 1)
+            assert client.request(ready) == ReadyResponse(ready.request_id, False)
+            unproven = inventory.get(unit_id)
+            assert unproven is not None
+            assert unproven.state is ManagedUnitState.EXIT_CONFIRMED
+            assert inventory.get_proof(unit_id) is None
+            release.touch()
+            _await_member_stopped(member)
+        finally:
+            _systemctl("--user", "stop", member, check=False)
+
+        reconciled = client.reconcile(ReconciliationRequest(uuid4(), 0))
+        assert isinstance(reconciled, ReconciliationResponse)
+        ready = ReadyRequest(uuid4(), 1)
+        assert client.request(ready) == ReadyResponse(ready.request_id, True)
+        removed = inventory.get(unit_id)
+        assert removed is not None and removed.state is ManagedUnitState.REMOVED
+        assert server.failed is False
+    finally:
+        server.stop()
     _assert_systemd_slice_clean(unit_id)

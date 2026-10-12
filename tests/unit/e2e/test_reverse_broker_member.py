@@ -139,8 +139,8 @@ def test_persistent_member_holds_until_the_worker_reports_the_broker_fault(
         metrics=[
             _metrics(),
             _metrics(ready=1),
-            _metrics(ready=0, fault=1, transport=1),
-            _metrics(ready=1),
+            _metrics(ready=0, fault=1, unproven=1),
+            _metrics(ready=1, unproven=1),
         ],
     )
 
@@ -254,6 +254,24 @@ def test_persistent_member_requires_a_new_broker_fault(
         metrics=[_metrics(transport=3), _metrics(ready=0, fault=1, transport=3)],
     )
     with pytest.raises(RuntimeError, match="did not report the broker fault"):
+        fixture.watch_member(
+            tmp_path, "persistent", METRICS_URL, setup.ready, setup.report
+        )
+
+    assert _stops(setup) == [("stop", _member(setup.unit_ids[0]))]
+
+
+def test_persistent_member_refuses_a_transport_deadline_failure(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    setup = _setup(
+        tmp_path,
+        mocker,
+        states=[CREATED, CREATED, EXIT],
+        metrics=[_metrics(), _metrics(ready=0, fault=1, transport=1, unproven=1)],
+    )
+
+    with pytest.raises(RuntimeError, match="dispatch exceeded its deadline"):
         fixture.watch_member(
             tmp_path, "persistent", METRICS_URL, setup.ready, setup.report
         )

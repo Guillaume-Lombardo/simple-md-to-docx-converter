@@ -64,9 +64,10 @@ _MAX_DIAGNOSTIC_ATTEMPTS = 32
 CHANNEL_LIMITS = {"max_input_bytes": 1_000_000, "max_output_bytes": 4_000_000}
 MEMBER_UNIT_PREFIX = "markweave-e2e-slice-member-"
 MEMBER_MODES = ("transient", "persistent")
-# The transient member must leave well inside the broker's emptiness bound and
-# the 5-second worker operation timeout, so the terminate request still succeeds.
-_MEMBER_TRANSIENT_HOLD_SECONDS = 0.5
+# The transient member leaves this long after EXIT_CONFIRMED is durable: after the
+# broker's first emptiness read in practice, and well inside the derived 1.25-second
+# emptiness bound of the harness's 5-second transport deadline.
+_MEMBER_TRANSIENT_HOLD_SECONDS = 0.25
 _MEMBER_PRE_EXIT_STATES = frozenset(
     {
         ManagedUnitState.RESERVED,
@@ -626,8 +627,13 @@ def _member_metrics(url: str) -> dict[str, float | None]:
     return projected
 
 
-def _broker_faults(metrics: Mapping[str, float | None]) -> float:
-    return sum(metrics[f"faults_{code}"] or 0.0 for code in _MEMBER_BROKER_FAULT_CODES)
+def _fault_delta(
+    metrics: Mapping[str, float | None],
+    baseline: Mapping[str, float | None],
+    code: str,
+) -> float:
+    key = f"faults_{code}"
+    return (metrics[key] or 0.0) - (baseline[key] or 0.0)
 
 
 def watch_member(  # noqa: PLR0912, PLR0915 - linear fail-closed test observer
@@ -744,15 +750,19 @@ def watch_member(  # noqa: PLR0912, PLR0915 - linear fail-closed test observer
             time.sleep(0.01)
         mark("exit-confirmed")
         if mode == "transient":
-            time.sleep(_MEMBER_TRANSIENT_HOLD_SECONDS)
+            release_at = time.monotonic() + _MEMBER_TRANSIENT_HOLD_SECONDS
             held_metrics = _member_metrics(metrics_url)
+            time.sleep(max(0.0, release_at - time.monotonic()))
         else:
             deadline = time.monotonic() + 90
             while True:
                 held_metrics = _member_metrics(metrics_url)
-                if held_metrics["broker_fault"] == 1 and _broker_faults(
-                    held_metrics
-                ) > _broker_faults(baseline):
+                if _fault_delta(held_metrics, baseline, "transport_failure") > 0:
+                    raise RuntimeError("T137 broker dispatch exceeded its deadline")
+                if (
+                    held_metrics["broker_fault"] == 1
+                    and _fault_delta(held_metrics, baseline, "termination_unproven") > 0
+                ):
                     break
                 if time.monotonic() >= deadline:
                     raise RuntimeError("T137 worker did not report the broker fault")

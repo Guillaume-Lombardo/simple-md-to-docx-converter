@@ -119,8 +119,22 @@ objects to force readiness.
 
 Podman reports a killed attempt as exited before its conmon monitor and that monitor's cleanup
 command leave the attempt's systemd slice. The emptiness proof therefore re-reads the slice's
-cgroup-v2 `populated` flag within a short bound (five seconds by default) instead of failing on
-the first read; a slice that stays populated past the bound still fails closed.
+cgroup-v2 `populated` flag within a short bound instead of failing on the first read. A slice that
+stays populated past the bound still fails closed: the termination request returns
+`termination_unproven`, the broker clears readiness, and the next reconciliation retries the proof.
+
+The wait runs inside one transport dispatch, and a dispatch that outlives
+`transport.operation_timeout_seconds` stops the broker. Two optional keys in the `podman` object
+tune the wait:
+
+- `cgroup_emptiness_timeout_seconds` must be positive, finite, and at most a quarter of
+  `transport.operation_timeout_seconds`. When absent, it defaults to five seconds or a quarter of
+  that operation timeout, whichever is smaller.
+- `cgroup_emptiness_poll_interval_seconds` must be positive, finite, and no greater than the
+  timeout. When absent, it defaults to 50 ms, capped by the timeout.
+
+The templates omit both keys, so existing configurations keep the derived defaults. Insert them in
+canonical key order if you set them.
 
 ## Troubleshooting
 

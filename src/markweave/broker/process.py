@@ -37,6 +37,7 @@ from markweave.broker.mtls_transport import (
 )
 from markweave.broker.podman_runtime import (
     BoundedCommandRunner,
+    CgroupEmptinessWait,
     PodmanCommandLimits,
     PodmanIsolationRuntime,
     SystemdCgroupRemover,
@@ -67,6 +68,15 @@ _TLS_MATERIAL_MAX_BYTES = 65_536
 _TLS_MATERIAL_COUNT = 3
 _UNIX_TRANSPORT = "unix"
 _MTLS_TRANSPORT = "mtls"
+_PODMAN_REQUIRED_FIELDS = frozenset({"operation_timeout_seconds", "output_bytes"})
+_PODMAN_OPTIONAL_FIELDS = frozenset(
+    {"cgroup_emptiness_poll_interval_seconds", "cgroup_emptiness_timeout_seconds"}
+)
+_DEFAULT_EMPTINESS_TIMEOUT_SECONDS = 5.0
+_DEFAULT_EMPTINESS_POLL_INTERVAL_SECONDS = 0.05
+# The emptiness wait runs inside one transport dispatch, whose deadline is fatal
+# to the broker. It may use at most this fraction of that deadline.
+_EMPTINESS_DISPATCH_FRACTION = 4
 
 
 class BrokerProcessConfigurationError(ValueError):
@@ -94,6 +104,7 @@ class BrokerProcessConfig:
     mtls_local_identity: MtlsLocalIdentity | None = None
     mtls_client_identity: MtlsPeerIdentity | None = None
     mtls_material: tuple[bytes, bytes, bytes] | None = field(default=None, repr=False)
+    podman_emptiness_wait: CgroupEmptinessWait | None = None
 
 
 def _configuration_failure() -> Never:
@@ -197,6 +208,47 @@ def _required_object(value: Any, fields: frozenset[str]) -> Mapping[str, Any]:
     if type(value) is not dict or set(value) != fields:
         _configuration_failure()
     return value
+
+
+def _object_with_optional(
+    value: Any, required: frozenset[str], optional: frozenset[str]
+) -> Mapping[str, Any]:
+    if type(value) is not dict or not required <= set(value) <= required | optional:
+        _configuration_failure()
+    return value
+
+
+def podman_emptiness_wait(
+    operation_timeout_seconds: float,
+    timeout_seconds: float | None = None,
+    poll_interval_seconds: float | None = None,
+) -> CgroupEmptinessWait:
+    """Bound the Podman cgroup emptiness wait inside one transport dispatch.
+
+    An absent timeout defaults to five seconds, capped at a quarter of the
+    transport operation timeout; a configured timeout above that quarter is
+    rejected. An absent poll interval defaults to 50 ms, capped by the timeout.
+    """
+
+    ceiling = operation_timeout_seconds / _EMPTINESS_DISPATCH_FRACTION
+    if timeout_seconds is None:
+        timeout_seconds = min(_DEFAULT_EMPTINESS_TIMEOUT_SECONDS, ceiling)
+    elif timeout_seconds > ceiling:
+        _configuration_failure()
+    if poll_interval_seconds is None:
+        poll_interval_seconds = min(
+            _DEFAULT_EMPTINESS_POLL_INTERVAL_SECONDS, timeout_seconds
+        )
+    try:
+        return CgroupEmptinessWait(timeout_seconds, poll_interval_seconds)
+    except ValueError as error:
+        raise BrokerProcessConfigurationError(
+            "Broker process configuration is invalid"
+        ) from error
+
+
+def _optional_positive_number(value: Mapping[str, Any], key: str) -> float | None:
+    return _positive_number(value[key]) if key in value else None
 
 
 def _positive_integer(value: Any) -> int:
@@ -323,8 +375,8 @@ def load_broker_process_config(  # noqa: PLR0912,PLR0915
             "max_pending_exchanges",
         }
     transport = _required_object(root["transport"], frozenset(transport_fields))
-    podman = _required_object(
-        root["podman"], frozenset({"operation_timeout_seconds", "output_bytes"})
+    podman = _object_with_optional(
+        root["podman"], _PODMAN_REQUIRED_FIELDS, _PODMAN_OPTIONAL_FIELDS
     )
     state_directory = _absolute_path(root["state_directory"])
     hooks_directory = _absolute_path(root["hooks_directory"])
@@ -428,6 +480,11 @@ def load_broker_process_config(  # noqa: PLR0912,PLR0915
         ) from error
     if hard_shutdown <= limits.shutdown_timeout_seconds:
         _configuration_failure()
+    emptiness_wait = podman_emptiness_wait(
+        limits.operation_timeout_seconds,
+        _optional_positive_number(podman, "cgroup_emptiness_timeout_seconds"),
+        _optional_positive_number(podman, "cgroup_emptiness_poll_interval_seconds"),
+    )
     mtls_endpoint: MtlsEndpoint | None = None
     mtls_local_identity: MtlsLocalIdentity | None = None
     mtls_client_identity: MtlsPeerIdentity | None = None
@@ -514,6 +571,7 @@ def load_broker_process_config(  # noqa: PLR0912,PLR0915
         mtls_local_identity,
         mtls_client_identity,
         mtls_material,
+        emptiness_wait,
     )
 
 
@@ -692,6 +750,8 @@ def build_broker_server(
                     _SYSTEMCTL, config.podman_limits, environment=systemd_environment
                 )
             ),
+            emptiness_wait=config.podman_emptiness_wait
+            or podman_emptiness_wait(config.transport_limits.operation_timeout_seconds),
         )
         service = IsolationBrokerService(
             inventory,

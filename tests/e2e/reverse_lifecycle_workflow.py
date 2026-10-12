@@ -504,10 +504,10 @@ def _read_member_report(path: Path, scenario: str) -> dict[str, Any]:
     return report
 
 
-def _broker_fault_count(metrics: dict[str, Any]) -> float:
-    return sum(
-        float(metrics.get(f"faults_{code}") or 0.0)
-        for code in ("termination_unproven", "transport_failure")
+def _fault_delta(report: dict[str, Any], sample: str, code: str) -> float:
+    key = f"faults_{code}"
+    return float(report[sample].get(key) or 0.0) - float(
+        report["baseline_metrics"].get(key) or 0.0
     )
 
 
@@ -516,16 +516,24 @@ def _utc(value: datetime) -> datetime:
 
 
 def _require_member_metrics(report: dict[str, Any], scenario: str) -> None:
-    baseline = _broker_fault_count(report["baseline_metrics"])
     held, final = report["held_metrics"], report["final_metrics"]
+    if any(
+        _fault_delta(report, sample, "transport_failure") > 0
+        for sample in ("held_metrics", "final_metrics")
+    ):
+        raise WorkflowFailure(
+            "a slice member pushed a broker dispatch past its deadline"
+        )
     if scenario == "member-transient":
-        if (
-            held.get("broker_ready") != 1
-            or _broker_fault_count(held) != baseline
-            or _broker_fault_count(final) != baseline
+        if held.get("broker_ready") != 1 or any(
+            _fault_delta(report, sample, "termination_unproven") > 0
+            for sample in ("held_metrics", "final_metrics")
         ):
             raise WorkflowFailure("a transient slice member degraded the broker")
-    elif held.get("broker_fault") != 1 or _broker_fault_count(held) <= baseline:
+    elif (
+        held.get("broker_fault") != 1
+        or not _fault_delta(report, "held_metrics", "termination_unproven") > 0
+    ):
         raise WorkflowFailure("a persistent slice member did not fault the broker")
     if final.get("broker_ready") != 1:
         raise WorkflowFailure("worker broker readiness did not recover")
