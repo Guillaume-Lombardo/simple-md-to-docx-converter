@@ -29,6 +29,9 @@ jobs:
       selected-domains: ${{ steps.select.outputs.selected-domains }}
       planned-domains: ${{ steps.select.outputs.planned-domains }}
       runnable-domains: ${{ steps.select.outputs.runnable-domains }}
+      heavy-domains: ${{ steps.select.outputs.heavy-domains }}
+      image-domains: ${{ steps.select.outputs.image-domains }}
+      image-roles: ${{ steps.select.outputs.image-roles }}
     steps:
       - name: Check out reviewed source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -391,7 +394,7 @@ jobs:
 
   heavy:
     name: CI / ${{ matrix.domain }}
-    if: ${{ needs.detect.outputs.runnable-domains != '[]' }}
+    if: ${{ needs.detect.outputs.heavy-domains != '[]' }}
     needs: detect
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -401,7 +404,7 @@ jobs:
       fail-fast: false
       max-parallel: 8
       matrix:
-        domain: ${{ fromJSON(needs.detect.outputs.runnable-domains) }}
+        domain: ${{ fromJSON(needs.detect.outputs.heavy-domains) }}
     services:
       postgres:
         image: ${{ matrix.domain == 'storage-distributed' && 'docker.io/library/postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8' || '' }}
@@ -447,12 +450,6 @@ jobs:
         with:
           python-version-file: .python-version
           check-latest: false
-      - name: Set up pinned Node for frontend smoke
-        if: ${{ matrix.domain == 'frontend' }}
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24.19.0
-          check-latest: false
       - name: Set up uv with a lock-keyed cache
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
@@ -480,25 +477,8 @@ jobs:
         with:
           path: ${{ runner.temp }}/markweave-toolchain/LibreOffice_26.2.5_Linux_x86-64_deb.tar.gz
           key: ubuntu-24.04-amd64-libreoffice-deb-26.2.5-2f03bfb2ac9f33ea7c77331b4b7a23300fb0ed7443566046bf8b5bc51c1bed1e
-      - name: Restore verified LibreOffice RPM archive
-        if: ${{ matrix.domain == 'container' || startsWith(matrix.domain, 'e2e-') }}
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/markweave-toolchain/LibreOffice_26.2.5_Linux_x86-64_rpm.tar.gz
-          key: ubuntu-24.04-amd64-libreoffice-rpm-26.2.5-f62611c441ff1faa5cadb499abdbab119f5a9013eb6c0e32fc9aa65f6ff8b53d
-      - name: Prepare verified LibreOffice RPM archive
-        if: ${{ matrix.domain == 'container' || startsWith(matrix.domain, 'e2e-') }}
-        env:
-          MARKWEAVE_TOOLCHAIN_CACHE_DIRECTORY: ${{ runner.temp }}/markweave-toolchain
-        run: bash scripts/ci/prepare-libreoffice-archive.sh rpm
-      - name: Save verified LibreOffice RPM archive
-        if: ${{ matrix.domain == 'container' && github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/markweave-toolchain/LibreOffice_26.2.5_Linux_x86-64_rpm.tar.gz
-          key: ubuntu-24.04-amd64-libreoffice-rpm-26.2.5-f62611c441ff1faa5cadb499abdbab119f5a9013eb6c0e32fc9aa65f6ff8b53d
-      - name: Verify preinstalled rootless Podman for container validation
-        if: ${{ matrix.domain == 'compose' || matrix.domain == 'container' || matrix.domain == 'frontend' || startsWith(matrix.domain, 'e2e-') }}
+      - name: Verify preinstalled rootless Podman for Compose validation
+        if: ${{ startsWith(matrix.domain, 'compose-') }}
         run: |
           set -euo pipefail
           podman_version="$(podman version --format '{{.Client.Version}}')"
@@ -560,26 +540,6 @@ jobs:
         with:
           node-version: 22.23.1
           check-latest: false
-      - name: Set up pinned Node for rootless E2E
-        if: ${{ startsWith(matrix.domain, 'e2e-') }}
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24.19.0
-          check-latest: false
-      - name: Bootstrap verified Corepack and pnpm for workspace domains
-        if: ${{ matrix.domain == 'frontend' || startsWith(matrix.domain, 'e2e-') }}
-        run: |
-          set -euo pipefail
-          scripts/javascript/bootstrap-pnpm.sh "$RUNNER_TEMP/markweave-js-tools"
-          echo "$RUNNER_TEMP/markweave-js-tools/bin" >> "$GITHUB_PATH"
-          echo "COREPACK_HOME=$RUNNER_TEMP/markweave-js-tools/corepack-home" >> "$GITHUB_ENV"
-          echo "COREPACK_ENABLE_NETWORK=0" >> "$GITHUB_ENV"
-      - name: Restore the exact pnpm store cache for workspace domains
-        if: ${{ matrix.domain == 'frontend' || startsWith(matrix.domain, 'e2e-') }}
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.local/share/pnpm/store/v11
-          key: ${{ runner.os }}-node-24.19.0-pnpm-11.25.0-${{ hashFiles('pnpm-lock.yaml') }}
       - name: Install verified Mermaid and Chrome for document-engine tests
         if: ${{ matrix.domain == 'document-engines' }}
         env:
@@ -606,9 +566,6 @@ jobs:
       - name: Prepare the RustFS test bucket
         if: ${{ matrix.domain == 'storage-distributed' }}
         run: uv run python -m scripts.ci.prepare_s3_test_bucket
-      - name: Install the locked E2E browser driver
-        if: ${{ startsWith(matrix.domain, 'e2e-') }}
-        run: pnpm install --frozen-lockfile --ignore-scripts --filter md-converter-web-tests
       - name: Run selected domain suite without a shell
         env:
           CI_DOMAIN: ${{ matrix.domain }}
@@ -620,19 +577,221 @@ jobs:
           else
             uv run python -m scripts.ci.run_domain "$CI_DOMAIN"
           fi
+
+  build-images:
+    name: CI / build images
+    if: ${{ needs.detect.outputs.image-domains != '[]' }}
+    needs: detect
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      archive-attempt: ${{ github.run_attempt }}
+      backend-image-id: ${{ steps.build.outputs.backend-image-id }}
+      frontend-image-id: ${{ steps.build.outputs.frontend-image-id }}
+      reverse-attempt-image-id: ${{ steps.build.outputs.reverse-attempt-image-id }}
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Python 3.14
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+          check-latest: false
+      - name: Set up uv with a lock-keyed cache
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.1"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: py314-heavy
+          save-cache: false
+      - name: Synchronize locked dependencies
+        run: uv sync --locked --all-groups
+      - name: Restore verified LibreOffice RPM archive
+        if: ${{ contains(fromJSON(needs.detect.outputs.image-roles), 'backend') }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/markweave-toolchain/LibreOffice_26.2.5_Linux_x86-64_rpm.tar.gz
+          key: ubuntu-24.04-amd64-libreoffice-rpm-26.2.5-f62611c441ff1faa5cadb499abdbab119f5a9013eb6c0e32fc9aa65f6ff8b53d
+      - name: Prepare verified LibreOffice RPM archive
+        if: ${{ contains(fromJSON(needs.detect.outputs.image-roles), 'backend') }}
+        env:
+          MARKWEAVE_TOOLCHAIN_CACHE_DIRECTORY: ${{ runner.temp }}/markweave-toolchain
+        run: bash scripts/ci/prepare-libreoffice-archive.sh rpm
+      - name: Save verified LibreOffice RPM archive
+        if: ${{ contains(fromJSON(needs.detect.outputs.image-roles), 'backend') && github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/markweave-toolchain/LibreOffice_26.2.5_Linux_x86-64_rpm.tar.gz
+          key: ubuntu-24.04-amd64-libreoffice-rpm-26.2.5-f62611c441ff1faa5cadb499abdbab119f5a9013eb6c0e32fc9aa65f6ff8b53d
+      - name: Verify preinstalled rootless Podman for image builds
+        run: |
+          set -euo pipefail
+          podman_version="$(podman version --format '{{.Client.Version}}')"
+          [[ "$podman_version" =~ ^([0-9]+)\.[0-9]+\.[0-9]+ ]]
+          (( BASH_REMATCH[1] >= 4 ))
+          echo "Using preinstalled Podman $podman_version"
+          podman info --format '{{.Host.Security.Rootless}}' | grep -Fx true
+      - name: Build, export and verify each selected final image once
+        id: build
+        env:
+          IMAGE_ROLES: ${{ needs.detect.outputs.image-roles }}
+          MARKWEAVE_TOOLCHAIN_CACHE_DIRECTORY: ${{ runner.temp }}/markweave-toolchain
+        run: >-
+          uv run python -m scripts.container.ci_images build
+          --roles "$IMAGE_ROLES" --output-directory "$RUNNER_TEMP/final-images"
+          --github-output "$GITHUB_OUTPUT"
+      - name: Publish the backend archive to this run
+        if: ${{ contains(fromJSON(needs.detect.outputs.image-roles), 'backend') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: final-image-backend-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/final-images/backend.oci.tar
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+      - name: Publish the frontend archive to this run
+        if: ${{ contains(fromJSON(needs.detect.outputs.image-roles), 'frontend') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: final-image-frontend-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/final-images/frontend.oci.tar
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+      - name: Publish the reverse-attempt archive to this run
+        if: ${{ contains(fromJSON(needs.detect.outputs.image-roles), 'reverse-attempt') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: final-image-reverse-attempt-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/final-images/reverse-attempt.oci.tar
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+
+  final-image:
+    name: CI / ${{ matrix.domain }}
+    if: ${{ needs.detect.outputs.image-domains != '[]' }}
+    needs: [detect, build-images]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        domain: ${{ fromJSON(needs.detect.outputs.image-domains) }}
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Python 3.14
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+          check-latest: false
+      - name: Set up pinned Node for frontend smoke
+        if: ${{ matrix.domain == 'frontend' }}
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.19.0
+          check-latest: false
+      - name: Set up uv with a lock-keyed cache
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.1"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: py314-heavy
+          save-cache: false
+      - name: Synchronize locked dependencies
+        run: uv sync --locked --all-groups
+      - name: Verify preinstalled rootless Podman for container validation
+        run: |
+          set -euo pipefail
+          podman_version="$(podman version --format '{{.Client.Version}}')"
+          [[ "$podman_version" =~ ^([0-9]+)\.[0-9]+\.[0-9]+ ]]
+          (( BASH_REMATCH[1] >= 4 ))
+          echo "Using preinstalled Podman $podman_version"
+          podman info --format '{{.Host.Security.Rootless}}' | grep -Fx true
+      - name: Set up pinned Node for rootless E2E
+        if: ${{ startsWith(matrix.domain, 'e2e-') }}
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.19.0
+          check-latest: false
+      - name: Bootstrap verified Corepack and pnpm for workspace domains
+        if: ${{ matrix.domain == 'frontend' || startsWith(matrix.domain, 'e2e-') }}
+        run: |
+          set -euo pipefail
+          scripts/javascript/bootstrap-pnpm.sh "$RUNNER_TEMP/markweave-js-tools"
+          echo "$RUNNER_TEMP/markweave-js-tools/bin" >> "$GITHUB_PATH"
+          echo "COREPACK_HOME=$RUNNER_TEMP/markweave-js-tools/corepack-home" >> "$GITHUB_ENV"
+          echo "COREPACK_ENABLE_NETWORK=0" >> "$GITHUB_ENV"
+      - name: Restore the exact pnpm store cache for workspace domains
+        if: ${{ matrix.domain == 'frontend' || startsWith(matrix.domain, 'e2e-') }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.local/share/pnpm/store/v11
+          key: ${{ runner.os }}-node-24.19.0-pnpm-11.25.0-${{ hashFiles('pnpm-lock.yaml') }}
+      - name: Install the locked E2E browser driver
+        if: ${{ startsWith(matrix.domain, 'e2e-') }}
+        run: pnpm install --frozen-lockfile --ignore-scripts --filter md-converter-web-tests
+      - name: Download the backend archive
+        if: ${{ matrix.domain == 'container' || matrix.domain == 'supply-chain' || startsWith(matrix.domain, 'e2e-') }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: final-image-backend-${{ github.run_id }}-${{ needs.build-images.outputs.archive-attempt }}
+          path: ${{ runner.temp }}/final-images
+      - name: Download the frontend archive
+        if: ${{ matrix.domain == 'frontend' || startsWith(matrix.domain, 'e2e-') }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: final-image-frontend-${{ github.run_id }}-${{ needs.build-images.outputs.archive-attempt }}
+          path: ${{ runner.temp }}/final-images
+      - name: Download the reverse-attempt archive
+        if: ${{ matrix.domain == 'container' || matrix.domain == 'supply-chain' || startsWith(matrix.domain, 'e2e-') }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: final-image-reverse-attempt-${{ github.run_id }}-${{ needs.build-images.outputs.archive-attempt }}
+          path: ${{ runner.temp }}/final-images
+      - name: Load verified final images
+        env:
+          BACKEND_IMAGE_ID: ${{ needs.build-images.outputs.backend-image-id }}
+          CI_DOMAIN: ${{ matrix.domain }}
+          FRONTEND_IMAGE_ID: ${{ needs.build-images.outputs.frontend-image-id }}
+          REVERSE_ATTEMPT_IMAGE_ID: ${{ needs.build-images.outputs.reverse-attempt-image-id }}
+        run: >-
+          uv run python -m scripts.container.ci_images load
+          --domain "$CI_DOMAIN" --archive-directory "$RUNNER_TEMP/final-images"
+          --backend-image-id "$BACKEND_IMAGE_ID"
+          --frontend-image-id "$FRONTEND_IMAGE_ID"
+          --reverse-attempt-image-id "$REVERSE_ATTEMPT_IMAGE_ID"
+      - name: Run selected final-image suite without a shell
+        env:
+          CI_DOMAIN: ${{ matrix.domain }}
+        run: uv run python -m scripts.ci.run_domain "$CI_DOMAIN"
       - name: Retain failed E2E evidence
         if: ${{ failure() && startsWith(matrix.domain, 'e2e-') }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-failure-${{ matrix.domain }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: artifacts/e2e/${{ matrix.domain == 'e2e-standalone' && 'standalone' || 'distributed' }}
+          path: artifacts/e2e/${{ startsWith(matrix.domain, 'e2e-standalone-') && 'standalone' || 'distributed' }}
           if-no-files-found: error
           retention-days: 30
       - name: Retain final-image verification evidence
-        if: ${{ always() && matrix.domain == 'container' }}
+        if: ${{ always() && (matrix.domain == 'container' || matrix.domain == 'supply-chain') }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: final-image-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          name: final-image-evidence-${{ matrix.domain }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             artifacts/container/sbom.cdx.json
             artifacts/container/sbom.spdx.json
@@ -647,7 +806,6 @@ jobs:
             artifacts/reverse-attempt/anydoc-cargo-vulnerabilities.json
             artifacts/reverse-attempt/release-bundle.sha256
             artifacts/container-diagnostics/ci-status.txt
-            artifacts/container-diagnostics/frontend-oci-identity.txt
             artifacts/container-diagnostics/scanner-readiness.txt
           if-no-files-found: error
           retention-days: 30
@@ -696,15 +854,19 @@ jobs:
   gate:
     name: CI / gate
     if: ${{ always() }}
-    needs: [detect, light, python-tests, python-coverage, domain-plan, heavy, mutation]
+    needs: [detect, light, python-tests, python-coverage, domain-plan, heavy, build-images, final-image, mutation]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Require every implemented CI stage
         env:
+          BUILD_IMAGES_RESULT: ${{ needs.build-images.result }}
           DETECT_RESULT: ${{ needs.detect.result }}
           DOMAIN_PLAN_RESULT: ${{ needs.domain-plan.result }}
+          FINAL_IMAGE_RESULT: ${{ needs.final-image.result }}
+          HEAVY_DOMAINS: ${{ needs.detect.outputs.heavy-domains }}
           HEAVY_RESULT: ${{ needs.heavy.result }}
+          IMAGE_DOMAINS: ${{ needs.detect.outputs.image-domains }}
           LIGHT_RESULT: ${{ needs.light.result }}
           MUTATION_RESULT: ${{ needs.mutation.result }}
           PYTHON_TESTS_RESULT: ${{ needs.python-tests.result }}
@@ -714,10 +876,22 @@ jobs:
           set -euo pipefail
           [[ "$DETECT_RESULT" == "success" ]]
           [[ "$DOMAIN_PLAN_RESULT" == "success" ]]
-          if [[ "$RUNNABLE_DOMAINS" == "[]" ]]; then
+          jq --exit-status --null-input \
+            --argjson heavy "$HEAVY_DOMAINS" --argjson image "$IMAGE_DOMAINS" \
+            --argjson runnable "$RUNNABLE_DOMAINS" \
+            '(($heavy + $image) | sort) == ($runnable | sort) and ($heavy - $image) == $heavy' \
+            >/dev/null
+          if [[ "$HEAVY_DOMAINS" == "[]" ]]; then
             [[ "$HEAVY_RESULT" == "skipped" ]]
           else
             [[ "$HEAVY_RESULT" == "success" ]]
+          fi
+          if [[ "$IMAGE_DOMAINS" == "[]" ]]; then
+            [[ "$BUILD_IMAGES_RESULT" == "skipped" ]]
+            [[ "$FINAL_IMAGE_RESULT" == "skipped" ]]
+          else
+            [[ "$BUILD_IMAGES_RESULT" == "success" ]]
+            [[ "$FINAL_IMAGE_RESULT" == "success" ]]
           fi
           [[ "$LIGHT_RESULT" == "success" ]]
           [[ "$MUTATION_RESULT" == "success" ]]

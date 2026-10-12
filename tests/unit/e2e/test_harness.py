@@ -25,11 +25,41 @@ RUNTIME_FAILURE_BROWSER = Path(
 BROWSER_RUNNER_SMOKE = Path("tests/e2e/browser-runner-smoke.mjs").resolve()
 
 
+def _runner_text() -> str:
+    """Return the harness with shard phase and diagnostic bodies dedented.
+
+    Scenarios live in `e2e_phase_*` and `e2e_diagnostic_*` functions. Removing
+    their two-space body indentation keeps these structural assertions about
+    command order and arguments independent of that grouping.
+    """
+    lines = RUNNER.read_text(encoding="utf-8").splitlines(keepends=True)
+    inside = False
+    result = []
+    for line in lines:
+        if line.startswith(
+            ("e2e_phase_", "e2e_diagnostic_")
+        ) and line.rstrip().endswith("() {"):
+            inside = True
+        elif inside and line.rstrip("\n") == "}":
+            inside = False
+        elif inside and line.startswith("  "):
+            result.append(line[2:])
+            continue
+        result.append(line)
+    return "".join(result)
+
+
+def _function(runner: str, name: str) -> str:
+    """Return one top-level function body from the (dedented) harness text."""
+    start = runner.index(f"\n{name}() {{\n") + len(f"\n{name}() {{\n")
+    return runner[start : runner.index("\n}\n", start)]
+
+
 @pytest.mark.unit
 def test_final_frontend_binds_and_probes_loopback_independently_of_runtime_hostname() -> (
     None
 ):
-    runner = RUNNER.read_text(encoding="utf-8")
+    runner = _runner_text()
     start_frontend = runner.split("start_frontend() {", 1)[1].split(
         "restart_backend_and_router() {", 1
     )[0]
@@ -58,7 +88,7 @@ def test_admission_frontend_origin_requires_one_valid_named_network_address(
     expected_code: int,
     expected_origin: str,
 ) -> None:
-    runner = RUNNER.read_text(encoding="utf-8")
+    runner = _runner_text()
     helper_body = runner.split("admission_frontend_origin() {", 1)[1].split(
         "\nrestart_backend_and_router() {", 1
     )[0]
@@ -343,7 +373,7 @@ def test_repository_local_tmpdir_is_removed_before_worktree_check(
 
 @pytest.mark.unit
 def test_every_final_image_container_monitor_inherits_owned_directory() -> None:
-    runner = RUNNER.read_text(encoding="utf-8")
+    runner = _runner_text()
     lines = runner.splitlines()
     podman_runs = [
         index
@@ -351,7 +381,7 @@ def test_every_final_image_container_monitor_inherits_owned_directory() -> None:
         if line.lstrip().startswith("podman run")
     ]
 
-    assert len(podman_runs) == 19
+    assert len(podman_runs) == 17
     assert all(
         any(
             '"$temporary_directory" "$temporary_directory_identity"' in line
@@ -369,7 +399,7 @@ def test_every_final_image_container_monitor_inherits_owned_directory() -> None:
 def test_browser_driver_has_its_own_bounded_cgroup_and_current_backend_network() -> (
     None
 ):
-    runner = RUNNER.read_text(encoding="utf-8")
+    runner = _runner_text()
     browser = runner.split("run_browser_test() {", 1)[1].split(
         "\nstart_production_router() {", 1
     )[0]
@@ -449,7 +479,7 @@ def test_browser_driver_has_its_own_bounded_cgroup_and_current_backend_network()
 
 @pytest.mark.unit
 def test_opt_in_browser_runner_smoke_is_terminal_and_retains_exact_evidence() -> None:
-    runner = RUNNER.read_text(encoding="utf-8")
+    runner = _runner_text()
     fixture = BROWSER_RUNNER_SMOKE.read_text(encoding="utf-8")
     assert (
         'browser_runner_smoke_only="${MARKWEAVE_E2E_BROWSER_RUNNER_SMOKE_ONLY:-0}"'
@@ -459,10 +489,16 @@ def test_opt_in_browser_runner_smoke_is_terminal_and_retains_exact_evidence() ->
         '"$browser_runner_smoke_only" != 0 && "$browser_runner_smoke_only" != 1'
         in runner
     )
-    initial_ready = runner.index('wait_for_url "$base_url/health/ready"')
+    initial_ready = runner.index(
+        'wait_for_url "$base_url/health/ready"', runner.index("application_mode=serve")
+    )
     smoke = runner.index('if [[ "$browser_runner_smoke_only" == 1 ]]', initial_ready)
     service = runner.index('if [[ "$composer_scenario_only" == 1 ]]', smoke)
-    phase = runner[smoke:service]
+    assert runner[smoke:service] == (
+        'if [[ "$browser_runner_smoke_only" == 1 ]]; then\n'
+        "  e2e_diagnostic_browser_runner_smoke\nfi\n"
+    )
+    phase = _function(runner, "e2e_diagnostic_browser_runner_smoke")
     assert (
         phase.index("start_frontend")
         < phase.index('start_production_router "$application_name"')
@@ -479,8 +515,8 @@ def test_opt_in_browser_runner_smoke_is_terminal_and_retains_exact_evidence() ->
         in phase
     )
     assert '"$artifact_directory/"' in phase
-    assert "browser_smoke_succeeded=true\n  succeeded=true" in phase
-    assert phase.rstrip().endswith("exit 0\nfi")
+    assert "browser_smoke_succeeded=true\nsucceeded=true" in phase
+    assert phase.rstrip().endswith("exit 0")
     cleanup = runner.split("cleanup() {", 1)[1].split("\ntrap cleanup EXIT", 1)[0]
     assert '"$succeeded" == true && "$browser_smoke_succeeded" != true' in cleanup
     assert "await page.goto(`${baseURL}/login`" in fixture
@@ -493,7 +529,7 @@ def test_opt_in_browser_runner_smoke_is_terminal_and_retains_exact_evidence() ->
 
 @pytest.mark.unit
 def test_composer_scenario_replays_real_browser_with_canonical_runtime() -> None:
-    runner = RUNNER.read_text(encoding="utf-8")
+    runner = _runner_text()
     assert (
         'composer_scenario_only="${MARKWEAVE_E2E_COMPOSER_SCENARIO_ONLY:-0}"' in runner
     )
@@ -501,13 +537,19 @@ def test_composer_scenario_replays_real_browser_with_canonical_runtime() -> None
     assert (
         '"$browser_runner_smoke_only" == 1 && "$composer_scenario_only" == 1' in runner
     )
-    initial_ready = runner.index('wait_for_url "$base_url/health/ready"')
+    initial_ready = runner.index(
+        'wait_for_url "$base_url/health/ready"', runner.index("application_mode=serve")
+    )
     scenario = runner.index('if [[ "$composer_scenario_only" == 1 ]]', initial_ready)
     service = runner.index(
         'bash "$repository/scripts/container/wait-for-fake-clamav.sh"',
         runner.index("\nfi\n", scenario),
     )
-    phase = runner[scenario:service]
+    assert runner[scenario:service] == (
+        'if [[ "$composer_scenario_only" == 1 ]]; then\n'
+        "  e2e_diagnostic_composer_scenario\nfi\n"
+    )
+    phase = _function(runner, "e2e_diagnostic_composer_scenario")
     assert phase.index('podman rm --force "$application_name"') < phase.index(
         "start_frontend"
     )
@@ -555,8 +597,8 @@ def test_composer_scenario_replays_real_browser_with_canonical_runtime() -> None
         in phase
     )
     assert 'podman logs "$resource" >"$artifact_directory/$resource.log"' in phase
-    assert "composer_scenario_succeeded=true\n  succeeded=true" in phase
-    assert phase.rstrip().endswith("exit 0\nfi")
+    assert "composer_scenario_succeeded=true\nsucceeded=true" in phase
+    assert phase.rstrip().endswith("exit 0")
     cleanup = runner.split("cleanup() {", 1)[1].split("\ntrap cleanup EXIT", 1)[0]
     assert '"$composer_scenario_succeeded" != true' in cleanup
     assert (
@@ -604,7 +646,7 @@ def test_composer_scenario_rejects_invalid_modes_before_runtime_setup(
 def test_composer_browser_mounts_only_checksum_verified_small_corpus(
     tmp_path: Path,
 ) -> None:
-    runner = RUNNER.read_text(encoding="utf-8")
+    runner = _runner_text()
     stage = runner.split("for corpus_file in docx/text.docx pdf/text.pdf; do", 1)[
         1
     ].split("\ndone", 1)[0]
@@ -670,7 +712,7 @@ def test_composer_browser_mounts_only_checksum_verified_small_corpus(
 def test_repeated_browser_phases_reserve_distinct_cgroup_receipts(
     tmp_path: Path,
 ) -> None:
-    runner = RUNNER.read_text(encoding="utf-8")
+    runner = _runner_text()
     reservation = (
         "reserve_browser_cgroup_receipt() {"
         + runner.split("reserve_browser_cgroup_receipt() {", 1)[1].split(
@@ -701,7 +743,7 @@ def test_repeated_browser_phases_reserve_distinct_cgroup_receipts(
 
 @pytest.mark.unit
 def test_smoke_receipt_stem_matches_the_branch_evidence_path(tmp_path: Path) -> None:
-    runner = RUNNER.read_text(encoding="utf-8")
+    runner = _runner_text()
     reservation = (
         "reserve_browser_cgroup_receipt() {"
         + runner.split("reserve_browser_cgroup_receipt() {", 1)[1].split(
@@ -735,15 +777,13 @@ def test_smoke_receipt_stem_matches_the_branch_evidence_path(tmp_path: Path) -> 
     assert normal_receipt == (
         "/browser-artifacts/browser-next-composer-real-cgroup-001.txt"
     )
-    smoke_branch = runner.split('if [[ "$browser_runner_smoke_only" == 1 ]]', 1)[
-        1
-    ].split("\nfi", 1)[0]
+    smoke_branch = _function(runner, "e2e_diagnostic_browser_runner_smoke")
     assert f'test -s "$temporary_directory{smoke_receipt}"' in smoke_branch
 
 
 @pytest.mark.unit
 def test_composer_final_image_provider_and_restore_preserve_harness_guards() -> None:
-    runner = RUNNER.read_text(encoding="utf-8")
+    runner = _runner_text()
     provider_start = runner.index(
         'podman run --detach --name "$composer_provider_name"'
     )
@@ -772,7 +812,8 @@ def test_composer_final_image_provider_and_restore_preserve_harness_guards() -> 
     )
 
     composer_browser = runner.index(
-        'run_browser_test "$application_name" /e2e/browser-next-composer-real.test.mjs'
+        'run_browser_test "$application_name" /e2e/browser-next-composer-real.test.mjs',
+        provider_start,
     )
     pairing_browser = runner.index(
         "/e2e/browser-next-composer-pairing.test.mjs", composer_browser
@@ -793,7 +834,7 @@ def test_composer_final_image_provider_and_restore_preserve_harness_guards() -> 
 
 @pytest.mark.unit
 def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
-    runner = RUNNER.read_text(encoding="utf-8")
+    runner = _runner_text()
 
     assert "frontend-auth-router.mjs" not in runner
     assert "routing-fixture.mjs" not in runner
@@ -828,18 +869,22 @@ def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
     assert "AbortSignal.timeout(1000)" in runner
     assert "--env PUBLIC_HOSTS=localhost:3100" in runner
     assert "--env ROUTER_UPSTREAM_TIMEOUT_MS=30000" in runner
-    assert runner.count('start_production_router "$application_name"') == 12
+    assert runner.count('start_production_router "$application_name"') == 11
     assert runner.count('restart_backend_and_router "$application_name"') == 1
     assert runner.count('kill_backend_and_reconnect_router "$application_name"') == 1
     assert runner.count('start_production_router "$expiry_application_name"') == 1
     provisioning = runner.index("/e2e/browser-provisioning-restart.test.mjs")
     provisioning_end = runner.index("/e2e/browser-recovery-checkpoint.test.mjs")
-    first_router = runner.rindex(
-        'start_production_router "$application_name"',
-        runner.index("application_mode=serve"),
-        provisioning,
+    first_router = runner.index("\ne2e_phase_browser_session() {\n")
+    browser_runtime = _function(runner, "use_browser_runtime")
+    assert browser_runtime.index("start_application") < browser_runtime.index(
+        'start_production_router "$application_name"'
     )
-    assert first_router < provisioning
+    assert (
+        first_router
+        < runner.index("\nuse_browser_runtime\n", first_router)
+        < provisioning
+    )
     assert (
         "MARKWEAVE_E2E_BASE_URL=http://localhost:3100"
         in runner[provisioning:provisioning_end]
@@ -879,7 +924,7 @@ def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
 
 @pytest.mark.unit
 def test_router_uses_current_numeric_frontend_address_during_scanner_outage() -> None:
-    runner = RUNNER.read_text(encoding="utf-8")
+    runner = _runner_text()
     router = runner.split("start_production_router() {", 1)[1].split(
         "\nstart_frontend() {", 1
     )[0]
@@ -909,7 +954,7 @@ def test_router_uses_current_numeric_frontend_address_during_scanner_outage() ->
 
 @pytest.mark.unit
 def test_admission_phase_uses_only_the_revalidated_numeric_frontend_origin() -> None:
-    runner = RUNNER.read_text(encoding="utf-8")
+    runner = _runner_text()
     fixture_ready = runner.index(
         '[[ -f "$evidence_directory/frontend-admission-ready" ]] && break'
     )
@@ -988,7 +1033,7 @@ def test_admission_browser_waits_for_every_frontend_admission() -> None:
 def test_failure_artifacts_retain_bounded_frontend_admission_evidence(
     tmp_path: Path,
 ) -> None:
-    runner = RUNNER.read_text(encoding="utf-8")
+    runner = _runner_text()
     collector = runner.split("collect_failure_artifacts() {", 1)[1].split(
         "\ncleanup() {", 1
     )[0]
@@ -1088,22 +1133,21 @@ def test_e2e_runner_rejects_mismatched_pair_versions(
 
 @pytest.mark.unit
 def test_router_is_removed_before_every_backend_network_parent() -> None:
-    runner = RUNNER.read_text(encoding="utf-8")
+    runner = _runner_text()
 
     assert 'podman rm --force "$router_name" "$application_name"' not in runner
     assert 'podman rm --force "$router_name" "$expiry_application_name"' not in runner
-    assert runner.count('podman rm --force "$router_name" >/dev/null') == 12
+    assert runner.count('podman rm --force "$router_name" >/dev/null') == 10
     cleanup = runner[runner.index("cleanup() {") : runner.index("trap cleanup EXIT")]
     assert cleanup.index('podman rm --force "$router_name"') < cleanup.index(
         'for resource in "${created[@]}"'
     )
-    assert (
-        runner.count(
-            'podman rm --force "$router_name" >/dev/null\n'
-            'podman rm --force "$application_name" >/dev/null'
-        )
-        == 3
-    )
+    for helper in ("use_api_runtime", "use_browser_runtime", "use_held_runtime"):
+        assert (
+            'podman rm --force --ignore "$router_name" >/dev/null\n'
+            '  podman rm --force --ignore "$application_name" >/dev/null'
+        ) in _function(runner, helper)
+    assert runner.count('podman rm --force --ignore "$application_name"') == 3
     assert (
         'podman rm --force "$router_name" >/dev/null\n'
         'podman rm --force "$expiry_application_name" "$clamav_name" >/dev/null'
@@ -1145,7 +1189,7 @@ def test_router_is_removed_before_every_backend_network_parent() -> None:
 
 @pytest.mark.unit
 def test_browser_recovery_uses_final_router_and_exact_forced_restart() -> None:
-    runner = RUNNER.read_text(encoding="utf-8")
+    runner = _runner_text()
     router_index = runner.index('start_production_router "$application_name"')
     checkpoint_index = runner.index("/e2e/browser-recovery-checkpoint.test.mjs")
     kill_index = runner.index(
@@ -1161,7 +1205,7 @@ def test_browser_recovery_uses_final_router_and_exact_forced_restart() -> None:
 
 @pytest.mark.unit
 def test_runner_invokes_next_conversion_browser_in_both_profile_matrix() -> None:
-    runner = RUNNER.read_text(encoding="utf-8")
+    runner = _runner_text()
     main_index = runner.index("/e2e/browser-next-conversion.test.mjs")
     failure_index = runner.index(
         "/e2e/browser-next-conversion-failure.test.mjs", main_index
@@ -1229,50 +1273,56 @@ def test_restart_checkpoint_is_fresh_and_authoritative() -> None:
 def test_runner_invokes_next_administration_with_restored_policy_evidence(
     tmp_path: Path,
 ) -> None:
-    runner = RUNNER.read_text(encoding="utf-8")
-    restore_index = runner.index("# Prove that an isolated snapshot restores")
-    checkpoint_verify_index = runner.index(
-        "tests.e2e.service_workflow verify-checkpoint", restore_index
+    runner = _runner_text()
+    service = _function(runner, "e2e_phase_service")
+    restore_index = service.index("# Prove that an isolated snapshot restores")
+    assert (
+        service.index("tests.e2e.service_workflow checkpoint")
+        < restore_index
+        < service.index("tests.e2e.service_workflow verify-checkpoint", restore_index)
     )
-    policy_values_index = runner.index(
-        '"policy_user_idle_minutes"', checkpoint_verify_index
+    assert "/e2e/browser-next-auth.test.mjs" in _function(
+        runner, "e2e_phase_browser_session"
     )
-    auth_index = runner.index("/e2e/browser-next-auth.test.mjs", policy_values_index)
-    conversion_failure_index = runner.index(
-        "/e2e/browser-next-conversion-failure.test.mjs", auth_index
+    assert "/e2e/browser-next-conversion-failure.test.mjs" in _function(
+        runner, "e2e_phase_browser_workspaces"
     )
-    admission_index = runner.index(
-        "/e2e/browser-next-conversion-admission.test.mjs", conversion_failure_index
+    # Without the service phase, the browser shard seeds the same checkpoint.
+    workspaces = _function(runner, "e2e_phase_browser_workspaces")
+    assert workspaces.startswith(
+        "if ! e2e_selects_phase service; then\n  e2e_seed_browser_prerequisites\nfi\n"
     )
-    recovery_index = runner.index(
+    assert "seed-browser-prerequisites" in _function(
+        runner, "e2e_seed_browser_prerequisites"
+    )
+    runtime = _function(runner, "e2e_phase_browser_runtime")
+    admission_index = runtime.index("/e2e/browser-next-conversion-admission.test.mjs")
+    recovery_index = runtime.index(
         "/e2e/browser-next-conversion-restart.test.mjs", admission_index
     )
-    admin_cookie_index = runner.index(
+    policy_values_index = runtime.index("read_checkpoint_policy_values", recovery_index)
+    admin_cookie_index = runtime.index(
         "/e2e/browser-next-admin-cookie.test.mjs", recovery_index
     )
-    admin_index = runner.index("/e2e/browser-next-admin.test.mjs", recovery_index)
-    expiry_index = runner.index("/e2e/browser-next-auth-expiry.test.mjs", admin_index)
+    admin_index = runtime.index("/e2e/browser-next-admin.test.mjs", recovery_index)
+    expiry_index = runtime.index("/e2e/browser-next-auth-expiry.test.mjs", admin_index)
 
     assert runner.count("/e2e/browser-next-admin-cookie.test.mjs") == 1
     assert runner.count("/e2e/browser-next-admin.test.mjs") == 1
     assert (
-        checkpoint_verify_index
-        < policy_values_index
-        < auth_index
-        < conversion_failure_index
-        < admission_index
+        admission_index
         < recovery_index
+        < policy_values_index
         < admin_cookie_index
         < admin_index
         < expiry_index
     )
-    assert '"policy_admin_idle_minutes"' in runner[policy_values_index:auth_index]
-    assert '"policy_revision"' in runner[policy_values_index:auth_index]
-    assert (
-        "value.isascii() and value.isdecimal()"
-        in runner[policy_values_index:auth_index]
-    )
-    invocation = runner[recovery_index:expiry_index]
+    reader = _function(runner, "read_checkpoint_policy_values")
+    assert '"policy_user_idle_minutes"' in reader
+    assert '"policy_admin_idle_minutes"' in reader
+    assert '"policy_revision"' in reader
+    assert "value.isascii() and value.isdecimal()" in reader
+    invocation = runtime[recovery_index:expiry_index]
     assert (
         'run_browser_test "$application_name" '
         "/e2e/browser-next-admin-cookie.test.mjs\n"
@@ -1295,9 +1345,9 @@ def test_runner_invokes_next_administration_with_restored_policy_evidence(
     assert "MARKWEAVE_E2E_CHECKPOINT_USER_IDLE_MINUTES=25" not in runner
     assert "MARKWEAVE_E2E_CHECKPOINT_ADMIN_IDLE_MINUTES=10" not in runner
 
-    extraction_start = runner.index("import json", checkpoint_verify_index)
-    extraction_end = runner.index('\n\' "$state_file"', extraction_start)
-    extraction = runner[extraction_start:extraction_end]
+    extraction_start = reader.index("import json")
+    extraction_end = reader.index('\n\' "$state_file"', extraction_start)
+    extraction = reader[extraction_start:extraction_end]
     compile(extraction, str(RUNNER), "exec")
     state_file = tmp_path / "state.json"
     state_file.write_text(
@@ -1330,16 +1380,15 @@ def test_runner_invokes_next_administration_with_restored_policy_evidence(
 
 @pytest.mark.unit
 def test_next_conversion_admission_phase_holds_workers_and_restores_runtime() -> None:
-    runner = RUNNER.read_text(encoding="utf-8")
+    runner = _runner_text()
     probe_function = runner.index("wait_for_embedded_worker_idle()")
     probe_start = runner.index("from pathlib import Path", probe_function)
     probe_end = runner.index("\n'\n}", probe_start)
     compile(runner[probe_start:probe_end], str(RUNNER), "exec")
-    main_index = runner.index("/e2e/browser-next-conversion.test.mjs")
-    admission_index = runner.index(
-        "/e2e/browser-next-conversion-admission.test.mjs", main_index
-    )
-    phase = runner[main_index:admission_index]
+    runtime = _function(runner, "e2e_phase_browser_runtime")
+    admission_index = runtime.index("/e2e/browser-next-conversion-admission.test.mjs")
+    assert runtime.startswith("use_held_runtime\n")
+    phase = _function(runner, "use_held_runtime")
 
     assert 'podman stop --time 15 "$worker_one_name" "$worker_two_name"' in phase
     assert "MARKWEAVE_JOB_ACTIVE_LIMIT_PER_USER=2" in phase
@@ -1352,16 +1401,24 @@ def test_next_conversion_admission_phase_holds_workers_and_restores_runtime() ->
     assert "stable_samples >= 5" in runner
     assert "deadline = monotonic() + 15" in runner
     assert "sleep 1" not in phase
-    assert phase.index('"${application_settings[@]}"') < phase.index(
+    start = _function(runner, "start_application")
+    assert start.index('"${application_settings[@]}"') < start.index('"$@"')
+    assert phase.index("start_application") < phase.index(
         "MARKWEAVE_JOB_ACTIVE_LIMIT_PER_USER=2"
     )
-    restore = runner[
-        admission_index : runner.index(
+    assert phase.index('podman stop --time 15 "$worker_one_name"') < phase.index(
+        "start_application"
+    )
+    restore = runtime[
+        admission_index : runtime.index(
             'restart_backend_and_router "$application_name"', admission_index
         )
     ]
-    assert 'podman start "$worker_one_name" "$worker_two_name"' in restore
-    assert restore.count('"${application_settings[@]}"') == 1
+    assert "\nuse_browser_runtime\n" in restore
+    browser_runtime = _function(runner, "use_browser_runtime")
+    assert 'podman start "$worker_one_name" "$worker_two_name"' in browser_runtime
+    assert browser_runtime.count("start_application") == 1
+    assert start.count('"${application_settings[@]}"') == 1
 
 
 @pytest.mark.unit
@@ -1432,9 +1489,10 @@ def test_one_reverse_supervisor_owns_each_host_broker_principal() -> None:
 
 @pytest.mark.unit
 def test_reverse_full_matrix_runs_outside_primary_diagnostic() -> None:
-    runner = RUNNER.read_text()
+    runner = _runner_text()
     diagnostic = runner.index(
-        'if [[ "${MARKWEAVE_E2E_REVERSE_PRIMARY_ONLY:-false}" == true ]]'
+        'if [[ "${MARKWEAVE_E2E_REVERSE_PRIMARY_ONLY:-false}" == true ]]; then',
+        runner.index("\ne2e_phase_reverse_api() {\n"),
     )
     corpus = runner.index("tests.e2e.reverse_corpus_workflow")
     structured = runner.index("tests.e2e.structured_pptx_workflow")
@@ -1443,11 +1501,16 @@ def test_reverse_full_matrix_runs_outside_primary_diagnostic() -> None:
     assert diagnostic < runner.index("exit 0", diagnostic) < corpus < structured
     assert structured < structured_cli < structured_browser
     assert runner.count("/e2e/browser-next-reversion.test.mjs") == 4
-    primary = runner.index("--env MARKWEAVE_E2E_REVERSE_PHASE=primary")
-    held = runner.index("--env MARKWEAVE_WORKER_IDLE_POLL_SECONDS=600")
-    admission = runner.index("--env MARKWEAVE_E2E_REVERSE_PHASE=admission")
-    assert primary < held < admission
-    assert runner.index("--reverse-held-queue") > held
+    assert "--env MARKWEAVE_E2E_REVERSE_PHASE=primary" in _function(
+        runner, "e2e_phase_browser_workspaces"
+    )
+    runtime = _function(runner, "e2e_phase_browser_runtime")
+    held = runtime.index("use_held_runtime")
+    admission = runtime.index("--env MARKWEAVE_E2E_REVERSE_PHASE=admission")
+    assert held < runtime.index("--reverse-held-queue") < admission
+    assert "--env MARKWEAVE_WORKER_IDLE_POLL_SECONDS=600" in _function(
+        runner, "use_held_runtime"
+    )
     assert "--env MARKWEAVE_TEST_CLAMAV_REJECT_EICAR=true" in runner
 
 
@@ -1541,7 +1604,7 @@ def test_reverse_broker_crash_signals_verified_child_not_uv_wrapper() -> None:
 @pytest.mark.unit
 def test_runner_invokes_local_image_packaging_in_both_profiles() -> None:
     """T104 browser and CLI packaging run once per final-image profile."""
-    runner = RUNNER.read_text(encoding="utf-8")
+    runner = _runner_text()
     browser = Path("tests/e2e/browser-next-local-images.test.mjs").read_text(
         encoding="utf-8"
     )
@@ -1576,7 +1639,7 @@ def _runner_function(runner: str, name: str, following: str) -> str:
 
 @pytest.mark.unit
 def test_scanner_outage_probe_is_a_documented_bounded_poll() -> None:
-    runner = RUNNER.read_text(encoding="utf-8")
+    runner = _runner_text()
     probe = _runner_function(
         runner, "probe_scanner_outage_routes", "require_reserved_address"
     )
@@ -1605,7 +1668,7 @@ def test_scanner_outage_probe_is_a_documented_bounded_poll() -> None:
 def test_failed_scanner_outage_probe_records_name_resolution(
     probe_status: int, expected_code: int
 ) -> None:
-    runner = RUNNER.read_text(encoding="utf-8")
+    runner = _runner_text()
     probe = _runner_function(
         runner, "probe_scanner_outage_routes", "require_reserved_address"
     )
@@ -1642,7 +1705,7 @@ def test_failed_scanner_outage_probe_records_name_resolution(
 
 @pytest.mark.unit
 def test_name_resolution_record_covers_pinned_and_resolver_paths() -> None:
-    runner = RUNNER.read_text(encoding="utf-8")
+    runner = _runner_text()
     record = _runner_function(
         runner, "record_name_resolution", "probe_scanner_outage_routes"
     )
@@ -1686,7 +1749,7 @@ def _reservation_program(runner: str) -> str:
 def test_e2e_network_reserves_distinct_usable_peer_addresses(
     subnet: str, gateway: str, expected: str | None
 ) -> None:
-    program = _reservation_program(RUNNER.read_text(encoding="utf-8"))
+    program = _reservation_program(_runner_text())
     inspected = f'[{{"subnets": [{{"subnet": "{subnet}", "gateway": "{gateway}"}}]}}]'
     result = subprocess.run(
         [sys.executable, "-c", program],
@@ -1706,7 +1769,7 @@ def test_e2e_network_reserves_distinct_usable_peer_addresses(
 
 @pytest.mark.unit
 def test_storage_peers_use_reserved_addresses_and_host_entries() -> None:
-    runner = RUNNER.read_text(encoding="utf-8")
+    runner = _runner_text()
     start_frontend = _runner_function(
         runner, "start_frontend", "record_name_resolution"
     )
@@ -1761,7 +1824,7 @@ def test_storage_peers_use_reserved_addresses_and_host_entries() -> None:
 def test_reserved_address_check_rejects_a_moved_peer(
     inspected: str, expected_code: int
 ) -> None:
-    runner = RUNNER.read_text(encoding="utf-8")
+    runner = _runner_text()
     check = _runner_function(
         runner, "require_reserved_address", "admission_frontend_origin"
     )
@@ -1835,7 +1898,7 @@ REQUIRED_OUTAGE_ROUTES = ("router_login", "frontend_numeric", "backend_ready")
 def _run_scanner_outage_probe(
     tmp_path: Path, plan: dict[str, list[str]]
 ) -> subprocess.CompletedProcess[str]:
-    runner = RUNNER.read_text(encoding="utf-8")
+    runner = _runner_text()
     probe = _runner_function(
         runner, "probe_scanner_outage_routes", "require_reserved_address"
     )
