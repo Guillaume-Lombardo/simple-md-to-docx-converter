@@ -473,7 +473,8 @@ In Progress until the adoption change is verified on main and final records clos
 - Full document-engine and final-image
   qualification remains a hosted CI gate; Pandoc, Mermaid and LibreOffice
   executables are unavailable on the local PATH.
-- Publication and merge await the explicit AGENTS.md approval.
+- Publication and merge required explicit AGENTS.md approval; the user granted it
+  before the authorized updates below.
 
 ## Prepared pull-request updates
 
@@ -518,4 +519,25 @@ Changed files relative to current main:
 - `tests/test_ci_validation.py`
 - `tickets/T22-finalize-cicd.md`
 
-The existing Dependabot head and current main are ancestors of each local branch; publication uses a normal fast-forward push to the existing PR branch, without history rewriting. No remote update, merge or closure has been performed.
+The existing Dependabot head and current main are ancestors of each local branch; publication uses a normal fast-forward push to the existing PR branch, without history rewriting. This prepared snapshot preceded the authorized remote updates recorded below.
+
+
+## Authorized integration progress
+
+- The user explicitly approved normal pushes to PRs #280 and #294, independent
+  review, squash merges after successful CI, and cleanup of task branches.
+- Independent review found no actionable issues. Additional review checks passed:
+  201 workflow tests, eight real PDFium tests, 50 Composer connection/encryption
+  tests, static checking, canonical constraints and immutable upstream Action pins.
+- Initial hosted CI passed all 19 jobs on both reviewed heads: run 38245391028
+  for #280 and run 38245415833 for #294. These runs include document engines,
+  golden checks, storage, coverage, and both final-image E2E modes.
+- PR #280 was independently squash merged on October 12, 2026 at 12:36:30 UTC
+  as 745367ff3fb4cadadd6f140a2954b4e6f18567ee, without bypassing protections.
+- PR #294 incorporates that main commit through a normal merge. The refreshed
+  base passes uv sync, Ruff formatting/lint, ty, the CI validator, and 201
+  workflow tests. Its new head must pass hosted CI and independent review
+  before the separately authorized squash merge.
+- T22 remains In Progress while Mermaid #274 awaits its adapter migration
+  and engine/golden/final-image qualification. The published version remains
+  0.7.5 and Compose receipt digests remain unchanged.
