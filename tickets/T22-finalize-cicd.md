@@ -541,3 +541,12 @@ The existing Dependabot head and current main are ancestors of each local branch
 - T22 remains In Progress while Mermaid #274 awaits its adapter migration
   and engine/golden/final-image qualification. The published version remains
   0.7.5 and Compose receipt digests remain unchanged.
+
+
+## Remaining Python Dependabot qualification (#298)
+
+- Qualify Kubernetes 37.0.0 against the existing bounded exec adapter and SDK
+  integration tests; narrow the protocol to the exact keyword arguments used.
+- Adopt pypdf 6.20.0 and regenerate canonical hash-required build constraints.
+- Preserve the paused Kubernetes capability, version 0.7.5 and public image pins.
+- Validation and remote publication are pending.
