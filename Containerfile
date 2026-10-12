@@ -30,7 +30,7 @@ RUN install-md-converter-fonts \
     && rm -rf /tmp/md-converter-fonts
 
 RUN curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
-        --connect-timeout 20 --max-time 180 --retry 3 --retry-delay 2 --retry-max-time 600 \
+        --connect-timeout 20 --max-time 180 --retry 8 --retry-max-time 600 \
         --retry-all-errors \
         "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-linux-amd64.tar.gz" \
         --output /tmp/pandoc.tar.gz \
@@ -39,7 +39,7 @@ RUN curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
     && rm /tmp/pandoc.tar.gz
 
 RUN curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
-        --connect-timeout 20 --max-time 180 --retry 3 --retry-delay 2 --retry-max-time 600 \
+        --connect-timeout 20 --max-time 180 --retry 8 --retry-max-time 600 \
         --retry-all-errors \
         "https://dl.google.com/linux/linux_signing_key.pub" \
         --output /tmp/google-linux-signing-key.pub \
@@ -48,7 +48,7 @@ RUN curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
     && rpm --import /tmp/google-linux-signing-key.pub \
     && rm /tmp/google-linux-signing-key.pub \
     && curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
-        --connect-timeout 20 --max-time 180 --retry 3 --retry-delay 2 --retry-max-time 600 \
+        --connect-timeout 20 --max-time 180 --retry 8 --retry-max-time 600 \
         --retry-all-errors \
         "https://dl.google.com/linux/chrome/rpm/stable/x86_64/google-chrome-stable-${CHROME_VERSION}.x86_64.rpm" \
         --output /tmp/google-chrome.rpm \
@@ -81,7 +81,7 @@ RUN npm ci --omit=dev --ignore-scripts \
     && rm -f /usr/bin/npm /usr/bin/npx
 
 RUN curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
-        --connect-timeout 20 --max-time 180 --retry 3 --retry-delay 2 --retry-max-time 600 \
+        --connect-timeout 20 --max-time 180 --retry 8 --retry-max-time 600 \
         --retry-all-errors \
         "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" \
         --output /tmp/uv.tar.gz \

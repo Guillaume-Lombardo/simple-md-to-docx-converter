@@ -526,8 +526,8 @@ def test_checksum_pinned_container_downloads_use_bounded_transient_retries() -> 
         encoding="utf-8"
     )
     retry = (
-        "--connect-timeout 20 --max-time 180 --retry 3 --retry-delay 2 "
-        "--retry-max-time 600 \\\n        --retry-all-errors \\\n"
+        "--connect-timeout 20 --max-time 180 --retry 8 --retry-max-time 600 \\\n"
+        "        --retry-all-errors \\\n"
     )
 
     assert containerfile.count(retry) == 4
@@ -535,12 +535,14 @@ def test_checksum_pinned_container_downloads_use_bounded_transient_retries() -> 
     for source in (containerfile, reverse_attempt):
         assert "sha256sum --check --strict" in source
         # A retry budget below one transfer bound would make curl give up after a
-        # timed-out attempt instead of retrying it.
+        # timed-out attempt instead of retrying it, and a fixed --retry-delay
+        # would replace curl's doubling backoff with a window of a few seconds.
+        assert "--retry-delay" not in source
         for match in re.finditer(
-            r"--max-time (\d+) --retry \d+ --retry-delay \d+ --retry-max-time (\d+)",
-            source,
+            r"--max-time (\d+) --retry (\d+) --retry-max-time (\d+)", source
         ):
-            assert int(match.group(2)) >= 3 * int(match.group(1))
+            assert int(match.group(3)) >= 3 * int(match.group(1))
+            assert int(match.group(2)) >= 8
         assert source.count("curl --fail") == source.count("--retry-all-errors")
 
 
@@ -1479,5 +1481,9 @@ def test_document_engine_font_downloads_retry_before_checksum_verification() -> 
     )
     fetch = installer.split("fetch() {", 1)[1].split("\n}\n", 1)[0]
 
-    assert "--connect-timeout 20 --max-time 120 --retry 5 --retry-all-errors" in fetch
+    assert (
+        "--connect-timeout 20 --max-time 120 --retry 8 --retry-max-time 600 \\\n"
+        "        --retry-all-errors" in fetch
+    )
+    assert "--retry-delay" not in fetch
     assert fetch.index("curl --fail") < fetch.index("sha256sum --check --strict")

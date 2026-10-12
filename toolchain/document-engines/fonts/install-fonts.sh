@@ -8,11 +8,13 @@ mkdir -p "$font_dir" "$notice_dir" "$work_dir"
 
 fetch() {
     local url=$1 expected=$2 destination=$3
-    # Bounded retries absorb transient upstream failures; the pinned checksum
-    # below still rejects any incomplete or altered archive.
+    # Eight retries with curl's doubling backoff (1 s up to 128 s) span about
+    # four minutes, bounded to ten, so a short upstream incident such as a
+    # burst of HTTP 500 responses is survived. The pinned checksum below still
+    # rejects any incomplete or altered archive.
     curl --fail --location --silent --show-error \
-        --connect-timeout 20 --max-time 120 --retry 5 --retry-all-errors \
-        "$url" --output "$destination"
+        --connect-timeout 20 --max-time 120 --retry 8 --retry-max-time 600 \
+        --retry-all-errors "$url" --output "$destination"
     echo "$expected  $destination" | sha256sum --check --strict
 }
 
