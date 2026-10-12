@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import socket
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from threading import Thread
@@ -21,7 +21,7 @@ pytestmark = pytest.mark.light_coverage
 
 
 @contextmanager
-def running_server(settings: Settings) -> Iterator[str]:
+def running_server(settings: Settings) -> Generator[str]:
     """Run Uvicorn on an ephemeral loopback port and always stop its thread."""
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

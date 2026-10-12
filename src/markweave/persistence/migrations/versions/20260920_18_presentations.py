@@ -1,6 +1,6 @@
 """Add typed reference templates and immutable presentation job options."""
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 
 import sqlalchemy as sa
@@ -13,7 +13,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 @contextmanager
-def _preserve_sqlite_triggers() -> Iterator[None]:
+def _preserve_sqlite_triggers() -> Generator[None]:
     """Keep integrity/audit triggers across SQLite 3.34 table-copy operations."""
     bind = op.get_bind()
     triggers = (

@@ -7,7 +7,7 @@ import os
 import signal
 import subprocess
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager, suppress
 from pathlib import Path
 from threading import Lock
@@ -23,7 +23,7 @@ _SUBREAPER_LOCK = Lock()
 
 
 @contextmanager
-def _subreaper() -> Iterator[None]:
+def _subreaper() -> Generator[None]:
     """Own orphan descendants during one serialized Linux release command."""
     with _SUBREAPER_LOCK:
         libc = ctypes.CDLL(None, use_errno=True)

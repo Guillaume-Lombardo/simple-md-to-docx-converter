@@ -10,7 +10,7 @@ import ssl
 import subprocess
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -102,7 +102,7 @@ def _podman(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[
 
 
 @contextmanager
-def _retain_fixture_image(image: str, purpose: str) -> Iterator[None]:
+def _retain_fixture_image(image: str, purpose: str) -> Generator[None]:
     """Keep one fixture image referenced by a never-started container."""
 
     container_id: str | None = None

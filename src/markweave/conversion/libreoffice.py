@@ -15,7 +15,7 @@ import threading
 import time
 import unicodedata
 import zipfile
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager, suppress
 from dataclasses import asdict, dataclass, field
 from pathlib import Path, PurePosixPath
@@ -553,7 +553,7 @@ def _walk_pdf_object(
 
 
 @contextmanager
-def _bounded_pdf_parser(limits: PdfLimits) -> Iterator[None]:
+def _bounded_pdf_parser(limits: PdfLimits) -> Generator[None]:
     """Serialize pypdf while applying this call's decoded-stream bounds."""
 
     with _PDF_PARSE_LOCK:

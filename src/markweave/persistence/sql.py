@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import builtins
 import math
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from functools import partial
@@ -95,7 +95,7 @@ def managed_database_engine(
     *,
     timeout_seconds: float | None = None,
     pool_pre_ping: bool = True,
-) -> Iterator[Engine]:
+) -> Generator[Engine]:
     """Yield one engine and dispose its complete pool on every exit path."""
 
     engine = create_database_engine(
