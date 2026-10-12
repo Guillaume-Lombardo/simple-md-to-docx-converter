@@ -7,7 +7,7 @@ import json
 import os
 import signal
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -34,7 +34,7 @@ PANDOC = EngineObservation("pandoc", "3.10.2", "3.10.2", EngineVersionStatus.PIN
 
 
 @contextmanager
-def opened(path: Path) -> Iterator[int]:
+def opened(path: Path) -> Generator[int]:
     descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
     try:
         yield descriptor

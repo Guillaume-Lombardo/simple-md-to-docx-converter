@@ -15,6 +15,7 @@ import struct
 import tarfile
 import tomllib
 import zipfile
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from email.message import Message
@@ -23,7 +24,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import IO, TYPE_CHECKING, Any, BinaryIO
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Iterable
 
 MANIFEST_NAME = "release-integrity.json"
 MANIFEST_SCHEMA_VERSION = 1
@@ -148,7 +149,7 @@ def _require_unique_paths(paths: Iterable[str]) -> list[str]:
 
 
 @contextmanager
-def _open_regular(path: Path, *, max_bytes: int, label: str) -> Iterator[BinaryIO]:
+def _open_regular(path: Path, *, max_bytes: int, label: str) -> Generator[BinaryIO]:
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
         descriptor = os.open(path, flags)

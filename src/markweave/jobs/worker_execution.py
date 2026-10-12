@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -208,7 +208,7 @@ class JobHeartbeatService:
             self._heartbeat()
 
     @contextmanager
-    def guarded(self) -> Iterator[None]:
+    def guarded(self) -> Generator[None]:
         with self._operation_lock:
             if self._errors:
                 raise self._errors[0]

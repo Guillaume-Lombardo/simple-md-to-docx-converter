@@ -7,7 +7,7 @@ import json
 import os
 import subprocess
 import sys
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -53,7 +53,7 @@ def _step_response(*, status: str = "running") -> bytes:
 
 
 @contextmanager
-def _policy_service() -> Iterator[tuple[str, list[dict[str, Any]]]]:
+def _policy_service() -> Generator[tuple[str, list[dict[str, Any]]]]:
     requests: list[dict[str, Any]] = []
     policy = {
         "mode": "delegated",
@@ -131,7 +131,7 @@ def _service(
     *,
     artifact_headers: dict[str, str] | None = None,
     model_error_text: str | None = None,
-) -> Iterator[tuple[str, list[dict[str, Any]]]]:
+) -> Generator[tuple[str, list[dict[str, Any]]]]:
     received: list[dict[str, Any]] = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -290,7 +290,7 @@ def _private_file(path: Path, value: str) -> None:
 
 
 @contextmanager
-def _typed_service() -> Iterator[tuple[str, list[dict[str, Any]]]]:
+def _typed_service() -> Generator[tuple[str, list[dict[str, Any]]]]:
     requests: list[dict[str, Any]] = []
 
     class Handler(BaseHTTPRequestHandler):

@@ -8,7 +8,7 @@ import math
 import re
 import sys
 from collections import defaultdict
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
@@ -214,7 +214,7 @@ def reset_correlation_id(token: Token[str | None]) -> None:
 
 
 @contextmanager
-def correlated(value: str) -> Iterator[None]:
+def correlated(value: str) -> Generator[None]:
     """Bind correlation for one request or durable worker operation."""
 
     token = bind_correlation_id(value)

@@ -6,7 +6,7 @@ import hashlib
 import hmac
 import json
 import sqlite3
-from collections.abc import Iterator, Sequence
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Never
@@ -250,7 +250,7 @@ class _SQLiteInventoryStorage:
             _inventory_fail()
 
     @contextmanager
-    def _connect(self) -> Iterator[sqlite3.Connection]:
+    def _connect(self) -> Generator[sqlite3.Connection]:
         connection = sqlite3.connect(self._path, timeout=10, isolation_level=None)
         try:
             connection.row_factory = sqlite3.Row
@@ -265,7 +265,7 @@ class _SQLiteInventoryStorage:
             connection.close()
 
     @contextmanager
-    def _transaction(self) -> Iterator[sqlite3.Connection]:
+    def _transaction(self) -> Generator[sqlite3.Connection]:
         try:
             with self._connect() as connection:
                 connection.execute("BEGIN IMMEDIATE")
@@ -280,7 +280,7 @@ class _SQLiteInventoryStorage:
             _inventory_fail()
 
     @contextmanager
-    def _read_snapshot(self, connection: sqlite3.Connection) -> Iterator[None]:
+    def _read_snapshot(self, connection: sqlite3.Connection) -> Generator[None]:
         connection.execute("BEGIN")
         try:
             yield
@@ -288,7 +288,7 @@ class _SQLiteInventoryStorage:
             connection.rollback()
 
     @contextmanager
-    def _verified_connection(self) -> Iterator[sqlite3.Connection]:
+    def _verified_connection(self) -> Generator[sqlite3.Connection]:
         try:
             with self._connect() as connection, self._read_snapshot(connection):
                 self._verify_all(connection)

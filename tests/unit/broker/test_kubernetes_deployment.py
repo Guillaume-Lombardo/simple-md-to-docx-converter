@@ -43,7 +43,7 @@ def _resources() -> list[dict[str, Any]]:
         .replace("@REQUIRED_POD_EXEC_TIMEOUT_SECONDS@", "10")
         .replace("@REQUIRED_POD_POLL_INTERVAL_SECONDS@", "0.1")
     )
-    return cast(list[dict[str, Any]], list(yaml.safe_load_all(rendered)))
+    return list(yaml.safe_load_all(rendered))
 
 
 @pytest.mark.unit

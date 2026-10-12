@@ -28,7 +28,7 @@ from tests.golden.reference import normalize_reference_docx
 
 LIBREOFFICE_VERSION = "LibreOffice 26.2.5.2 cd7284b4cbbfeb507e630c1aac019f4157393acb"
 PANDOC_VERSION = "3.10.2"
-PDFIUM_VERSION = "5.13.0"
+PDFIUM_VERSION = "5.14.0"
 DPI = 96
 PDF_LIMITS = PdfLimits(
     max_docx_bytes=20_000_000,
