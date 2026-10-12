@@ -256,3 +256,46 @@ def test_application_log_handler_never_outlives_its_capture_stream(
     )
     result = _run(pytester, mode)
     result.assert_outcomes(passed=2)
+
+
+@pytest.mark.integration
+@pytest.mark.light_coverage
+@MODES
+def test_child_subreaper_leak_fails_its_own_test_and_is_undone(
+    pytester: pytest.Pytester,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: tuple[str, ...],
+) -> None:
+    """A test that leaves the worker a subreaper fails, and later tests do not.
+
+    A leaked subreaper adopted every later orphan without reaping it, and the
+    zombie kept the orphan's process group alive for the local service stack.
+    """
+    _project(pytester, monkeypatch)
+    pytester.makeconftest(
+        HARNESS_CONFTEST + "from tests.conftest import keep_child_subreaper_state\n"
+    )
+    pytester.makepyfile(
+        test_sample=(
+            "import ctypes\n"
+            "from tests.conftest import child_subreaper_state\n\n\n"
+            "def test_clean_before():\n"
+            "    assert child_subreaper_state() == 0\n\n\n"
+            "def test_leaves_subreaper():\n"
+            "    assert ctypes.CDLL(None).prctl(36, 1, 0, 0, 0) == 0\n"
+            "    assert child_subreaper_state() == 1\n\n\n"
+            "def test_clean_after():\n"
+            "    assert child_subreaper_state() == 0\n"
+        )
+    )
+    result = _run(pytester, mode)
+    result.assert_outcomes(passed=3, errors=1)
+    result.stdout.fnmatch_lines(
+        [
+            "*ERROR*test_leaves_subreaper*",
+            "*left PR_SET_CHILD_SUBREAPER at 1 instead of 0*",
+        ]
+    )
+    errors = [line for line in result.stdout.lines if "ERROR " in line]
+    assert errors
+    assert all("test_leaves_subreaper" in line for line in errors), errors

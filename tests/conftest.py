@@ -1,5 +1,6 @@
 """Shared fixtures for the reference corpus."""
 
+import ctypes
 import gc
 import logging
 import os
@@ -33,6 +34,10 @@ FASTAPI_DEPENDENCY_CACHES = (
     "_is_async_gen_callable_cached",
     "_is_coroutine_callable_cached",
 )
+PR_SET_CHILD_SUBREAPER = 36
+PR_GET_CHILD_SUBREAPER = 37
+# Bound once, so a test that patches ``ctypes.CDLL`` cannot blind the guard.
+_LIBC = ctypes.CDLL(None, use_errno=True) if sys.platform.startswith("linux") else None
 
 
 @pytest.hookimpl(tryfirst=True)
@@ -158,6 +163,46 @@ def isolate_application_log_handlers() -> Iterator[None]:
         if handler not in before and isinstance(handler.formatter, JsonLogFormatter):
             logger.removeHandler(handler)
             handler.close()
+
+
+def _prctl(libc: ctypes.CDLL, option: int, argument: object) -> None:
+    if libc.prctl(option, argument, 0, 0, 0) != 0:
+        error_number = ctypes.get_errno()
+        raise OSError(error_number, os.strerror(error_number))
+
+
+def child_subreaper_state() -> int | None:
+    """Return this process's ``PR_SET_CHILD_SUBREAPER`` value, or ``None`` off Linux."""
+    if _LIBC is None:
+        return None
+    state = ctypes.c_int()
+    _prctl(_LIBC, PR_GET_CHILD_SUBREAPER, ctypes.byref(state))
+    return state.value
+
+
+@pytest.fixture(autouse=True)
+def keep_child_subreaper_state() -> Iterator[None]:
+    """Fail a test that leaves this process a child subreaper, and undo it.
+
+    The attribute is process-wide and survives the test that set it. A
+    subreaper adopts every later orphaned descendant, and nothing in pytest
+    reaps it, so the orphan ends as a zombie whose process group still exists.
+    The local service stack then never sees its Docker command groups end and
+    refuses to release its owner lock: every later test with a detached
+    descendant failed after the full retry and grace bounds, far from the test
+    that set the attribute. Restoring it confines the damage to that test,
+    which fails at teardown.
+    """
+    before = child_subreaper_state()
+    yield
+    after = child_subreaper_state()
+    if _LIBC is None or after == before:
+        return
+    _prctl(_LIBC, PR_SET_CHILD_SUBREAPER, before)
+    pytest.fail(
+        f"The test left PR_SET_CHILD_SUBREAPER at {after} instead of {before}; "
+        "restore it before the test ends."
+    )
 
 
 def _collect_frozen_garbage() -> list[str]:
