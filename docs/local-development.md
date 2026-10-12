@@ -264,16 +264,40 @@ container, and E2E domains by `scripts/ci/select_domains.py`. Domain lifecycle m
 as executed. Activate a domain only in the ticket that delivers its real suite by changing its
 status to `active` and adding the reviewed command as an argument array; the matrix runner invokes
 that array without a shell. Scheduled, release, and manual runs select every domain, including both
-storage profiles. The self-contained `scripts/e2e/run-compose*.sh` runners select only the
-`compose` domain; every other `scripts/e2e/` change still selects both final-image E2E profiles.
+storage profiles. The four Compose sub-suites (`compose-secure`, `compose-simple-docker`,
+`compose-simple-podman`, and `compose-podman-insecure`) are separate domains. Shared quickstart
+inputs select all of them, and each self-contained `scripts/e2e/run-compose*.sh` runner selects
+only the domains that execute it; every other `scripts/e2e/` change still selects every
+final-image E2E shard of both profiles.
+
+Domains that need the final images (`container`, `supply-chain`, `frontend`, and the final-image
+E2E shards `e2e-standalone-<n>` and `e2e-distributed-<n>`) run in the `final-image` matrix. Every
+other active domain runs in the `heavy` matrix. When a final-image domain is selected,
+`CI / build images` builds each required backend, frontend, and reverse-attempt image exactly once
+for the run, after acquiring the pinned base images with retries. It exports each image with
+`podman save --format oci-archive`, verifies that the archive configuration digest is the built
+image ID, uploads one run-scoped archive per image for one day, and publishes the IDs as job
+outputs. It writes no cache from an untrusted context and publishes nothing to a registry. Each
+consumer downloads only the archives its domain needs. `scripts/container/ci_images.py load`
+tags an image only after the archive configuration digest, the ID that `podman load` reports, and
+the tagged image's ID all equal the build output; a missing, substituted, or partially loaded
+archive fails closed.
+
+`scripts/e2e/run.sh` groups its scenarios into phases and assigns every phase to one shard.
+`MARKWEAVE_E2E_SHARD=<n>` runs one shard on a fresh deployment, re-seeding through `e2e_seed_*`
+functions the state a phase of another shard would otherwise produce. Unset or `all` runs every
+shard in order on one deployment, as releases do. The CI validator runs
+`scripts/ci/e2e_shards.py`, which fails when a scenario is outside every phase, reachable from more
+than one shard, or hidden in a seed; `uv run python -m scripts.ci.e2e_shards` prints the shard map.
 
 The `ci-infrastructure` domain is active now. Changes to the detector, runner, registry, workflow,
 or its integration tests must run the real subprocess and quality-policy success and failure cases
-in `tests/test_ci_runner.py` and `tests/integration/ci`; `CI / gate` rejects a skipped or failed
-heavy matrix whenever any active domain was selected. The heavy matrix runs at most eight domains
-in parallel and its domains share one `py314-heavy` `uv` cache entry. Caches are restore-only
-outside trusted pushes to `main`, including pull requests, forks, merge groups, releases,
-schedules, and manual runs.
+in `tests/test_ci_runner.py` and `tests/integration/ci`. `CI / gate` requires the `heavy` and
+`final-image` partitions to cover exactly the runnable domains, and rejects a skipped or failed
+matrix, or a skipped or failed image build, whenever one of its domains was selected. Each matrix
+runs at most eight domains in parallel, and the heavy and final-image domains share one
+`py314-heavy` `uv` cache entry. Caches are restore-only outside trusted pushes to `main`, including
+pull requests, forks, merge groups, releases, schedules, and manual runs.
 
 Active domains run their registered functional, document-engine, storage, container, and final-image
 suites as selected. The stable gate fails when a selected active domain is skipped or fails.

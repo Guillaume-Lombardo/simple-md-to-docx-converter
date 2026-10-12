@@ -630,3 +630,140 @@ def test_failure_artifact_is_bounded_private_and_sanitized_by_caller(
     assert payload["profile"] == "standalone"
     assert len(payload["message"]) == 300
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def _seed_arguments(tmp_path: Path) -> argparse.Namespace:
+    template = tmp_path / "template.docx"
+    template.write_bytes(b"docx")
+    return argparse.Namespace(
+        base_url="http://service.test",
+        profile="distributed",
+        template=template,
+        state_file=tmp_path / "seed" / "state.json",
+        admin_username="admin",
+        admin_password="password",  # noqa: S106 - test-only credential
+    )
+
+
+@pytest.mark.unit
+def test_browser_seed_recreates_fallback_and_policy_checkpoint(
+    mocker: MockerFixture, tmp_path: Path
+) -> None:
+    """A fresh browser shard gets the service phase's fallback and policy state."""
+    client = mocker.Mock()
+    template_id = identifier()
+    create_template = mocker.patch.object(
+        workflow, "create_template", return_value={"id": template_id}
+    )
+    client.request.side_effect = (
+        workflow.HttpResult(204, {}, b"", ()),
+        workflow.HttpResult(
+            200,
+            {"etag": '"policy-0"'},
+            b'{"revision": 0, "user_idle_minutes": 30, "admin_idle_minutes": 15}',
+            (),
+        ),
+    )
+    json_request = mocker.patch.object(
+        workflow, "json_request", return_value=workflow.HttpResult(200, {}, b"{}", ())
+    )
+    evidence = checkpoint()
+    policy = {key: value for key, value in evidence.items() if key.startswith("policy")}
+    mocker.patch.object(workflow, "checkpoint_policy_evidence", return_value=policy)
+    mocker.patch.object(workflow, "ServiceClient", return_value=client)
+    arguments = _seed_arguments(tmp_path)
+
+    workflow.seed_browser_prerequisites(arguments)
+
+    client.login.assert_called_once_with("admin", "password")
+    assert create_template.call_args.args[:2] == (client, arguments.template)
+    assert client.request.call_args_list[0].args == (
+        "PUT",
+        f"/api/v1/templates/{template_id}/system-fallback",
+    )
+    assert json_request.call_args.args[1:4] == (
+        "PUT",
+        "/api/v1/admin/session-policy",
+        {"user_idle_minutes": 300, "admin_idle_minutes": 60},
+    )
+    assert json_request.call_args.kwargs["headers"] == {"If-Match": '"policy-0"'}
+    state = json.loads(arguments.state_file.read_text(encoding="utf-8"))
+    assert state == {
+        "schema": "t135-browser-seed-v1",
+        "profile": "distributed",
+        "template_id": template_id,
+        **policy,
+    }
+    assert stat.S_IMODE(arguments.state_file.stat().st_mode) == 0o600
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("policy", "headers", "message"),
+    [
+        (b'{"revision": 3}', {"etag": '"policy-3"'}, "deployment is not fresh"),
+        (b'{"revision": 0}', {}, "ETag is missing"),
+    ],
+)
+def test_browser_seed_requires_a_fresh_policy_baseline(
+    mocker: MockerFixture,
+    tmp_path: Path,
+    policy: bytes,
+    headers: dict[str, str],
+    message: str,
+) -> None:
+    client = mocker.Mock()
+    mocker.patch.object(workflow, "create_template", return_value={"id": identifier()})
+    client.request.side_effect = (
+        workflow.HttpResult(204, {}, b"", ()),
+        workflow.HttpResult(200, headers, policy, ()),
+    )
+    mocker.patch.object(workflow, "ServiceClient", return_value=client)
+    arguments = _seed_arguments(tmp_path)
+
+    with pytest.raises(workflow.WorkflowFailure, match=message):
+        workflow.seed_browser_prerequisites(arguments)
+    assert not arguments.state_file.exists()
+
+
+@pytest.mark.unit
+def test_browser_seed_command_requires_template_and_state_file(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    parser = workflow.build_parser()
+    for missing in (
+        ["--state-file", str(tmp_path / "state.json")],
+        ["--template", str(tmp_path / "missing.docx")],
+    ):
+        arguments = parser.parse_args(
+            [
+                "seed-browser-prerequisites",
+                "--base-url",
+                "http://service.test",
+                "--profile",
+                "standalone",
+                *missing,
+            ]
+        )
+        with pytest.raises(SystemExit):
+            workflow.validate_arguments(parser, arguments)
+    seed = mocker.patch.object(workflow, "seed_browser_prerequisites")
+    template = tmp_path / "template.docx"
+    template.write_bytes(b"docx")
+    assert (
+        workflow.main(
+            [
+                "seed-browser-prerequisites",
+                "--base-url",
+                "http://service.test",
+                "--profile",
+                "standalone",
+                "--template",
+                str(template),
+                "--state-file",
+                str(tmp_path / "state.json"),
+            ]
+        )
+        == 0
+    )
+    seed.assert_called_once()

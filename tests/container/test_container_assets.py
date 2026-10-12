@@ -19,6 +19,7 @@ import yaml
 
 from scripts.container import (
     api_workflow_smoke,
+    ci_images,
     integrity,
     summarize_supply_chain,
     verify_oci_export,
@@ -228,6 +229,7 @@ def test_container_workflow_rejects_structured_capability_drift(
         "scripts/container/distributed-api-smoke.sh",
         "scripts/container/recovery-cli-smoke.sh",
         "scripts/container/run-ci.sh",
+        "scripts/container/run-ci-supply-chain.sh",
         "scripts/container/pull-base-images.sh",
         "scripts/container/smoke.sh",
         "scripts/container/supply-chain.sh",
@@ -272,13 +274,7 @@ def test_recovery_smoke_is_a_required_ci_and_release_final_image_gate() -> None:
     )
 
     assert run_ci.count(ci_command) == 1
-    assert (
-        run_ci.index('bash scripts/container/build.sh "$final_image"')
-        < run_ci.index(ci_command)
-        < run_ci.index(
-            'bash scripts/container/supply-chain.sh "$final_image" artifacts/container'
-        )
-    )
+    assert run_ci.index('podman image exists "$final_image"') < run_ci.index(ci_command)
     assert release_run.count(release_command) == 1
     assert release_run.index(
         'bash scripts/container/build.sh "$backend_image"'
@@ -408,13 +404,16 @@ def test_final_e2e_proves_scanner_network_path_before_user_workflows() -> None:
         runner.index("hardened_runtime=(") : runner.index("start_production_router()")
     ]
     assert "--add-host" not in hardened_runtime
+    # The Composer diagnostic repeats the mapped probe before its own scenarios;
+    # the canonical probe is the last one and precedes every shard phase.
     assert (
-        runner.index(alias_probe) < runner.index(mapping) < runner.index(mapped_probe)
+        runner.index(alias_probe) < runner.index(mapping) < runner.rindex(mapped_probe)
     )
     assert '"${scanner_host_mapping[@]}"' in runner
-    assert runner.index(mapped_probe) < runner.index(
+    assert runner.rindex(mapped_probe) < runner.index(
         "tests.e2e.service_workflow exercise-security-boundaries"
     )
+    assert runner.rindex(mapped_probe) < runner.index("\ne2e_phase_reverse_api() {")
 
 
 def test_scanner_readiness_runs_exact_protocol_probe_from_network_peer(
@@ -554,18 +553,14 @@ def test_final_image_e2e_pulls_and_verifies_the_pinned_base_before_build() -> No
         r"bash scripts/container/pull-base-images\.sh \\\n\s+"
         r"Containerfile containers/reverse-attempt/Containerfile web/Containerfile\n"
     )
-    for script_path, build in (
-        (Path("scripts/e2e/run.sh"), 'bash scripts/container/build.sh "$image"'),
-        (
-            Path("scripts/container/run-ci.sh"),
-            'bash scripts/container/build.sh "$final_image"',
-        ),
-    ):
-        script = script_path.read_text(encoding="utf-8")
-        matches = list(pull.finditer(script))
-        assert len(matches) == 1
-        assert matches[0].start() < script.index(build)
-        assert "base_digest" not in script
+    script = Path("scripts/e2e/run.sh").read_text(encoding="utf-8")
+    matches = list(pull.finditer(script))
+    assert len(matches) == 1
+    assert matches[0].start() < script.index('bash scripts/container/build.sh "$image"')
+    assert "base_digest" not in script
+    assert "build.sh" not in Path("scripts/container/run-ci.sh").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_distributed_e2e_acquires_pinned_storage_services_before_running_them() -> None:
@@ -784,13 +779,16 @@ def test_supply_chain_retains_complete_scan_and_ci_evidence() -> None:
     )
     assert "--only-fixed" not in script
     assert "vulnerabilities.json" in script
-    heavy_steps = workflow["jobs"]["heavy"]["steps"]
+    final_image_steps = workflow["jobs"]["final-image"]["steps"]
     upload = next(
         step
-        for step in heavy_steps
+        for step in final_image_steps
         if step["name"] == "Retain final-image verification evidence"
     )
-    assert upload["if"] == "${{ always() && matrix.domain == 'container' }}"
+    assert upload["if"] == (
+        "${{ always() && (matrix.domain == 'container' || "
+        "matrix.domain == 'supply-chain') }}"
+    )
     assert upload["with"]["retention-days"] == 30
     assert upload["with"]["if-no-files-found"] == "error"
     for artifact in (
@@ -799,7 +797,6 @@ def test_supply_chain_retains_complete_scan_and_ci_evidence() -> None:
         "vulnerabilities.json",
         "image-metadata.json",
         "container-diagnostics/ci-status.txt",
-        "container-diagnostics/frontend-oci-identity.txt",
         "container-diagnostics/scanner-readiness.txt",
     ):
         assert artifact in upload["with"]["path"]
@@ -832,10 +829,15 @@ def test_every_frontend_image_build_command_requests_oci_format() -> None:
     )
     helper = Path("scripts/container/build-frontend.sh").read_text(encoding="utf-8")
     callers = (
-        Path("scripts/container/run-ci.sh").read_text(encoding="utf-8"),
         Path("scripts/e2e/run.sh").read_text(encoding="utf-8"),
         Path("web/scripts/run-rootless-smoke.sh").read_text(encoding="utf-8"),
     )
+    assert ci_images._build_command("frontend", "1700000000") == [
+        "bash",
+        "scripts/container/build-frontend.sh",
+        "localhost/md-converter-web:ci",
+        "1700000000",
+    ]
 
     assert "podman build --format oci" in release
     assert "build_options=(--pull=never --format oci)" in helper
@@ -936,23 +938,44 @@ def test_base_image_acquisition_reads_every_pinned_containerfile_base(
     assert "declares no digest-pinned base image" in rejected.stderr
 
 
-def test_container_ci_exports_and_verifies_real_frontend_oci_identity() -> None:
-    script = Path("scripts/container/run-ci.sh").read_text(encoding="utf-8")
-    build = 'bash scripts/container/build-frontend.sh "$frontend_image" "$source_date_epoch"'
-    resolve = "podman image inspect \"$frontend_image\" --format '{{.Id}}'"
-    export = (
-        'podman save --format oci-archive --output "$frontend_archive" '
-        '"$frontend_image_id"'
+def test_container_ci_consumes_only_the_verified_single_build() -> None:
+    """Container smokes and supply-chain scans never rebuild their images."""
+    for path in (
+        Path("scripts/container/run-ci.sh"),
+        Path("scripts/container/run-ci-supply-chain.sh"),
+    ):
+        script = path.read_text(encoding="utf-8")
+        assert "podman build" not in script
+        assert "build.sh" not in script
+        assert "build-reverse-attempt.sh" not in script
+        assert "build-frontend.sh" not in script
+        assert "podman save" not in script
+        for image in (
+            "readonly final_image=localhost/md-converter:ci",
+            "readonly reverse_attempt_image=localhost/md-converter-reverse-attempt:ci",
+        ):
+            assert image in script
+        rootless = (
+            "test \"$(podman info --format '{{.Host.Security.Rootless}}')\" = true"
+        )
+        assert script.index(rootless) < script.index(
+            'podman image exists "$final_image"'
+        )
+    supply_chain = Path("scripts/container/run-ci-supply-chain.sh").read_text(
+        encoding="utf-8"
     )
-    verify = "uv run python -m scripts.container.verify_oci_export"
-
-    assert script.count(build) == 1
-    assert script.count(resolve) == 1
-    assert script.count(export) == 1
-    assert script.count(verify) == 1
-    assert script.index(build) < script.index(resolve) < script.index(export)
-    assert script.index(export) < script.index(verify)
-    assert '| tee "$evidence_directory/frontend-oci-identity.txt"' in script
+    assert (
+        'bash scripts/container/supply-chain.sh "$final_image" artifacts/container'
+        in supply_chain
+    )
+    assert (
+        "bash scripts/container/supply-chain.sh \\\n"
+        '  "$reverse_attempt_image" artifacts/reverse-attempt ci reverse-attempt'
+        in supply_chain
+    )
+    assert "supply-chain.sh" not in Path("scripts/container/run-ci.sh").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_oci_export_verifier_accepts_only_the_expected_config_digest(

@@ -11,26 +11,107 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
 
+COMPOSE_PATTERNS = (
+    ".gitignore",
+    "README.md",
+    "compose.simple.yaml",
+    "compose.simple-composer.yaml",
+    "compose.podman.yaml",
+    "compose.podman-trusted-upstream.yaml",
+    "compose.trusted-upstream.yaml",
+    "compose.yaml",
+    "docs/local-development.md",
+    "examples/**",
+    "scripts/quickstart-simple.sh",
+    "scripts/quickstart.sh",
+    "scripts/e2e/run-compose-all.sh",
+    "tests/test_quickstart_compose.py",
+)
+
+CONTAINER_PATTERNS = (
+    "toolchain/document-engines/**",
+    "LICENSE",
+    "README.md",
+    "Containerfile*",
+    "**/Containerfile*",
+    ".dockerignore",
+    ".containerignore",
+    "container/**",
+    "containers/**",
+    "deploy/**",
+    "docs/reverse-broker-deployment.md",
+    "packaging/broker/**",
+    "packaging/systemd/user/markweave-broker.service",
+    "spikes/anydoc/LICENSE.anydoc",
+    "spikes/anydoc/corpus/**",
+    "src/markweave/__init__.py",
+    "src/markweave/version.py",
+    "src/markweave/conversion/__init__.py",
+    "src/markweave/conversion/errors.py",
+    "src/markweave/conversion/images.py",
+    "src/markweave/cli/commands/recovery.py",
+    "src/markweave/cli/commands/local_conversion.py",
+    "src/markweave/cli/local_outputs.py",
+    "src/markweave/conversion/engine_versions.py",
+    "src/markweave/conversion/local.py",
+    "src/markweave/conversion/local_settings.py",
+    "examples/local-conversion.env",
+    "tests/e2e/local-conversion-final-image.sh",
+    "tests/e2e/fixtures/local-publication-sync/**",
+    "src/markweave/recovery*.py",
+    "src/markweave/reversions/**",
+    "src/markweave/broker/**",
+    "src/markweave/broker_process.py",
+    "scripts/container/**",
+    "tests/container/**",
+    "tests/integration/broker/**",
+)
+
+FINAL_IMAGE_E2E_PATTERNS = (
+    ".containerignore",
+    "Containerfile*",
+    "package.json",
+    "pnpm-lock.yaml",
+    "playwright.config.*",
+    "src/**",
+    "container/**",
+    "scripts/container/**",
+    "scripts/e2e/**",
+    "scripts/run-web-tests.mjs",
+    "toolchain/document-engines/**",
+    "tests/e2e/**",
+    "tests/corpus/**",
+    "containers/**",
+    "deploy/**",
+)
+
+# Each final-image E2E profile runs as complementary shards; `scripts/e2e/run.sh`
+# owns the exhaustive scenario assignment behind `MARKWEAVE_E2E_SHARD`.
+E2E_PROFILES = ("standalone", "distributed")
+E2E_SHARD_COUNT = 2
+E2E_DOMAINS: Mapping[str, tuple[str, int]] = {
+    f"e2e-{profile}-{shard}": (profile, shard)
+    for profile in E2E_PROFILES
+    for shard in range(1, E2E_SHARD_COUNT + 1)
+}
+
+# The Compose sub-suites are independent jobs; shared quickstart inputs select
+# all of them, and each runner script selects only the jobs that execute it.
+COMPOSE_DOMAINS = (
+    "compose-podman-insecure",
+    "compose-secure",
+    "compose-simple-docker",
+    "compose-simple-podman",
+)
+
 DOMAIN_PATTERNS: Mapping[str, tuple[str, ...]] = {
-    "compose": (
-        ".gitignore",
-        "README.md",
-        "compose.simple.yaml",
-        "compose.simple-composer.yaml",
-        "compose.podman.yaml",
-        "compose.podman-trusted-upstream.yaml",
-        "compose.trusted-upstream.yaml",
-        "compose.yaml",
-        "docs/local-development.md",
-        "examples/**",
-        "scripts/quickstart-simple.sh",
-        "scripts/quickstart.sh",
-        "scripts/e2e/run-compose-all.sh",
-        "scripts/e2e/run-compose-simple.sh",
+    "compose-podman-insecure": (
+        *COMPOSE_PATTERNS,
         "scripts/e2e/run-compose-podman-insecure.sh",
-        "scripts/e2e/run-compose.sh",
-        "tests/test_quickstart_compose.py",
     ),
+    "compose-secure": (*COMPOSE_PATTERNS, "scripts/e2e/run-compose.sh"),
+    "compose-simple-docker": (*COMPOSE_PATTERNS, "scripts/e2e/run-compose-simple.sh"),
+    "compose-simple-podman": (*COMPOSE_PATTERNS, "scripts/e2e/run-compose-simple.sh"),
     "ci-infrastructure": (
         ".github/ci/**",
         ".github/workflows/**",
@@ -41,44 +122,7 @@ DOMAIN_PATTERNS: Mapping[str, tuple[str, ...]] = {
         "tests/test_python_quality.py",
         "tests/integration/ci/**",
     ),
-    "container": (
-        "toolchain/document-engines/**",
-        "LICENSE",
-        "README.md",
-        "Containerfile*",
-        "**/Containerfile*",
-        ".dockerignore",
-        ".containerignore",
-        "container/**",
-        "containers/**",
-        "deploy/**",
-        "docs/reverse-broker-deployment.md",
-        "packaging/broker/**",
-        "packaging/systemd/user/markweave-broker.service",
-        "spikes/anydoc/LICENSE.anydoc",
-        "spikes/anydoc/corpus/**",
-        "src/markweave/__init__.py",
-        "src/markweave/version.py",
-        "src/markweave/conversion/__init__.py",
-        "src/markweave/conversion/errors.py",
-        "src/markweave/conversion/images.py",
-        "src/markweave/cli/commands/recovery.py",
-        "src/markweave/cli/commands/local_conversion.py",
-        "src/markweave/cli/local_outputs.py",
-        "src/markweave/conversion/engine_versions.py",
-        "src/markweave/conversion/local.py",
-        "src/markweave/conversion/local_settings.py",
-        "examples/local-conversion.env",
-        "tests/e2e/local-conversion-final-image.sh",
-        "tests/e2e/fixtures/local-publication-sync/**",
-        "src/markweave/recovery*.py",
-        "src/markweave/reversions/**",
-        "src/markweave/broker/**",
-        "src/markweave/broker_process.py",
-        "scripts/container/**",
-        "tests/container/**",
-        "tests/integration/broker/**",
-    ),
+    "container": CONTAINER_PATTERNS,
     "document-engines": (
         "package.json",
         "src/**",
@@ -92,45 +136,14 @@ DOMAIN_PATTERNS: Mapping[str, tuple[str, ...]] = {
         "tests/integration/document_engines/**",
         "tests/unit/test_golden_*.py",
     ),
-    "e2e-distributed": (
-        ".containerignore",
-        "Containerfile*",
-        "package.json",
-        "pnpm-lock.yaml",
-        "playwright.config.*",
-        "src/**",
-        "container/**",
-        "scripts/container/**",
-        "scripts/e2e/**",
-        "scripts/run-web-tests.mjs",
-        "toolchain/document-engines/**",
-        "tests/e2e/**",
-        "tests/corpus/**",
-        "containers/**",
-        "deploy/**",
-    ),
-    "e2e-standalone": (
-        ".containerignore",
-        "Containerfile*",
-        "package.json",
-        "pnpm-lock.yaml",
-        "playwright.config.*",
-        "src/**",
-        "container/**",
-        "scripts/container/**",
-        "scripts/e2e/**",
-        "scripts/run-web-tests.mjs",
-        "toolchain/document-engines/**",
-        "tests/e2e/**",
-        "tests/corpus/**",
-        "containers/**",
-        "deploy/**",
-    ),
+    **dict.fromkeys(E2E_DOMAINS, FINAL_IMAGE_E2E_PATTERNS),
     "functional": ("src/**", "tests/functional/**", "tests/integration/auth/**"),
     "frontend": (
         "web/**",
         "openapi/v1.json",
         "scripts/container/build-frontend.sh",
+        "scripts/container/ci_images.py",
+        "scripts/container/integrity.py",
         "scripts/container/pull-base-images.sh",
     ),
     "storage-distributed": (
@@ -148,14 +161,26 @@ DOMAIN_PATTERNS: Mapping[str, tuple[str, ...]] = {
         "tests/integration/storage/**",
         "tests/integration/sqlite/**",
     ),
+    # The supply-chain scan inspects the same backend and reverse-attempt
+    # archives as the container smokes, so it follows the same inputs.
+    "supply-chain": CONTAINER_PATTERNS,
 }
 
 # Paths that a domain's broad patterns would otherwise match but that its suite
 # never executes. The Compose runners are self-contained and run only in the
-# compose domain, so they must not also select both final-image E2E profiles.
-DOMAIN_EXCLUSIONS: Mapping[str, tuple[str, ...]] = {
-    "e2e-distributed": ("scripts/e2e/run-compose*.sh",),
-    "e2e-standalone": ("scripts/e2e/run-compose*.sh",),
+# Compose domains, so they must not also select both final-image E2E profiles.
+DOMAIN_EXCLUSIONS: Mapping[str, tuple[str, ...]] = dict.fromkeys(
+    E2E_DOMAINS, ("scripts/e2e/run-compose*.sh",)
+)
+
+# Final-image domains consume the images that `CI / build images` builds once per
+# run. Each maps to the image roles it downloads, loads, and verifies by ID.
+IMAGE_ROLES = ("backend", "frontend", "reverse-attempt")
+IMAGE_DOMAIN_ROLES: Mapping[str, tuple[str, ...]] = {
+    "container": ("backend", "reverse-attempt"),
+    **dict.fromkeys(E2E_DOMAINS, IMAGE_ROLES),
+    "frontend": ("frontend",),
+    "supply-chain": ("backend", "reverse-attempt"),
 }
 
 GLOBAL_PATTERNS = (
@@ -249,6 +274,27 @@ def classify_domains(
     return planned, runnable
 
 
+def partition_domains(
+    runnable: Iterable[str],
+) -> tuple[list[str], list[str], list[str]]:
+    """Split runnable domains between the shared-image and independent matrices.
+
+    Return the independent heavy domains, the final-image domains that consume
+    the images built once per run, and the sorted image roles they require.
+    """
+    runnable_domains = sorted(set(runnable))
+    image_domains = [
+        domain for domain in runnable_domains if domain in IMAGE_DOMAIN_ROLES
+    ]
+    heavy_domains = [
+        domain for domain in runnable_domains if domain not in IMAGE_DOMAIN_ROLES
+    ]
+    roles = sorted(
+        {role for domain in image_domains for role in IMAGE_DOMAIN_ROLES[domain]}
+    )
+    return heavy_domains, image_domains, roles
+
+
 def write_github_outputs(
     output_path: Path,
     *,
@@ -257,10 +303,14 @@ def write_github_outputs(
     runnable: Sequence[str],
 ) -> None:
     """Append compact JSON values to the GitHub Actions output file."""
+    heavy, image, roles = partition_domains(runnable)
     values = {
         "selected-domains": list(selected),
         "planned-domains": list(planned),
         "runnable-domains": list(runnable),
+        "heavy-domains": heavy,
+        "image-domains": image,
+        "image-roles": roles,
     }
     with output_path.open("a", encoding="utf-8") as output:
         for key, value in values.items():
