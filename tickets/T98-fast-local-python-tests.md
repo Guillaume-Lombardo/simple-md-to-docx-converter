@@ -136,6 +136,18 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
   interrupt before the teardown, settle failure, removal failure then exit fallback, and a group
   that survives every stop) and asserts the invariant at the single release point; mutants for
   each half of the invariant, the completed-command rule and the exit fallback all fail it.
+- 2026-10-12: Review round 5 (review of `358dca6`, one major finding). A successful
+  `compose down` was treated as proof of removal, but Compose returns success while a network or
+  volume is still in use, so normal teardown and the reaper could release or unlink a lock while
+  a resource remained. The single release point now requires a fresh listing to show none of the
+  stack's containers, volumes or networks (a failed listing counts as not proven) for any stack
+  whose creation was attempted. One helper, `_remove_and_prove`, runs `down` and the listing a
+  bounded number of times and is used by teardown, the exit fallback and the reaper; ownership is
+  cleared and the reaper reports success and unlinks its claim only after that proof. The table
+  gains rows where `down` succeeds but leaves a container, network or volume (ownership and lock
+  kept, the exit fallback then retries), a transient removal failure, and a repeated one; reaper
+  unit tests cover the same three leftovers. Removing the proof from the release point, from the
+  helper, from the teardown or from the reaper each fails the new tests.
 - 2026-10-12: Remaining work. Adopt `-n auto --dist loadgroup` in the CI Python shard commands
   and lower the shard `timeout-minutes` from 40 to about 15 in `.github/workflows/ci.yml`,
   `scripts/ci/validate_ci.py` and `tests/test_ci_validation.py` after PR #297 (T130) merges.

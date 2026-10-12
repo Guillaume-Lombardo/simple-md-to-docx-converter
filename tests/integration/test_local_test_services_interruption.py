@@ -13,7 +13,6 @@ records its pid, ``down`` logs whether the startup child was still alive, and
 that every release asserts the invariant at the moment it happens.
 """
 
-import contextlib
 import fcntl
 import os
 import signal
@@ -45,12 +44,18 @@ child() {
     echo $$ >> "$FAKE_DOCKER_PIDS"
     echo $$ > "$FAKE_DOCKER_CHILD"
     sleep "$FAKE_CHILD_DELAY"
-    echo resource >> "$FAKE_DOCKER_STATE"
+    echo container >> "$FAKE_DOCKER_STATE"
   ' &
+}
+countdown() {
+  n=$(cat "$1" 2>/dev/null || echo 0)
+  [ "$n" -gt 0 ] || return 1
+  echo $((n - 1)) > "$1"
 }
 case " $* " in
   *" compose "*" up "*)
     echo up >> "$FAKE_DOCKER_LOG"
+    printf 'network\nvolume\n' >> "$FAKE_DOCKER_STATE"
     case "$FAKE_UP_MODE" in
       ok) ;;
       ok-detached) child </dev/null >/dev/null 2>&1 ;;
@@ -68,14 +73,18 @@ case " $* " in
     else
       echo down >> "$FAKE_DOCKER_LOG"
     fi
-    if [ -e "$FAKE_DOCKER_DOWN_FAILS" ]; then rm -f "$FAKE_DOCKER_DOWN_FAILS"; exit 1; fi
+    if countdown "$FAKE_DOCKER_DOWN_FAILS"; then exit 1; fi
     : > "$FAKE_DOCKER_STATE"
+    # Compose reports success while an in-use network or volume remains.
+    if countdown "$FAKE_DOCKER_DOWN_LEAVES"; then
+      echo "$FAKE_DOWN_LEFTOVER" >> "$FAKE_DOCKER_STATE"
+    fi
     ;;
   *" ls "*)
     case "$FAKE_LS_MODE" in
-      always) echo resource ;;
+      always) echo "$3" ;;
       block) child; sleep 30 ;;
-      *) cat "$FAKE_DOCKER_STATE" ;;
+      *) grep -x "$3" "$FAKE_DOCKER_STATE" || true ;;
     esac
     ;;
 esac
@@ -142,6 +151,7 @@ def fake(
         ("FAKE_DOCKER_PIDS", "pids"),
         ("FAKE_DOCKER_CHILD", "child"),
         ("FAKE_DOCKER_DOWN_FAILS", "down-fails"),
+        ("FAKE_DOCKER_DOWN_LEAVES", "down-leaves"),
     ):
         monkeypatch.setenv(variable, str(result.path(name)))
     monkeypatch.setenv("FAKE_UP_MODE", "ok")
@@ -172,6 +182,7 @@ def fake(
     for held in services._HELD.values():
         os.close(held.descriptor)
     services._HELD.clear()
+    services._CREATION_ATTEMPTED.clear()
     services._OWNED.clear()
     services._UNSETTLED.clear()
 
@@ -199,7 +210,8 @@ class Scenario:
     timeout: float | None = None
     interrupts: tuple[float, ...] = ()
     interrupt_before_teardown: bool = False
-    down_fails_once: bool = False
+    down_failures: int = 0
+    down_leaves: str | None = None
     unkillable_until_exit: bool = False
 
 
@@ -243,9 +255,16 @@ SCENARIOS = {
         False,
         interrupts=(0.2,),
     ),
+    "transient-removal-failure": Scenario({}, None, True, True, down_failures=1),
     "removal-failure-then-exit-fallback": Scenario(
-        {}, RuntimeError, False, True, down_fails_once=True
+        {}, RuntimeError, False, True, down_failures=services.REMOVAL_ATTEMPTS
     ),
+    **{
+        f"down-succeeds-but-leaves-{resource}": Scenario(
+            {}, RuntimeError, False, True, down_leaves=resource
+        )
+        for resource in ("container", "network", "volume")
+    },
     # A command group that survives every stop attempt before any stack
     # resource exists: only the live-group half of the invariant holds it.
     "surviving-group-before-startup": Scenario(
@@ -275,8 +294,10 @@ def test_every_exit_path_keeps_the_ownership_invariant(
         monkeypatch.setenv(variable, value)
     if scenario.timeout is not None:
         monkeypatch.setattr(services, "COMMAND_TIMEOUT_SECONDS", scenario.timeout)
-    if scenario.down_fails_once:
-        fake.path("down-fails").touch()
+    fake.path("down-fails").write_text(str(scenario.down_failures))
+    if scenario.down_leaves is not None:
+        monkeypatch.setenv("FAKE_DOWN_LEFTOVER", scenario.down_leaves)
+        fake.path("down-leaves").write_text(str(services.REMOVAL_ATTEMPTS))
     restop = services.stop_unsettled_commands
     if scenario.interrupt_before_teardown:
         # A signal landing between ``finally:`` and the teardown's deferred
@@ -290,13 +311,18 @@ def test_every_exit_path_keeps_the_ownership_invariant(
         mocker.patch.object(services, "stop_process_group", return_value=False)
     _interrupt_after_child_start(fake, scenario.interrupts)
 
-    expectation = (
-        pytest.raises(scenario.expected)
-        if scenario.expected is not None
-        else contextlib.nullcontext()
-    )
-    with expectation, services.distributed_services():
-        pass
+    # A KeyboardInterrupt that escapes a test aborts the whole session, so the
+    # outcome is captured and compared instead.
+    outcome: BaseException | None = None
+    try:
+        with services.distributed_services():
+            pass
+    except BaseException as error:
+        outcome = error
+    if scenario.expected is None:
+        assert outcome is None, repr(outcome)
+    else:
+        assert isinstance(outcome, scenario.expected), repr(outcome)
     mocker.patch.object(services, "stop_unsettled_commands", side_effect=restop)
     if scenario.unkillable_until_exit:
         mocker.patch.object(services, "stop_process_group", side_effect=stop)

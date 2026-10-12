@@ -123,16 +123,19 @@ until its whole process group, including the Compose plugin, is proven gone; a c
 exits, successfully or not, while a descendant with redirected streams still runs has that
 descendant stopped. An interrupted or timed-out command is stopped with `SIGTERM`, then `SIGKILL`
 after a bounded grace period, and further interrupts wait until that stop and its record are
-complete. Teardown stops any recorded survivor again before removal, and a stack whose startup
-did not finish is released only once the engine lists no resource of that project.
+complete. Teardown stops any recorded survivor again before removal.
 
 One invariant governs the owner lock: the session releases its `flock` and unlinks the lock file
-only when no Docker command group it started is alive and the stack's resources were removed.
-Otherwise the lock stays held until the interpreter-exit fallback stops the groups, removes the
-stack and proves both conditions; the kernel releases it at process exit at the latest, and the
+only when no Docker command group it started is alive and a fresh listing shows none of the
+stack's containers, volumes or networks. A successful `docker compose down` is not proof, because
+Compose reports success while a network or volume is still in use, and a failed listing counts as
+not proven. Every removal (teardown, the exit fallback and the reaper) repeats `down` a bounded
+number of times until the listing is empty. Otherwise the lock stays held until the
+interpreter-exit fallback stops the groups, removes the stack and proves both conditions; the kernel releases it at process exit at the latest, and the
 lock file then stays for the next session. The owner also writes every command group it starts
 into the lock file, and the next session waits for any of those groups that is still alive, up to
-the stale bound below. Residual limitation: after a hard kill of the owner (`SIGKILL`, a crashed
+the stale bound below. The reaper reports a stack as removed, and unlinks its lock file, only
+after the same listing proof; otherwise the file stays for the next session. Residual limitation: after a hard kill of the owner (`SIGKILL`, a crashed
 xdist worker or a host crash) nothing can stop its detached descendants, so a descendant that
 outlives the owner, or one whose process group number is reused, delays removal until the stale
 bound; a Compose plugin that keeps running past that bound can still recreate resources after

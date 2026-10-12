@@ -7,8 +7,8 @@ success, failure, ``KeyboardInterrupt``, ``SIGTERM`` (turned into
 ``KeyboardInterrupt`` while a stack is owned) and interpreter exit, and
 ``SIGINT``/``SIGTERM`` wait until ``compose down`` has finished. An interrupted
 or timed-out Docker command is stopped with its whole process group, including
-the Compose plugin, before teardown starts, and a stack whose startup did not
-finish is released only once the engine reports no resource left. A session that
+the Compose plugin, before teardown starts, and a stack is released only once a
+fresh listing shows none of its resources. A session that
 cannot clean up at all, such as after ``SIGKILL`` or a pytest-xdist worker
 crash, leaves a stack whose lock nobody holds; the next acquisition reaps it
 once the command groups recorded in the lock file are gone or the stale bound
@@ -78,7 +78,7 @@ _UNSETTLED: dict[int, subprocess.Popen[str]] = {}
 COMMAND_TIMEOUT_SECONDS = 300
 STOP_GRACE_SECONDS = 5.0
 STOP_KILL_SECONDS = 10.0
-SETTLE_ATTEMPTS = 3
+REMOVAL_ATTEMPTS = 3
 UNAVAILABLE = (
     "Local test services require a working Docker Compose installation; "
     "alternatively configure all MARKWEAVE_TEST_* service variables."
@@ -227,6 +227,8 @@ class _HeldLock:
 # Owner locks this process holds, by project. A lock leaves this table only
 # through ``release_if_settled``.
 _HELD: dict[str, _HeldLock] = {}
+# Projects whose creation this process attempted; their removal must be proven.
+_CREATION_ATTEMPTED: set[str] = set()
 
 
 def _record_group(group: int) -> None:
@@ -247,19 +249,25 @@ def release_if_settled(project: str) -> bool:
 
     INVARIANT: the ``flock`` is released and the lock file unlinked only when
     (a) no Docker command group this process started is still alive, which
-    ``unsettled_commands`` proves for every recorded group, and (b) the stack's
-    resources were removed, which ``_OWNED`` no longer listing the project
-    records. Otherwise the descriptor stays open, so no other session can
-    claim the stack, until the exit fallback proves both conditions; the
-    kernel releases it at process exit at the latest. This is the only place
-    that releases an owner lock. Callers defer interrupts around it.
+    ``unsettled_commands`` proves for every recorded group, and (b) the engine
+    lists none of the stack's containers, volumes or networks, checked here by
+    a fresh listing. A successful ``compose down`` is not proof: Compose
+    reports success while a network or volume is still in use. A failed
+    listing counts as not proven. Otherwise the descriptor stays open, so no
+    other session can claim the stack, until the exit fallback proves both
+    conditions; the kernel releases it at process exit at the latest. This is
+    the only place that releases an owner lock. Callers defer interrupts.
     """
     held = _HELD.get(project)
     if held is None:
         return True
-    if project in _OWNED or unsettled_commands():
+    if unsettled_commands():
+        return False
+    if project in _CREATION_ATTEMPTED and not _resources_proven_absent(project):
         return False
     del _HELD[project]
+    _CREATION_ATTEMPTED.discard(project)
+    _OWNED.pop(project, None)
     _close_lock(held.descriptor, held.path, remove=True)
     return True
 
@@ -379,10 +387,8 @@ def remove_owned_stacks() -> None:
     with _deferred_interrupts():
         stop_unsettled_commands()
         for project, environment in list(_OWNED.items()):
-            with contextlib.suppress(RuntimeError):
-                _compose(project, environment, *DOWN_ARGUMENTS)
-                if not project_resources(project):
-                    _OWNED.pop(project, None)
+            if _remove_and_prove(project, environment):
+                _OWNED.pop(project, None)
         for project in list(_HELD):
             release_if_settled(project)
 
@@ -509,14 +515,15 @@ def reap_stale_stacks(*, now: float | None = None) -> tuple[str, ...]:
         removed = False
         try:
             with _deferred_interrupts():
-                _compose(project, _cleanup_environment(), *DOWN_ARGUMENTS)
-                removed = True
-                reaped.append(project)
-        except RuntimeError:
-            continue
+                removed = _remove_and_prove(
+                    project, _cleanup_environment(), own_groups=False
+                )
         finally:
+            # Without proof the lock file stays, so the next session retries.
             if claim.descriptor is not None:
                 _close_lock(claim.descriptor, claim.lock, remove=removed)
+        if removed:
+            reaped.append(project)
     return tuple(reaped)
 
 
@@ -538,23 +545,34 @@ def project_resources(project: str) -> bool:
     )
 
 
-def _settle_interrupted_startup(project: str, environment: Mapping[str, str]) -> None:
-    """Prove that an interrupted or failed startup left nothing behind.
+def _resources_proven_absent(project: str) -> bool:
+    """Return whether a fresh listing shows none of the project's resources."""
+    try:
+        return not project_resources(project)
+    except RuntimeError:
+        return False
 
-    Every recorded command group is stopped again first, so no startup child
-    can outlive the release. A request the stopped startup had already sent
-    can still complete inside the engine after the first removal, so removal
-    repeats until the project is empty. Ownership is kept when that cannot be
-    proven. Callers defer interrupts around this step.
+
+def _remove_and_prove(
+    project: str, environment: Mapping[str, str], *, own_groups: bool = True
+) -> bool:
+    """Remove a stack and prove it gone, with a bounded number of attempts.
+
+    ``compose down`` succeeds while a network or volume is still in use, and a
+    request a stopped command had already sent can still complete inside the
+    engine, so removal repeats until a fresh listing shows nothing. With
+    ``own_groups``, every recorded command group of this process is stopped
+    first and must be gone too. Callers defer interrupts around this step.
     """
-    for _ in range(SETTLE_ATTEMPTS):
-        stop_unsettled_commands()
-        if not unsettled_commands() and not project_resources(project):
-            return
-        _compose(project, environment, *DOWN_ARGUMENTS)
-    raise RuntimeError(
-        "Local test services: an interrupted startup could not be settled."
-    )
+    for _ in range(REMOVAL_ATTEMPTS):
+        if own_groups:
+            stop_unsettled_commands()
+        with contextlib.suppress(RuntimeError):
+            _compose(project, environment, *DOWN_ARGUMENTS)
+        groups_gone = not own_groups or not unsettled_commands()
+        if groups_gone and _resources_proven_absent(project):
+            return True
+    return False
 
 
 @contextmanager
@@ -583,8 +601,8 @@ def distributed_services() -> Generator[None]:
         }
         previous = {name: os.environ.get(name) for name in VARIABLES}
         with _sigterm_as_interrupt():
+            _CREATION_ATTEMPTED.add(project)
             _OWNED[project] = environment
-            started = False
             try:
                 _compose(
                     project,
@@ -595,7 +613,6 @@ def distributed_services() -> Generator[None]:
                     "--wait-timeout",
                     "120",
                 )
-                started = True
                 postgres = _port(
                     _compose(project, environment, "port", "postgres", "5432")
                 )
@@ -629,11 +646,11 @@ def distributed_services() -> Generator[None]:
                             os.environ.pop(name, None)
                         else:
                             os.environ[name] = value
-                    # No startup command may outlive the removal below.
-                    stop_unsettled_commands()
-                    _compose(project, environment, *DOWN_ARGUMENTS)
-                    if not started or unsettled_commands():
-                        _settle_interrupted_startup(project, environment)
+                    if not _remove_and_prove(project, environment):
+                        raise RuntimeError(
+                            "Local test services: removal of the stack could "
+                            "not be proven."
+                        )
                     _OWNED.pop(project, None)
     finally:
         with _deferred_interrupts():

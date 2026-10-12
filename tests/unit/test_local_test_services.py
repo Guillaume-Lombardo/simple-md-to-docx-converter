@@ -36,6 +36,7 @@ def clear_service_environment(
     for held in services._HELD.values():
         os.close(held.descriptor)
     services._HELD.clear()
+    services._CREATION_ATTEMPTED.clear()
     services._OWNED.clear()
     services._UNSETTLED.clear()
 
@@ -170,31 +171,42 @@ def test_owned_stack_is_labelled_and_locked_for_its_whole_life(
     assert not list(services.lock_directory().iterdir())
 
 
-def test_failed_removal_keeps_the_lock_held_until_the_exit_fallback(
-    mocker: MockerFixture,
-    reaper: MockType,
+@pytest.mark.parametrize("proof", ["resources-remain", "listing-fails"])
+def test_unproven_removal_keeps_the_lock_held_until_the_exit_fallback(
+    mocker: MockerFixture, reaper: MockType, proof: str
 ) -> None:
+    """A successful ``down`` is not proof; only an empty listing is."""
     del reaper
-
-    def compose(project: str, environment: dict[str, str], *args: str) -> str:
-        del project, environment
-        if args[0] == "down":
-            raise RuntimeError("down")
-        return "127.0.0.1:15432" if args[0] == "port" else ""
-
-    compose_mock = mocker.patch.object(services, "_compose", side_effect=compose)
+    compose = mocker.patch.object(
+        services,
+        "_compose",
+        side_effect=lambda _p, _e, *args: (
+            "127.0.0.1:15432" if args[0] == "port" else ""
+        ),
+    )
     mocker.patch.object(services, "prepare_bucket")
-    with pytest.raises(RuntimeError, match="down"), services.distributed_services():
+    resources = mocker.patch.object(
+        services,
+        "project_resources",
+        return_value=True,
+        side_effect=RuntimeError("listing") if proof == "listing-fails" else None,
+    )
+    with (
+        pytest.raises(RuntimeError, match="could not be proven"),
+        services.distributed_services(),
+    ):
         pass
+    downs = [call for call in compose.call_args_list if call.args[2] == "down"]
+    assert len(downs) == services.REMOVAL_ATTEMPTS
     (lock,) = services.lock_directory().iterdir()
     assert _locked_elsewhere(lock)
     (project,) = services._OWNED
 
-    compose_mock.side_effect = None
-    compose_mock.return_value = ""
+    resources.side_effect = None
+    resources.return_value = False
     services.remove_owned_stacks()
-    assert compose_mock.call_args.args[0] == project
-    assert compose_mock.call_args.args[2:] == services.DOWN_ARGUMENTS
+    assert compose.call_args.args[0] == project
+    assert compose.call_args.args[2:] == services.DOWN_ARGUMENTS
     assert not services._OWNED
     assert not services._HELD
     assert not lock.exists()
@@ -204,12 +216,13 @@ def test_interpreter_exit_net_keeps_ownership_it_cannot_prove_removed(
     mocker: MockerFixture,
 ) -> None:
     services._OWNED.update({PROJECT: {}, OTHER: {}})
-    compose = mocker.patch.object(
-        services, "_compose", side_effect=[RuntimeError("down"), ""]
+    compose = mocker.patch.object(services, "_compose", return_value="")
+    mocker.patch.object(
+        services, "project_resources", side_effect=lambda project: project == PROJECT
     )
-    mocker.patch.object(services, "project_resources", return_value=False)
     services.remove_owned_stacks()
-    assert [call.args[0] for call in compose.call_args_list] == [PROJECT, OTHER]
+    removed = [call.args[0] for call in compose.call_args_list]
+    assert removed == [PROJECT] * services.REMOVAL_ATTEMPTS + [OTHER]
     assert list(services._OWNED) == [PROJECT]
 
 
@@ -490,8 +503,11 @@ def test_interrupted_startup_is_removed_until_the_engine_is_empty(
         removals.append(args[0])
         return ""
 
+    listings = iter([True])
     mocker.patch.object(services, "_compose", side_effect=compose)
-    mocker.patch.object(services, "project_resources", side_effect=[True, False])
+    mocker.patch.object(
+        services, "project_resources", side_effect=lambda _: next(listings, False)
+    )
     with pytest.raises(KeyboardInterrupt), services.distributed_services():
         pass
     assert removals == ["down", "down"]
@@ -519,7 +535,7 @@ def test_unsettled_startup_keeps_ownership_and_lock(
         services, "unsettled_commands", return_value=cause == "survivor"
     )
     with (
-        pytest.raises(RuntimeError, match="could not be settled"),
+        pytest.raises(RuntimeError, match="could not be proven"),
         services.distributed_services(),
     ):
         pass
@@ -563,16 +579,26 @@ def _labels(
 
 
 @pytest.fixture
-def listing(mocker: MockerFixture) -> dict[str, list[str]]:
-    """Serve container, volume and network listings from a mutable table."""
+def leftovers() -> dict[str, set[str]]:
+    """Resource types the engine still lists for a project after removal."""
+    return {}
+
+
+@pytest.fixture
+def listing(
+    mocker: MockerFixture, leftovers: dict[str, set[str]]
+) -> dict[str, list[str]]:
+    """Serve labelled and per-project listings from mutable tables."""
     table: dict[str, list[str]] = {"container": [], "volume": [], "network": []}
+    project_filter = "label=com.docker.compose.project="
 
     def docker(arguments: tuple[str, ...], environment: object, action: str) -> str:
         del environment, action
-        assert "--filter" in arguments
-        assert arguments[arguments.index("--filter") + 1] == (
-            "label=io.markweave.tests.stack=local-services"
-        )
+        selector = arguments[arguments.index("--filter") + 1]
+        if selector.startswith(project_filter):
+            project = selector.removeprefix(project_filter)
+            return arguments[0] if arguments[0] in leftovers.get(project, ()) else ""
+        assert selector == "label=io.markweave.tests.stack=local-services"
         return "\n".join(table[arguments[0]])
 
     mocker.patch.object(services, "_docker", side_effect=docker)
@@ -707,16 +733,23 @@ def test_reaper_skips_an_unreadable_lock(
     removals.assert_not_called()
 
 
-def test_reaper_continues_after_a_failed_removal(
-    listing: dict[str, list[str]], removals: MockType
+@pytest.mark.parametrize("resource", ["container", "network", "volume"])
+def test_reaper_keeps_the_claim_file_until_removal_is_proven(
+    listing: dict[str, list[str]],
+    leftovers: dict[str, set[str]],
+    removals: MockType,
+    resource: str,
 ) -> None:
+    """``down`` succeeds while a resource remains; the stack is not reaped."""
     for project in (PROJECT, OTHER):
         (services.lock_directory() / f"{project}.lock").touch()
         listing["container"].append(_labels(project))
-    removals.side_effect = [RuntimeError("down"), ""]
+    leftovers[PROJECT] = {resource}
     assert services.reap_stale_stacks(now=NOW) == (OTHER,)
-    assert _removed(removals) == [PROJECT, OTHER]
-    assert (services.lock_directory() / f"{PROJECT}.lock").exists()
+    assert _removed(removals) == [PROJECT] * services.REMOVAL_ATTEMPTS + [OTHER]
+    kept = services.lock_directory() / f"{PROJECT}.lock"
+    assert kept.exists()
+    assert not _locked_elsewhere(kept)
     assert not (services.lock_directory() / f"{OTHER}.lock").exists()
 
 
@@ -828,20 +861,35 @@ def test_started_groups_are_written_to_every_held_lock(mocker: MockerFixture) ->
     assert services._recorded_groups(descriptor) == [4242, 4242]
 
 
-def test_release_refuses_while_the_stack_or_a_group_remains(
+def test_release_point_requires_live_proof_of_both_conditions(
     mocker: MockerFixture,
 ) -> None:
     lock = services.lock_directory() / f"{PROJECT}.lock"
     descriptor = os.open(lock, os.O_RDWR | os.O_CREAT, 0o600)
     fcntl.flock(descriptor, fcntl.LOCK_EX)
     services._HELD[PROJECT] = services._HeldLock(lock, descriptor)
+    services._CREATION_ATTEMPTED.add(PROJECT)
     services._OWNED[PROJECT] = {}
-    assert services.release_if_settled(PROJECT) is False
-    del services._OWNED[PROJECT]
     survivor = mocker.patch.object(services, "unsettled_commands", return_value=True)
+    resources = mocker.patch.object(services, "project_resources", return_value=False)
     assert services.release_if_settled(PROJECT) is False
-    assert _locked_elsewhere(lock)
     survivor.return_value = False
+    for remaining in (True, RuntimeError("listing")):
+        resources.side_effect = [remaining]
+        assert services.release_if_settled(PROJECT) is False
+        assert _locked_elsewhere(lock)
+    resources.side_effect = None
     assert services.release_if_settled(PROJECT) is True
     assert not lock.exists()
+    assert not services._OWNED
+    assert not services._CREATION_ATTEMPTED
     assert services.release_if_settled(PROJECT) is True
+
+
+def test_release_without_creation_needs_no_listing(mocker: MockerFixture) -> None:
+    lock = services.lock_directory() / f"{PROJECT}.lock"
+    descriptor = os.open(lock, os.O_RDWR | os.O_CREAT, 0o600)
+    services._HELD[PROJECT] = services._HeldLock(lock, descriptor)
+    resources = mocker.patch.object(services, "project_resources")
+    assert services.release_if_settled(PROJECT) is True
+    resources.assert_not_called()
