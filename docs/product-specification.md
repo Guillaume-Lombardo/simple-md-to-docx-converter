@@ -36,7 +36,7 @@ Actions workflows, and an autonomous development workflow.
 | Composer availability | A configured, enabled, and authorized OpenAI-compatible LLM connection is required to start Composer work; ordinary conversions never require one. A transient LLM failure must not remove authorized access to retained drafts, revisions, or exports |
 | Composer document execution | Backend-validated, bounded structured operations on copies of real DOCX/PPTX; no arbitrary shell, code execution, or document-controlled network access; document engines remain network-isolated |
 | Frontend topology | A separate stateless rootless Next.js process serves browser pages behind the same TLS router as FastAPI; browsers call FastAPI directly through relative same-origin exact `/api/v1` or `/api/v1/**` URLs, and the frontend has no business-service or persistence credentials |
-| Frontend runtime baseline | Linux/AMD64 UBI 9 Node.js 24 builder and minimal runtime pinned by digest, resolving to Node.js `24.19.0`; verified Corepack `0.36.0` selects pnpm `11.25.0`; Next.js `16.3.4`, TypeScript `6.0.3`, and Tailwind CSS `4.3.3` remain exact and root-lockfile-integrity pinned as reviewed on 2026-09-03 |
+| Frontend runtime baseline | Linux/AMD64 UBI 9 Node.js 24 builder and minimal runtime pinned by digest, resolving to Node.js `24.19.0`; verified Corepack `0.36.0` selects pnpm `11.25.0`; Next.js `16.3.8`, TypeScript `6.0.3`, and Tailwind CSS `4.3.3` remain exact and root-lockfile-integrity pinned as reviewed on 2026-09-03; Next.js moved from `16.3.4` to the `16.3.8` security patch on 2026-10-12 (T133) |
 | Processing | Asynchronous jobs with a persistent queue and status API |
 | Markdown to DOCX | Pandoc |
 | Markdown to PPTX | Pandoc with editable slides, a documented Marp subset, and optional immutable PowerPoint reference templates; omitted templates use Pandoc defaults |
@@ -223,7 +223,7 @@ plus nonce-bearing framework scripts and inline style elements; it forbids
 objects, framing, external resources, workers, `unsafe-inline`, and `unsafe-eval`. Authenticated
 API responses and downloads remain uncacheable. Only content-hashed `/_next/static/**` assets may
 use one-year immutable caching. No service worker, CDN data cache, analytics, remote font, or
-third-party script is allowed. On exact Next.js `16.3.4` production dynamic rendering, T60 and T64
+third-party script is allowed. On the exact pinned Next.js patch (`16.3.4` for T60 and T64, `16.3.8` since T133) production dynamic rendering, T60 and T64
 must prove a fresh nonce for each HTML document with no cache reuse, the same nonce in `script-src`
 and `style-src`, a nonce on every framework bootstrap script and inline style element, no inline
 style attribute or unnonced inline style, and no eval requirement. Content-hashed
