@@ -116,3 +116,25 @@ that stays populated past the bound raises `Podman stable unit cgroup is not emp
     changed application lines and 90.48% branch coverage. The 8 failures are in the untouched
     `tests/integration/test_local_test_services_interruption.py`, which passes alone (15 passed).
   - The three consecutive hosted `container` runs are still pending.
+- 2026-10-12: Review round 1 (two findings):
+  - Minor finding, fixed. `_await_unpopulated` still accepts the first read immediately. A later
+    observation now counts only when both the pause and the read finished before the deadline.
+    New injected-clock unit tests cover an overslept pause followed by `populated 0`, a read that
+    finishes after the deadline, and a slow populated first read; all three raise the not-empty
+    error.
+  - Major finding, step (a) done. Two new real rootless Podman integration tests drive
+    `service.terminate` while a foreign `systemd-run --user --slice=<unit slice>` member shares
+    the slice:
+    - Transient member: the test releases the member only once the container's own scope is
+      empty. The broker observes the populated slice, retries, proves termination and keeps
+      readiness. Durable transitions are `EXIT_CONFIRMED`, `EMPTY_CONFIRMED`, then removal.
+    - Persistent member: `service.terminate` raises `TERMINATION_UNPROVEN` after the bound, and
+      readiness is cleared. The unit stays `EXIT_CONFIRMED` with no proof, including after a
+      refused sweep. Once the member exits, `service.start()` proves emptiness, removes the unit
+      and restores readiness.
+    - Both tests fail when the product reverts to a single read.
+    - These two tests replace the earlier runtime-only persistent-member test.
+  - Major finding, step (b), final-image E2E: pending. `scripts/e2e/run.sh` is frozen until
+    T135 (PR #300) lands.
+  - Local checks: ruff and ty pass. Broker unit tests: 1,053 passed. Changed application lines
+    are 100% covered (31/31). The Podman module passed 10 of 10 in eight consecutive runs.
