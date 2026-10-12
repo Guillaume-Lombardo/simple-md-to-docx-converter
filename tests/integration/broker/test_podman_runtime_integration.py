@@ -23,6 +23,7 @@ from markweave.broker.models import (
 )
 from markweave.broker.podman_runtime import (
     BoundedCommandRunner,
+    CgroupEmptinessWait,
     PodmanCommandLimits,
     PodmanIsolationRuntime,
     PodmanRuntimeError,
@@ -34,12 +35,16 @@ from markweave.reversions.models import (
     ReverseAttemptRequest,
     ReverseContentLimits,
 )
+from tests.integration.broker.cgroup_events import await_cgroup_events
 
 pytestmark = pytest.mark.requires_podman
 
 ROOT = Path(__file__).parents[3]
 PODMAN = Path("/usr/bin/podman")
 SYSTEMCTL = Path("/usr/bin/systemctl")
+SYSTEMD_RUN = Path("/usr/bin/systemd-run")
+EMPTY_CGROUP_EVENTS = "populated 0\nfrozen 0\n"
+POPULATED_CGROUP_EVENTS = "populated 1\nfrozen 0\n"
 TEST_IMAGE = "localhost/markweave-t70-runtime-integration:current"
 WORKSPACE_IMAGE = "localhost/markweave-t70-workspace-integration:current"
 INCOMPATIBLE_BASE_IMAGE = "localhost/markweave-t70-incompatible-base:current"
@@ -59,6 +64,7 @@ UNIT_IDS = (
     UUID("44444444-4444-4444-8444-444444444444"),
     UUID("44444444-4444-4444-8444-444444444445"),
     UUID("44444444-4444-4444-8444-444444444446"),
+    UUID("44444444-4444-4444-8444-444444444447"),
 )
 
 
@@ -71,6 +77,15 @@ def _cgroup_path(unit_id: UUID) -> Path:
 
 def _systemd_slice_name(unit_id: UUID) -> str:
     return f"markweavet70{unit_id.hex}.slice"
+
+
+def _container_name(unit_id: UUID) -> str:
+    return f"markweave-reverse-{unit_id.hex}"
+
+
+def _await_cgroup_events(unit_id: UUID, expected: str) -> str:
+    events = _cgroup_path(unit_id) / "cgroup.events"
+    return await_cgroup_events(lambda: events.read_text(encoding="ascii"), expected)
 
 
 def _podman(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -140,10 +155,25 @@ def _cleanup_systemd_slice(unit_id: UUID) -> None:
     _assert_systemd_slice_clean(unit_id)
 
 
-@pytest.fixture(scope="module")
-def controlled_image() -> Iterator[tuple[str, str]]:
+def _remove_managed_units() -> None:
+    # Remove every managed container first: reconciliation discovers all of them,
+    # so one leftover would make every later broker start fail closed.
+    _podman("rm", "--force", "--ignore", *map(_container_name, UNIT_IDS))
     for unit_id in UNIT_IDS:
         _cleanup_systemd_slice(unit_id)
+
+
+@pytest.fixture(autouse=True)
+def isolated_managed_units() -> Iterator[None]:
+    """Leave no managed unit behind, even when the test body fails."""
+
+    yield
+    _remove_managed_units()
+
+
+@pytest.fixture(scope="module")
+def controlled_image() -> Iterator[tuple[str, str]]:
+    _remove_managed_units()
     base = os.environ.get("MARKWEAVE_T70_PODMAN_TEST_IMAGE", DEFAULT_BASE_IMAGE)
     built_base = base == DEFAULT_BASE_IMAGE
     if built_base:
@@ -173,14 +203,7 @@ def controlled_image() -> Iterator[tuple[str, str]]:
     try:
         yield TEST_IMAGE.rsplit(":", 1)[0], digest
     finally:
-        for unit_id in UNIT_IDS:
-            _podman(
-                "rm",
-                "--force",
-                f"markweave-reverse-{unit_id.hex}",
-                check=False,
-            )
-            _cleanup_systemd_slice(unit_id)
+        _remove_managed_units()
         _podman("image", "rm", "--force", TEST_IMAGE)
         if built_base:
             _podman("image", "rm", "--force", base)
@@ -437,6 +460,7 @@ def _runtime(
     repository: str,
     hooks_directory: Path,
     command: Callable[..., tuple[int, bytes]] | None = None,
+    emptiness_wait: CgroupEmptinessWait | None = None,
 ) -> PodmanIsolationRuntime:
     environment = {
         key: os.environ[key]
@@ -466,6 +490,7 @@ def _runtime(
                 environment=systemd_environment,
             )
         ),
+        emptiness_wait=emptiness_wait,
     )
 
 
@@ -544,12 +569,15 @@ def test_real_rootless_podman_whole_unit_lifecycle_and_proof(
     assert actual_scope.parent == _cgroup_path(created.unit_id)
     assert (_cgroup_path(created.unit_id) / "cgroup.events").read_text(
         encoding="ascii"
-    ) == "populated 1\nfrozen 0\n"
+    ) == POPULATED_CGROUP_EVENTS
 
     runtime.hard_terminate(runtime_unit)
-    assert (_cgroup_path(created.unit_id) / "cgroup.events").read_text(
-        encoding="ascii"
-    ) == "populated 0\nfrozen 0\n"
+    # Podman reports the unit exited before conmon and its cleanup command leave
+    # the slice, so the kernel clears the populated flag asynchronously.
+    assert (
+        _await_cgroup_events(created.unit_id, EMPTY_CGROUP_EVENTS)
+        == EMPTY_CGROUP_EVENTS
+    )
 
     proof = service.terminate(PRINCIPAL, attempt_id, created.unit_id)
 
@@ -712,3 +740,70 @@ def test_persisted_empty_proof_reconstructs_removal_without_event_history(
     reconstructed = inventory.get(created.unit_id)
     assert reconstructed is not None and reconstructed.state is ManagedUnitState.REMOVED
     _assert_systemd_slice_clean(created.unit_id)
+
+
+def _systemd_run(*arguments: str) -> subprocess.CompletedProcess[str]:
+    environment = dict(os.environ)
+    environment.pop("CONTAINER_HOST", None)
+    return subprocess.run(
+        (str(SYSTEMD_RUN), *arguments),
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        env=environment,
+    )
+
+
+@pytest.mark.integration
+def test_empty_proof_refuses_a_persistent_unit_member_after_a_bounded_wait(
+    tmp_path: Path, controlled_image: tuple[str, str]
+) -> None:
+    repository, digest = controlled_image
+    unit_id = UNIT_IDS[6]
+    service, inventory, runtime = _service(
+        tmp_path, repository, _policy(digest), unit_id
+    )
+    attempt_id = UUID("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")
+    created = service.create(ReplayPosition(PRINCIPAL, 1), attempt_id)
+    runtime_unit = runtime.discover(limit=1)[0]
+    runtime.hard_terminate(runtime_unit)
+    runtime.confirm_exit(runtime_unit)
+    assert _await_cgroup_events(unit_id, EMPTY_CGROUP_EVENTS) == EMPTY_CGROUP_EVENTS
+    # A process that outlives the container keeps the whole-unit slice populated.
+    member = f"markweave-t137-member-{unit_id.hex}.service"
+    _systemd_run(
+        "--user",
+        f"--slice={_systemd_slice_name(unit_id)}",
+        f"--unit={member}",
+        "--collect",
+        "--quiet",
+        "/usr/bin/sleep",
+        "300",
+    )
+    try:
+        assert (
+            _await_cgroup_events(unit_id, POPULATED_CGROUP_EVENTS)
+            == POPULATED_CGROUP_EVENTS
+        )
+        bounded = _runtime(
+            repository,
+            tmp_path / "hooks",
+            emptiness_wait=CgroupEmptinessWait(1.0, 0.05),
+        )
+        started = time.monotonic()
+        with pytest.raises(PodmanRuntimeError, match="cgroup is not empty"):
+            bounded.confirm_empty(runtime_unit)
+        assert 1.0 <= time.monotonic() - started < 15
+        unproven = inventory.get(created.unit_id)
+        assert unproven is not None and unproven.state is ManagedUnitState.CREATED
+    finally:
+        _systemctl("--user", "stop", member, check=False)
+
+    proof = service.terminate(PRINCIPAL, attempt_id, created.unit_id)
+
+    assert proof.unit_id == created.unit_id
+    retained = inventory.get(created.unit_id)
+    assert retained is not None and retained.state is ManagedUnitState.REMOVED
+    assert runtime.discover(limit=1) == ()
+    _assert_systemd_slice_clean(unit_id)
