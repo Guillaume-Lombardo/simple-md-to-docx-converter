@@ -462,6 +462,9 @@ In Progress until the adoption change is verified on main and final records clos
   behavior; the existing boundary tests cover the same paths.
 - Canonical default suite: 5,880 passed, 114 engine/runtime cases deselected,
   15 warnings; 94.36% total coverage and 90.48% branch coverage.
+- Changed application coverage passes at 100.00% (22/22 lines).
+- Pytest reports 15 non-blocking warnings from Starlette/httpx, pypdf,
+  SQLAlchemy, and legacy session configuration.
 - Separate branch checks: 201 Actions tests and 85 Python/package/PDFium checks
   pass; Ruff formatting/lint and ty pass cleanly on each branch.
 - All nine application modules touched for ty compatibility retain their
