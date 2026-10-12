@@ -32,7 +32,7 @@ FULL_SHA_C = "c" * 40
 FULL_SHA_D = "d" * 40
 FULL_SHA_E = "e" * 40
 UPLOAD_ARTIFACT_PIN = (
-    "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1"
+    "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2"
 )
 LEGACY_UPLOAD_ARTIFACT_PIN = (
     "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2"
@@ -337,7 +337,7 @@ def test_document_engine_job_installs_checksum_locked_document_engines() -> None
         "65e41ba309b46b59d92c0158899776ed0c4f04fc97c8aeaa96b0bfd571f9fcff" in workflow
     )
     assert 'PUPPETEER_SKIP_DOWNLOAD: "true"' in workflow
-    assert "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020" in workflow
+    assert "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1" in workflow
     assert "node-version: 22.23.1" in workflow
     assert 'test "$(node --version)" = "v22.23.1"' in workflow
     assert (
@@ -421,14 +421,14 @@ def test_frontend_heavy_domain_uses_the_exact_pinned_node_runtime() -> None:
     weakened = workflow.replace(
         "- name: Set up pinned Node for frontend smoke\n"
         "        if: ${{ matrix.domain == 'frontend' }}\n"
-        "        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 "
-        "# v7.0.0\n"
+        "        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 "
+        "# v7.1.0\n"
         "        with:\n"
         "          node-version: 24.19.0",
         "- name: Set up pinned Node for frontend smoke\n"
         "        if: ${{ matrix.domain == 'frontend' }}\n"
-        "        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 "
-        "# v7.0.0\n"
+        "        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 "
+        "# v7.1.0\n"
         "        with:\n"
         "          node-version: 24",
     )
