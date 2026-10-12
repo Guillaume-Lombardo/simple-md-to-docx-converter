@@ -121,8 +121,19 @@ async function exerciseStructuredPptx(page) {
   await page.getByRole("heading", { name: "Composer", exact: true }).waitFor();
   await page.getByRole("button", { name: "Capture source revision" }).click();
   await page.getByText(/Original source captured/).waitFor();
-  await page.getByText("PPTX preview").waitFor();
-  const nativePreview = page.frameLocator('iframe[title^="PPTX revision"]');
+  // The label reads "PPTX preview" only until the captured revision becomes
+  // active, then "PPTX revision <id> preview". Wait for the active state and
+  // require the native preview frame to show that exact captured revision.
+  const previewLabelPattern = /^PPTX revision ([0-9a-f-]{36}) preview$/;
+  const previewLabel = page.getByText(previewLabelPattern);
+  await previewLabel.waitFor();
+  const capturedRevision = previewLabelPattern.exec(
+    ((await previewLabel.textContent()) ?? "").trim(),
+  )?.[1];
+  assert.ok(capturedRevision);
+  const nativePreview = page.frameLocator(
+    `iframe[title="PPTX revision ${capturedRevision} preview"]`,
+  );
   await nativePreview.getByText("Slide 1 of 2").waitFor();
   await nativePreview.getByRole("button", { name: "Next slide" }).click();
   await nativePreview.getByText("Slide 2 of 2").waitFor();
