@@ -24,6 +24,7 @@ from markweave.broker.models import (
     RuntimeRecoveryBinding,
     policy_specification_evidence,
 )
+from markweave.broker.operation_deadline import remaining_seconds
 from markweave.broker.ports import RuntimeUnit
 from markweave.reversions.attempt_channel import (
     MAX_METADATA_BYTES,
@@ -461,6 +462,7 @@ class PodmanIsolationRuntime:
             self._emptiness_wait,
             self._clock,
             self._pause,
+            remaining_seconds(),
         )
         return _evidence(
             "empty",
@@ -653,6 +655,9 @@ class PodmanIsolationRuntime:
         input_bytes: bytes | None = None,
         accepted_exit_codes: frozenset[int] = frozenset({0}),
     ) -> tuple[int, bytes]:
+        remaining = remaining_seconds()
+        if remaining is not None and remaining <= 0:
+            raise PodmanRuntimeError("Podman operation budget expired")
         if input_bytes is None:
             return self._command(
                 self._podman_arguments(arguments),

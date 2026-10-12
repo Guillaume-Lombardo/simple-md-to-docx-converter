@@ -5,6 +5,7 @@ import json
 import os
 import stat
 import tarfile
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -26,6 +27,7 @@ from markweave.broker.models import (
     RuntimeLimits,
     policy_specification_evidence,
 )
+from markweave.broker.operation_deadline import operation_budget
 from markweave.broker.podman_runtime import (
     BoundedCommandRunner,
     CgroupEmptinessWait,
@@ -2447,3 +2449,46 @@ def test_podman_evidence_field_parsers_fail_closed(
 def test_cgroup_parser_rejects_noncanonical_evidence(output: bytes) -> None:
     with pytest.raises(PodmanRuntimeError):
         podman_runtime._parse_cgroup_events(output)
+
+
+@pytest.mark.unit
+def test_runtime_refuses_every_command_once_the_budget_is_spent(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    command = PodmanDouble()
+    runtime_unit = created_runtime(command, unit, policy)
+    calls = len(command.calls)
+
+    with (
+        operation_budget(time.monotonic() - 0.1),
+        pytest.raises(PodmanRuntimeError, match="budget expired"),
+    ):
+        runtime(command).hard_terminate(runtime_unit)
+
+    assert len(command.calls) == calls
+
+
+@pytest.mark.unit
+def test_emptiness_wait_is_clamped_to_the_remaining_budget(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    command = PodmanDouble()
+    runtime_unit = created_runtime(command, unit, policy)
+    command.status = "exited"
+    clock = FakeClock()
+    backend = emptiness_runtime(
+        command,
+        lambda: b"populated 1\nfrozen 0\n",
+        clock,
+        CgroupEmptinessWait(5.0, 0.25),
+    )
+
+    with (
+        operation_budget(time.monotonic() + 0.3),
+        pytest.raises(PodmanRuntimeError, match="cgroup is not empty"),
+    ):
+        backend.confirm_empty(runtime_unit)
+
+    assert len(clock.pauses) == 2
+    assert clock.pauses[0] == 0.25
+    assert 0 < sum(clock.pauses) <= 0.3

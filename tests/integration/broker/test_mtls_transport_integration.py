@@ -34,6 +34,10 @@ from markweave.broker.mtls_transport import (
     MtlsTransportLimits,
     leaf_certificate_sha256,
 )
+from markweave.broker.operation_deadline import (
+    RESPONSE_RESERVE_FRACTION,
+    remaining_seconds,
+)
 from markweave.broker.protocol import (
     CreateRequest,
     CreateResponse,
@@ -438,6 +442,31 @@ def test_real_paired_mtls_lifecycle_exchange(
     dispatcher.dispatch.assert_called_once_with(
         CLIENT_PRINCIPAL, ReadyRequest(REQUEST_ID, 1)
     )
+
+
+def test_real_mtls_dispatch_publishes_a_budget_before_its_deadline(
+    certificates: CertificateSet, mocker: MockerFixture
+) -> None:
+    observed: list[float | None] = []
+
+    def dispatch(*_args: object) -> ReadyResponse:
+        observed.append(remaining_seconds())
+        return ReadyResponse(REQUEST_ID, True)
+
+    dispatcher = mocker.Mock(spec=BrokerDispatcher)
+    dispatcher.dispatch.side_effect = dispatch
+    server, client_local, server_peer = _server(certificates, dispatcher)
+
+    with server:
+        client = _client(server, client_local, server_peer)
+        assert client.request(ReadyRequest(REQUEST_ID, 1)) == ReadyResponse(
+            REQUEST_ID, True
+        )
+
+    assert len(observed) == 1
+    assert observed[0] is not None
+    assert 0 < observed[0] <= 2 * (1 - RESPONSE_RESERVE_FRACTION)
+    assert remaining_seconds() is None
 
 
 def test_real_paired_mtls_reconciliation_binds_certificate_principal(

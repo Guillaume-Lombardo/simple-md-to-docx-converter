@@ -136,6 +136,12 @@ tune the wait:
 The templates omit both keys, so existing configurations keep the derived defaults. Insert them in
 canonical key order if you set them.
 
+Each dispatch also keeps a tenth of `transport.operation_timeout_seconds` in reserve for its
+response. Every Podman and `systemctl` command, and the emptiness wait, is clamped to the time
+remaining in that budget. A slow kill, inspection, removal or wait is refused through the ordinary
+error, for example `termination_unproven`, and the broker keeps serving instead of tripping its
+fatal dispatch deadline. The next reconciliation completes the durable termination sequence.
+
 ## Troubleshooting
 
 If the worker cannot obtain `READY`, first check the user unit and its content-free journal as the

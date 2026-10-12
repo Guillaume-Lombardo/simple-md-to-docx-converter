@@ -52,15 +52,20 @@ def _await_unpopulated(
     wait: CgroupEmptinessWait,
     monotonic: Callable[[], float],
     sleep: Callable[[float], None],
+    limit_seconds: float | None = None,
 ) -> dict[str, int]:
     """Return parsed events once unpopulated, or fail when the bound expires.
 
     The first observation is accepted immediately. A later observation counts
     only when both the pause and the read completed before the deadline, so a
     delayed pause can never turn evidence observed after the bound into proof.
+    ``limit_seconds`` further shortens the bound to the remaining dispatch budget.
     """
 
-    deadline = monotonic() + wait.timeout_seconds
+    timeout = wait.timeout_seconds
+    if limit_seconds is not None:
+        timeout = min(timeout, limit_seconds)
+    deadline = monotonic() + timeout
     events = _parse_cgroup_events(read())
     while events.get("populated") != 0:
         remaining = deadline - monotonic()

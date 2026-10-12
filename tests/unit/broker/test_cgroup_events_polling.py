@@ -91,9 +91,53 @@ def test_returns_the_persistent_mismatch_once_the_bound_expires() -> None:
 
     assert observed == POPULATED
     assert observed != EMPTY
-    assert reads == [0.0, 0.375, 0.75, 1.0]
+    assert reads == [0.0, 0.375, 0.75]
     assert clock.sleeps == [0.375, 0.375, 0.25]
     assert clock.now == 1.0
+
+
+def test_an_emptiness_read_after_an_overslept_pause_does_not_count() -> None:
+    clock = FakeClock()
+    reads: list[float] = []
+
+    def oversleep(seconds: float) -> None:
+        clock.sleep(seconds + 6.0)
+
+    observed = await_cgroup_events(
+        _reader(iter((POPULATED, EMPTY)), clock, reads),
+        EMPTY,
+        timeout_seconds=5.0,
+        poll_interval_seconds=0.02,
+        monotonic=clock.monotonic,
+        sleep=oversleep,
+    )
+
+    assert observed == POPULATED
+    assert reads == [0.0]
+
+
+def test_an_emptiness_read_that_finishes_after_the_bound_does_not_count() -> None:
+    clock = FakeClock()
+    reads: list[float] = []
+
+    def slow_read() -> str:
+        reads.append(clock.now)
+        if len(reads) == 1:
+            return POPULATED
+        clock.now += 10.0
+        return EMPTY
+
+    observed = await_cgroup_events(
+        slow_read,
+        EMPTY,
+        timeout_seconds=1.0,
+        poll_interval_seconds=0.25,
+        monotonic=clock.monotonic,
+        sleep=clock.sleep,
+    )
+
+    assert observed == POPULATED
+    assert reads == [0.0, 0.25]
 
 
 @pytest.mark.unit

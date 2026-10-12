@@ -13,6 +13,8 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
+from markweave.broker.operation_deadline import bounded_seconds
+
 _INSPECT_MAX_BYTES = 64 * 1024
 _MAX_COMMAND_OUTPUT_BYTES = 128 * 1024
 _MIN_OUTPUT_BYTES = 1024
@@ -94,7 +96,10 @@ class BoundedCommandRunner:
         )
         if type(ceiling) is not int or ceiling < 0:
             raise PodmanRuntimeError("Podman command contract failed")
-        deadline = self._monotonic() + self._limits.operation_seconds
+        budget = bounded_seconds(self._limits.operation_seconds)
+        if budget <= 0:
+            raise PodmanRuntimeError("Podman command exceeded its bounds")
+        deadline = self._monotonic() + budget
         try:
             process = subprocess.Popen(  # noqa: S603 - argv is broker-authored
                 (str(self._executable), *arguments),

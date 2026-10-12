@@ -104,6 +104,12 @@ UNIT_IDS = (
     UUID("44444444-4444-4444-8444-444444444448"),
     UUID("44444444-4444-4444-8444-444444444449"),
     UUID("44444444-4444-4444-8444-44444444444a"),
+    UUID("44444444-4444-4444-8444-44444444444b"),
+    UUID("44444444-4444-4444-8444-44444444444c"),
+    UUID("44444444-4444-4444-8444-44444444444d"),
+    UUID("44444444-4444-4444-8444-44444444444e"),
+    UUID("44444444-4444-4444-8444-44444444444f"),
+    UUID("44444444-4444-4444-8444-444444444450"),
 )
 
 
@@ -495,12 +501,14 @@ def test_staged_workspace_is_swept_after_broker_crash(
     _assert_systemd_slice_clean(created.unit_id)
 
 
-def _runtime(
+def _runtime(  # noqa: PLR0913 - explicit runtime seams
     repository: str,
     hooks_directory: Path,
     command: Callable[..., tuple[int, bytes]] | None = None,
+    *,
     emptiness_wait: CgroupEmptinessWait | None = None,
     cgroup_read: Callable[[Path], bytes] | None = None,
+    podman: Path = PODMAN,
 ) -> PodmanIsolationRuntime:
     environment = {
         key: os.environ[key]
@@ -516,7 +524,7 @@ def _runtime(
         run_as_uid=1001,
         command=command
         or BoundedCommandRunner(
-            PODMAN, PodmanCommandLimits(20), environment=environment
+            podman, PodmanCommandLimits(20), environment=environment
         ),
         cgroup_root=Path(
             f"/sys/fs/cgroup/user.slice/user-{os.geteuid()}.slice/"
@@ -1074,18 +1082,52 @@ def _transport_pair(
     )
 
 
+SLOW_PODMAN = """\
+#!/bin/sh
+# Delay one broker-issued Podman subcommand while its delay file exists.
+for argument in "$@"; do
+  if [ -f "{delays}/$argument" ]; then
+    sleep "$(cat "{delays}/$argument")"
+    break
+  fi
+done
+exec /usr/bin/podman "$@"
+"""
+# Each delayed step consumes most of the 3.6-second dispatch budget of a
+# 4-second transport deadline, so a later step must be refused before it.
+DEADLINE_SCENARIOS = {
+    "persistent-member": {},
+    "slow-kill": {"kill": "3.4"},
+    "slow-inspect": {"inspect": "1.3"},
+    "slow-removal": {"rm": "10"},
+}
+
+
+def _slow_podman(directory: Path) -> tuple[Path, Path]:
+    delays = directory / "delays"
+    delays.mkdir(mode=0o700)
+    wrapper = directory / "slow-podman"
+    wrapper.write_text(SLOW_PODMAN.format(delays=delays), encoding="ascii")
+    wrapper.chmod(0o700)
+    return wrapper, delays
+
+
 @pytest.mark.integration
-@pytest.mark.parametrize(
-    ("transport", "unit_id"), [("unix", UNIT_IDS[8]), ("mtls", UNIT_IDS[9])]
-)
-def test_persistent_member_refusal_returns_within_the_transport_deadline(
+@pytest.mark.parametrize("transport", ["unix", "mtls"])
+@pytest.mark.parametrize("scenario", list(DEADLINE_SCENARIOS))
+def test_termination_refusal_returns_within_the_transport_deadline(  # noqa: PLR0915 - one linear refusal and recovery scenario
     tmp_path: Path,
     controlled_image: tuple[str, str],
     transport_certificates: dict[str, Path],
     transport: str,
-    unit_id: UUID,
+    scenario: str,
 ) -> None:
     repository, digest = controlled_image
+    unit_id = UNIT_IDS[
+        8
+        + 2 * list(DEADLINE_SCENARIOS).index(scenario)
+        + ["unix", "mtls"].index(transport)
+    ]
     wait = podman_emptiness_wait(TRANSPORT_OPERATION_SECONDS)
     assert wait == CgroupEmptinessWait(1.0, 0.05)
     inventory = SQLiteBrokerInventory(
@@ -1093,9 +1135,10 @@ def test_persistent_member_refusal_returns_within_the_transport_deadline(
     )
     hooks = tmp_path / "hooks"
     hooks.mkdir(mode=0o700)
+    wrapper, delays = _slow_podman(tmp_path)
     service = IsolationBrokerService(
         inventory,
-        _runtime(repository, hooks, emptiness_wait=wait),
+        _runtime(repository, hooks, emptiness_wait=wait, podman=wrapper),
         _policy(digest),
         max_discovered_units=8,
         unit_id_factory=lambda: unit_id,
@@ -1105,46 +1148,55 @@ def test_persistent_member_refusal_returns_within_the_transport_deadline(
     )
     release = tmp_path / "release-member"
     attempt_id = uuid4()
+    member: str | None = None
     server.start()
     try:
         client = client_factory()
         created = client.request(CreateRequest(uuid4(), 1, attempt_id))
         assert isinstance(created, CreateResponse)
         assert created.unit_id == unit_id
-        member = _start_slice_member(unit_id, tmp_path, release)
-        try:
-            terminate = TerminateRequest(uuid4(), 1, attempt_id, unit_id)
-            started = time.monotonic()
-            refused = client.request(terminate)
-            elapsed = time.monotonic() - started
+        if scenario == "persistent-member":
+            member = _start_slice_member(unit_id, tmp_path, release)
+        for subcommand, seconds in DEADLINE_SCENARIOS[scenario].items():
+            (delays / subcommand).write_text(seconds, encoding="ascii")
+        terminate = TerminateRequest(uuid4(), 1, attempt_id, unit_id)
+        started = time.monotonic()
+        refused = client.request(terminate)
+        elapsed = time.monotonic() - started
 
-            assert refused == ErrorResponse(
-                terminate.request_id,
-                BrokerOperation.TERMINATE,
-                BrokerErrorCategory.TERMINATION_UNPROVEN,
-            )
-            assert wait.timeout_seconds <= elapsed < TRANSPORT_OPERATION_SECONDS
-            # The dispatch watchdog never fired: the broker still serves.
-            assert server.failed is False
-            assert server.stopping is False
-            ready = ReadyRequest(uuid4(), 1)
-            assert client.request(ready) == ReadyResponse(ready.request_id, False)
-            unproven = inventory.get(unit_id)
-            assert unproven is not None
-            assert unproven.state is ManagedUnitState.EXIT_CONFIRMED
-            assert inventory.get_proof(unit_id) is None
+        assert refused == ErrorResponse(
+            terminate.request_id,
+            BrokerOperation.TERMINATE,
+            BrokerErrorCategory.TERMINATION_UNPROVEN,
+        )
+        assert elapsed < TRANSPORT_OPERATION_SECONDS
+        if scenario == "persistent-member":
+            assert elapsed >= wait.timeout_seconds
+        # The dispatch watchdog never fired: the broker still serves.
+        assert server.failed is False
+        assert server.stopping is False
+        ready = ReadyRequest(uuid4(), 1)
+        assert client.request(ready) == ReadyResponse(ready.request_id, False)
+        unproven = inventory.get(unit_id)
+        assert unproven is not None
+        assert unproven.state is not ManagedUnitState.REMOVED
+        assert inventory.get_proof(unit_id) is None
+
+        for delay in delays.iterdir():
+            delay.unlink()
+        if member is not None:
             release.touch()
             _await_member_stopped(member)
-        finally:
-            _systemctl("--user", "stop", member, check=False)
-
         reconciled = client.reconcile(ReconciliationRequest(uuid4(), 0))
         assert isinstance(reconciled, ReconciliationResponse)
         ready = ReadyRequest(uuid4(), 1)
         assert client.request(ready) == ReadyResponse(ready.request_id, True)
         removed = inventory.get(unit_id)
         assert removed is not None and removed.state is ManagedUnitState.REMOVED
+        assert inventory.get_proof(unit_id) is not None
         assert server.failed is False
     finally:
+        if member is not None:
+            _systemctl("--user", "stop", member, check=False)
         server.stop()
     _assert_systemd_slice_clean(unit_id)

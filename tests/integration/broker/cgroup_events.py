@@ -20,7 +20,9 @@ def await_cgroup_events(  # noqa: PLR0913 - injected clock keeps the bound testa
     The kernel clears a unit slice's ``populated`` flag only after every member,
     including Podman's conmon monitor and its cleanup command, has exited. The
     caller asserts on the returned last observation, so a persistent mismatch
-    still fails once the bound expires.
+    still fails once the bound expires. The first read is returned as observed;
+    a later read counts only when both its pause and the read itself finished
+    within the bound, so a delayed pause or read cannot pass after the bound.
     """
 
     if timeout_seconds <= 0 or not 0 < poll_interval_seconds <= timeout_seconds:
@@ -32,5 +34,10 @@ def await_cgroup_events(  # noqa: PLR0913 - injected clock keeps the bound testa
         if remaining <= 0:
             break
         sleep(min(poll_interval_seconds, remaining))
-        observed = read()
+        if deadline - monotonic() <= 0:
+            break
+        candidate = read()
+        if deadline - monotonic() <= 0:
+            break
+        observed = candidate
     return observed

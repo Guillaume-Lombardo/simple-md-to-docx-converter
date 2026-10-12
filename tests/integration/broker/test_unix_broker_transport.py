@@ -15,6 +15,10 @@ from pytest_mock import MockerFixture
 from markweave.broker.dispatch import BrokerDispatcher
 from markweave.broker.errors import BrokerError, BrokerErrorCategory
 from markweave.broker.models import AuthenticatedPrincipal, RuntimeChannelLimits
+from markweave.broker.operation_deadline import (
+    RESPONSE_RESERVE_FRACTION,
+    remaining_seconds,
+)
 from markweave.broker.process import BrokerProcess
 from markweave.broker.protocol import ReadyRequest, ReadyResponse, encode_request
 from markweave.broker.reconciliation_protocol import (
@@ -129,6 +133,36 @@ def test_real_unix_exchange_authenticates_both_peers_and_dispatches_once(
     assert response == ReadyResponse(REQUEST_ID, True)
     dispatcher.dispatch.assert_called_once_with(PRINCIPAL, request)
     assert not path.exists()
+
+
+def test_real_unix_dispatch_publishes_a_budget_before_its_deadline(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    observed: list[float | None] = []
+    path, server, dispatcher = _server(
+        tmp_path, mocker, limits=UnixTransportLimits(2, 1, 1, 1)
+    )
+
+    def dispatch(*_args: object) -> ReadyResponse:
+        observed.append(remaining_seconds())
+        return ReadyResponse(REQUEST_ID, True)
+
+    dispatcher.dispatch.side_effect = dispatch
+    with server:
+        client = UnixBrokerClient(
+            path,
+            expected_server_uid=os.geteuid(),
+            expected_principal=PRINCIPAL,
+            operation_timeout_seconds=2,
+        )
+        assert client.request(ReadyRequest(REQUEST_ID, 1)) == ReadyResponse(
+            REQUEST_ID, True
+        )
+
+    assert len(observed) == 1
+    assert observed[0] is not None
+    assert 0 < observed[0] <= 2 * (1 - RESPONSE_RESERVE_FRACTION)
+    assert remaining_seconds() is None
 
 
 def test_real_unix_reconciliation_exchange_binds_authenticated_principal(
