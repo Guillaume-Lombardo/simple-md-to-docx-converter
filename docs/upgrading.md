@@ -25,6 +25,9 @@ matches the selected storage profile before production use.
 
 Select a complete published release with verified receipts for every required image. Version `0.7.2`
 has no qualified published container set; see the [incident record](evidence/release-migration-history.md#incomplete-072-container-release).
+Version `0.7.4` was published to PyPI only and has no container images; container deployments
+upgrade from `0.7.3` directly to `0.7.5`. See the
+[0.7.4 incident record](evidence/release-migration-history.md#incomplete-074-container-release).
 The repository quickstarts pin the matched published `0.7.3` backend/frontend images. Reverse-enabled
 deployments also require the matching reverse-attempt image and native broker.
 
@@ -105,18 +108,23 @@ workflow before restoring traffic. Restore the matching database and object back
 state changed. The one-time legacy-renderer migration and its old rollback procedure are retained
 in [cutover history](evidence/release-migration-history.md#nextjs-cutover-and-legacy-rollback).
 
-### Upgrading to 0.7.4
+### Upgrading to 0.7.5
 
-Release 0.7.4 adds Composer migrations 20 to 26. Follow the upgrade procedure above: create and
-verify the profile-consistent backup, drain every component, and let one controlled `0.7.4`
-component apply the migrations and report readiness before starting the others. There is no
-automatic downgrade; to return to `0.7.3` after the migrations start, restore the pre-upgrade
-database and object backup and the matched `0.7.3` backend/frontend images together. Composer
-model access remains disabled unless `MARKWEAVE_COMPOSER_ENABLED=true` and its policy settings are
-configured, so an upgrade needs no new setting.
+Release 0.7.5 supersedes 0.7.4. Version 0.7.4 was published to PyPI, but its container release
+stopped at the Critical-vulnerability gate before any image was published, so no `0.7.4` image
+exists. Container deployments upgrade from `0.7.3` directly to `0.7.5`. Package deployments may
+upgrade from `0.7.3` or `0.7.4`; 0.7.5 keeps the 0.7.4 database schema and adds no migration.
 
-`markweave restore` in 0.7.4 accepts recovery sets created by release 0.5.0 or later, from schema
-revision `20260829_14`, and migrates them to the 0.7.4 head. Sets from earlier revisions, unknown
+Compared with 0.7.3, release 0.7.5 adds Composer migrations 20 to 26. Follow the upgrade procedure
+above: create and verify the profile-consistent backup, drain every component, and let one
+controlled `0.7.5` component apply the migrations and report readiness before starting the others.
+There is no automatic downgrade; to return to `0.7.3` after the migrations start, restore the
+pre-upgrade database and object backup and the matched `0.7.3` backend/frontend images together.
+Composer model access remains disabled unless `MARKWEAVE_COMPOSER_ENABLED=true` and its policy
+settings are configured, so an upgrade needs no new setting.
+
+`markweave restore` in 0.7.5 accepts recovery sets created by release 0.5.0 or later, from schema
+revision `20260829_14`, and migrates them to the 0.7.5 head. Sets from earlier revisions, unknown
 revisions or a newer release are refused. Keep a `0.7.3` recovery set until the upgraded
 deployment is verified.
 
@@ -129,9 +137,9 @@ the deleted files from your `-f` list; every supported mode renders the same con
 before. The image override variables `MARKWEAVE_CUTOVER_BACKEND_IMAGE` and
 `MARKWEAVE_CUTOVER_FRONTEND_IMAGE` are unchanged.
 
-The repository quickstarts keep their verified `0.7.3` image pins until the `0.7.4` images are
-published and their exact receipts are adopted. Do not run a `0.7.4` package against `0.7.3`
-images or substitute an inferred `0.7.4` digest.
+The repository quickstarts keep their verified `0.7.3` image pins until the `0.7.5` images are
+published and their exact receipts are adopted. Do not run a `0.7.4` or `0.7.5` package against
+`0.7.3` images, invent a `0.7.4` image digest, or substitute an inferred `0.7.5` digest.
 
 ## Configuration compatibility
 
@@ -157,7 +165,7 @@ required or select values for unresolved production limits.
 - [Supported transition](#supported-transition)
 - [Upgrade procedure](#upgrade-procedure)
 - [Schema changes and rollback](#schema-changes-and-rollback)
-- [Upgrading to 0.7.4](#upgrading-to-074)
+- [Upgrading to 0.7.5](#upgrading-to-075)
 - [Configuration compatibility during 0.x](#configuration-compatibility)
 
 ## Related guidance

@@ -10,6 +10,29 @@ Use the [upgrade guide](docs/upgrading.md) for supported transitions and rollbac
 [release process](docs/releasing.md) for artifact evidence, the [security policy](SECURITY.md) for
 private reporting, and the [support policy](SUPPORT.md) for help with a published release.
 
+<a id="release-0-7-5"></a>
+
+## [0.7.5] - 2026-10-12
+
+### Security
+
+- The Next.js frontend moves from `16.3.4` to `16.3.8`, fixing the Critical advisory
+  GHSA-vcvr-r3jv-pc5j and the High advisory GHSA-cjq9-62q9-8jv4 together with lower-severity
+  Next.js advisories. `eslint-config-next` follows the same patch.
+- The frontend lockfile adopts fixed releases of `sharp` `0.35.5`, `undici` `7.30.0`,
+  `brace-expansion` `1.1.21` and `5.0.12`, `js-yaml` `4.3.2` and `source-map-js` `1.2.2`. No High
+  or Critical advisory with an available fix remains in the frontend dependency tree.
+
+### Release notes
+
+- Version 0.7.4 was published to PyPI only. Its container release stopped at the
+  Critical-vulnerability gate before any image was published, so no `0.7.4` backend, frontend or
+  reverse-attempt image exists. Version 0.7.5 contains every 0.7.4 change and supersedes it for
+  container deployments: upgrade containers from `0.7.3` directly to `0.7.5`. Never invent
+  `0.7.4` image digests or run a `0.7.4` or `0.7.5` package against `0.7.3` images.
+- Repository Compose and quickstart defaults remain pinned to the verified `0.7.3` backend and
+  frontend digests until the `0.7.5` images are published and their exact receipts are adopted.
+
 <a id="release-0-7-4"></a>
 
 ## [0.7.4] - 2026-10-11

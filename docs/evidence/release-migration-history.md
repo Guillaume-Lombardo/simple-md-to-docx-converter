@@ -173,6 +173,39 @@ reverse-attempt images are published from one source and have verified public re
 deployments should keep their verified `0.7.1` configuration until they adopt the repository's
 exact `0.7.3` pins and complete deployment-specific verification.
 
+## Incomplete 0.7.4 container release
+
+The `0.7.4` Python package was published, but its container release failed before any image was
+published or retained. Protected release run `38182704382` started from the trusted push of source
+`5d0ac0bb329018fa3a88d7ba516e575de9abc100` (PR #293). Its `detect`, `build-and-verify`,
+`create-release` and `publish` jobs succeeded: PyPI `markweave` `0.7.4` is published, and tag
+`v0.7.4` and its GitHub Release target that source. Job `container / build-and-publish`
+(`114598666127`) then stopped at "Generate and verify release SBOM evidence for all three images"
+with `error: fixable Critical vulnerabilities found`. The backend image passed the gate; the
+frontend image `md-converter-web` did not. The pinned Grype `0.116.1` reported the Critical
+advisory GHSA-vcvr-r3jv-pc5j in `next` `16.3.4`, fixed in `16.3.6`, together with fixable High
+advisories in `next`, `undici`, `sharp`, `brace-expansion`, `js-yaml` and `source-map-js`.
+
+The failure happened before staging retention and before any registry mutation. The run retained
+only artifact `11718675473` (`python-release-v0.7.4`, digest
+`sha256:5f07b4b657dbb6eaa32395670b63aabb53187bd60b49da4e29e74d27b0bb36e4`); no staged image bytes
+exist, so the container-only recovery dispatch is impossible. The `v0.7.4` Release has no assets,
+and GHCR returns `MANIFEST_UNKNOWN` for tag `0.7.4` in `md-converter`, `md-converter-web` and
+`md-converter-reverse-attempt`. Do not rebuild or republish `0.7.4`.
+
+On 2026-10-12 the owner approved the corrective `0.7.5` release (T133). It upgrades the vulnerable
+frontend dependencies and admits only the exact `0.7.4` to `0.7.5` pending transition, the third
+bounded exception, modeled on the `0.7.2` one. On a pull request, merge-group candidate or trusted
+`main` push, the check requires latest PyPI `0.7.4`, the base project `0.7.4` at the exact source
+above, the head project `0.7.5`, and Compose still on the verified `0.7.3` backend and frontend
+receipts. It binds the failed run, its sole unexpired Python artifact by ID, name and digest, the
+tag and the asset-free Release. It requires the exact structured absence of the `0.7.4` and
+`source-5d0ac0bb329018fa3a88d7ba516e575de9abc100` tags in all three GHCR repositories, with the
+same read-only fallback rules as the `0.7.2` exception. Scheduled, Release and manual runs, any
+other version pair or source, and any extra or forged evidence fail closed. A successful `0.7.5`
+release must publish one fresh matched three-image set and adopt its actual public receipts before
+unrelated work. Existing container deployments keep their verified `0.7.3` configuration until then.
+
 ## Next.js cutover and legacy rollback
 
 A release containing the T64 cutover adds a separately published frontend
