@@ -166,6 +166,10 @@ Run the default local selection in parallel with its unchanged coverage gates:
 uv run pytest -n auto --dist loadgroup -m "not requires_pandoc and not requires_mermaid and not requires_libreoffice and not requires_podman"
 ```
 
+On the 4-vCPU reference developer host (measured 2026-10-12), `tests/unit` takes about 75 s
+serially and 47 s with `-n auto`, and the canonical default command about 7 minutes serially and
+under 3 minutes with `-n auto --dist loadgroup`.
+
 pytest-cov combines every worker's coverage data on the controller process, which then writes
 `coverage.json` and applies the 90% total and branch-only thresholds exactly once; a regression
 test proves that serial and parallel runs report identical lines, branches and gate results.
