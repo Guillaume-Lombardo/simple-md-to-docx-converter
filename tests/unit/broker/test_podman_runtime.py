@@ -1397,8 +1397,121 @@ def test_empty_proof_fails_closed_when_unit_slice_stays_populated(
         backend.confirm_empty(runtime_unit)
 
     assert clock.pauses == [0.375, 0.375, 0.25]
-    assert reads == [0.0, 0.375, 0.75, 1.0]
+    assert reads == [0.0, 0.375, 0.75]
     assert clock.now == 1.0
+
+
+@pytest.mark.unit
+def test_empty_proof_rejects_emptiness_observed_after_an_overslept_pause(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    command = PodmanDouble()
+    runtime_unit = created_runtime(command, unit, policy)
+    command.status = "exited"
+    observations = iter((b"populated 1\nfrozen 0\n", b"populated 0\nfrozen 0\n"))
+    reads: list[float] = []
+    clock = FakeClock()
+
+    def events() -> bytes:
+        reads.append(clock.now)
+        return next(observations)
+
+    def oversleep(seconds: float) -> None:
+        clock.pause(seconds + 6.0)
+
+    backend = PodmanIsolationRuntime(
+        image_repository=IMAGE_REPOSITORY,
+        run_as_uid=1001,
+        command=command,
+        cgroup_root=CGROUP_ROOT,
+        hooks_directory=HOOKS,
+        cgroup_remove=command.remove_cgroup,
+        hooks_directory_validate=lambda path: None,
+        cgroup_root_validate=lambda path: None,
+        cgroup_create=lambda path: None,
+        cgroup_read=lambda path: events(),
+        process_cgroup_read=lambda pid: f"0::{CGROUP_RUNTIME_PATH}\n".encode(),
+        clock=clock.monotonic,
+        pause=oversleep,
+    )
+    with pytest.raises(PodmanRuntimeError, match="cgroup is not empty"):
+        backend.confirm_empty(runtime_unit)
+
+    assert clock.pauses == [6.05]
+    assert reads == [0.0]
+
+
+@pytest.mark.unit
+def test_empty_proof_rejects_emptiness_read_completed_after_the_deadline(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    command = PodmanDouble()
+    runtime_unit = created_runtime(command, unit, policy)
+    command.status = "exited"
+    clock = FakeClock()
+    reads: list[float] = []
+
+    def events() -> bytes:
+        reads.append(clock.now)
+        if len(reads) == 1:
+            return b"populated 1\nfrozen 0\n"
+        clock.now += 1.0
+        return b"populated 0\nfrozen 0\n"
+
+    backend = emptiness_runtime(command, events, clock, CgroupEmptinessWait(1.0, 0.25))
+    with pytest.raises(PodmanRuntimeError, match="cgroup is not empty"):
+        backend.confirm_empty(runtime_unit)
+
+    assert reads == [0.0, 0.25]
+    assert clock.pauses == [0.25]
+
+
+@pytest.mark.unit
+def test_empty_proof_never_pauses_after_a_populated_first_read_past_the_deadline(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    command = PodmanDouble()
+    runtime_unit = created_runtime(command, unit, policy)
+    command.status = "exited"
+    clock = FakeClock()
+    reads: list[float] = []
+
+    def slow_populated_read() -> bytes:
+        reads.append(clock.now)
+        clock.now += 10.0
+        return b"populated 1\nfrozen 0\n"
+
+    with pytest.raises(PodmanRuntimeError, match="cgroup is not empty"):
+        emptiness_runtime(command, slow_populated_read, clock).confirm_empty(
+            runtime_unit
+        )
+
+    assert reads == [0.0]
+    assert clock.pauses == []
+
+
+@pytest.mark.unit
+def test_empty_proof_accepts_a_first_empty_read_without_a_deadline_check(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    command = PodmanDouble()
+    runtime_unit = created_runtime(command, unit, policy)
+    command.status = "exited"
+    clock = FakeClock()
+
+    def slow_first_read() -> bytes:
+        clock.now += 10.0
+        return b"populated 0\nfrozen 0\n"
+
+    waited = emptiness_runtime(command, slow_first_read, clock).confirm_empty(
+        runtime_unit
+    )
+    immediate = emptiness_runtime(
+        command, lambda: b"populated 0\nfrozen 0\n", FakeClock()
+    ).confirm_empty(runtime_unit)
+
+    assert waited == immediate
+    assert clock.pauses == []
 
 
 @pytest.mark.unit

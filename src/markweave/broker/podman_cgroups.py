@@ -53,17 +53,25 @@ def _await_unpopulated(
     monotonic: Callable[[], float],
     sleep: Callable[[float], None],
 ) -> dict[str, int]:
-    """Return parsed events once unpopulated, or fail when the bound expires."""
+    """Return parsed events once unpopulated, or fail when the bound expires.
+
+    The first observation is accepted immediately. A later observation counts
+    only when both the pause and the read completed before the deadline, so a
+    delayed pause can never turn evidence observed after the bound into proof.
+    """
 
     deadline = monotonic() + wait.timeout_seconds
-    while True:
-        events = _parse_cgroup_events(read())
-        if events.get("populated") == 0:
-            return events
+    events = _parse_cgroup_events(read())
+    while events.get("populated") != 0:
         remaining = deadline - monotonic()
-        if remaining <= 0:
+        if remaining > 0:
+            sleep(min(wait.poll_interval_seconds, remaining))
+        if deadline - monotonic() <= 0:
             raise PodmanRuntimeError("Podman stable unit cgroup is not empty")
-        sleep(min(wait.poll_interval_seconds, remaining))
+        events = _parse_cgroup_events(read())
+        if deadline - monotonic() <= 0:
+            raise PodmanRuntimeError("Podman stable unit cgroup is not empty")
+    return events
 
 
 class SystemdCgroupRemover:
