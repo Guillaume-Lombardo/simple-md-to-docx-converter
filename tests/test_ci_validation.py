@@ -38,6 +38,19 @@ UPLOAD_ARTIFACT_PIN = (
 LEGACY_UPLOAD_ARTIFACT_PIN = (
     "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2"
 )
+MISSING_LIGHT_SHARD_COMMAND = (
+    "missing required workflow command: 'uv run python -m "
+    'scripts.ci.engine_userns_gate -- uv run pytest -m "unit or light_coverage" '
+    "-n auto --dist loadgroup"
+)
+MISSING_COVERAGE_COMBINE_COMMAND = (
+    "missing required workflow command: 'set -euo pipefail\\n"
+    "test -s artifacts/light-coverage/0/.coverage\\n"
+)
+MISSING_CHANGED_COVERAGE_COMMAND = (
+    "missing required workflow command: "
+    "'uv run python -m scripts.ci.check_changed_coverage"
+)
 PACKAGE_PLACEHOLDER = "PACKAGE_NAME_FROM_APPROVED_POLICY"
 VERSION_PLACEHOLDER = "0+version.from.approved.policy"
 ARTIFACT_PATH_PLACEHOLDER = "ARTIFACT_DIRECTORY_FROM_APPROVED_POLICY"
@@ -116,6 +129,12 @@ RELEASE_POLICY = ReleaseWorkflowPolicy(
         f"{ARTIFACT_PATH_PLACEHOLDER}/*.tar.gz",
     ),
 )
+
+
+def _assert_reports(errors: list[str], *expected: str) -> None:
+    """Require each expected rule error, not just any error such as the digest."""
+    for message in expected:
+        assert any(message in error for error in errors), (message, errors)
 
 
 def _workflow_with_version(workflow: str, version: str) -> str:
@@ -678,33 +697,38 @@ def test_validator_rejects_ungated_functional_engine_domain() -> None:
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    ("command", "replacement"),
+    ("command", "replacement", "message"),
     [
         (
             'uv run pytest -m "unit or light_coverage"',
             'echo uv run pytest -m "unit or light_coverage"',
+            MISSING_LIGHT_SHARD_COMMAND,
         ),
         (
             'uv run pytest -m "unit or light_coverage"',
             'true # uv run pytest -m "unit or light_coverage"',
+            MISSING_LIGHT_SHARD_COMMAND,
         ),
         (
             'uv run pytest -m "unit or light_coverage"',
             "COMMAND='uv run pytest -m \"unit or light_coverage\"'; $COMMAND",
+            MISSING_LIGHT_SHARD_COMMAND,
         ),
         (
             "python -m scripts.ci.check_changed_coverage",
             "echo python -m scripts.ci.check_changed_coverage",
+            MISSING_CHANGED_COVERAGE_COMMAND,
         ),
     ],
+    ids=["echo", "comment", "variable", "echo-changed-coverage"],
 )
 def test_ci_contract_rejects_inert_or_indirect_commands(
-    command: str, replacement: str
+    command: str, replacement: str, message: str
 ) -> None:
     """Echoes, comments, and variables cannot satisfy an executable CI contract."""
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
     weakened = workflow.replace(command, replacement, 1)
-    assert validate_workflow_text(weakened)
+    _assert_reports(validate_workflow_text(weakened), message)
 
 
 @pytest.mark.unit
@@ -1302,15 +1326,17 @@ def test_mutation_policy_rejects_arbitrary_concurrency_expression() -> None:
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    ("needle", "replacement"),
+    ("needle", "replacement", "expected"),
     [
         (
             "permissions:\n  contents: read",
             "permissions:\n  contents: read\n\ndefaults:\n  run:\n    shell: bash",
+            ("workflow fields do not match the explicit allowlist",),
         ),
         (
             "    timeout-minutes: 30",
             "    timeout-minutes: 30\n    continue-on-error: true",
+            ("job 'mutation' fields do not match the explicit allowlist",),
         ),
         (
             "      - name: Synchronize locked dependencies\n"
@@ -1318,27 +1344,44 @@ def test_mutation_policy_rejects_arbitrary_concurrency_expression() -> None:
             "      - name: Synchronize locked dependencies\n"
             "        if: ${{ false }}\n"
             "        run: uv sync --locked --all-groups",
+            (
+                "step 'Synchronize locked dependencies' in job 'mutation' fields do not match the exact allowlist",
+                "step 'Synchronize locked dependencies' in job 'mutation' must not define a condition",
+            ),
         ),
         (
             "        run: uv sync --locked --all-groups",
             "        run: uv sync --locked --all-groups\n"
             "        continue-on-error: true",
+            (
+                "step 'Synchronize locked dependencies' in job 'mutation' fields do not match the exact allowlist",
+            ),
         ),
         (
             "        run: uv sync --locked --all-groups",
             "        run: uv sync --locked --all-groups\n        shell: bash",
+            (
+                "step 'Synchronize locked dependencies' in job 'mutation' fields do not match the exact allowlist",
+            ),
         ),
+    ],
+    ids=[
+        "workflow-defaults",
+        "job-continue-on-error",
+        "step-condition",
+        "step-continue-on-error",
+        "step-shell",
     ],
 )
 def test_read_only_policy_rejects_neutralizing_fields(
-    needle: str, replacement: str
+    needle: str, replacement: str, expected: tuple[str, ...]
 ) -> None:
     """Defaults, conditions, shells, and error suppression cannot weaken jobs."""
     workflow = Path(".github/workflows/mutation.yml").read_text(encoding="utf-8")
     errors = validate_workflow_text(
         workflow.replace(needle, replacement, 1), workflow_name="mutation.yml"
     )
-    assert errors
+    _assert_reports(errors, *expected)
 
 
 @pytest.mark.unit
@@ -2206,94 +2249,140 @@ def test_python_source_discovery_excludes_installed_package_managers(
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    ("original", "replacement"),
+    ("original", "replacement", "message"),
     [
-        ("shard: [0, 1]", "shard: [0]"),
-        ("timeout-minutes: 15", "timeout-minutes: 25"),
-        (" -n auto --dist loadgroup\n", "\n"),
-        ("--dist loadgroup\n", "--dist load\n"),
-        ("-n auto --dist", "-n 1 --dist"),
+        (
+            "shard: [0, 1]",
+            "shard: [0]",
+            "light Python tests must run both complementary shards",
+        ),
+        (
+            "timeout-minutes: 15",
+            "timeout-minutes: 25",
+            "light Python shards must use the reviewed 15-minute bound",
+        ),
+        (" -n auto --dist loadgroup\n", "\n", MISSING_LIGHT_SHARD_COMMAND),
+        ("--dist loadgroup\n", "--dist load\n", MISSING_LIGHT_SHARD_COMMAND),
+        ("-n auto --dist", "-n 1 --dist", MISSING_LIGHT_SHARD_COMMAND),
         (
             "needs: [python-tests, python-distributed-coverage]",
             "needs: python-tests",
+            "Python coverage must require both shards and distributed storage",
         ),
-        ("include-hidden-files: true", "include-hidden-files: false"),
-        ("light-coverage-${{ github.run_attempt }}-1", "light-coverage-1-1"),
-        ("test -s artifacts/light-coverage/1/.coverage", "true"),
+        (
+            "include-hidden-files: true",
+            "include-hidden-files: false",
+            "light sharding contract mismatch: Retain shard coverage",
+        ),
+        (
+            "light-coverage-${{ github.run_attempt }}-1",
+            "light-coverage-1-1",
+            "light sharding contract mismatch: Download second shard coverage",
+        ),
+        (
+            "test -s artifacts/light-coverage/1/.coverage",
+            "true",
+            MISSING_COVERAGE_COMBINE_COMMAND,
+        ),
         (
             "test -s artifacts/distributed-coverage/.coverage",
             "true",
+            MISSING_COVERAGE_COMBINE_COMMAND,
         ),
         (
             "distributed-coverage-${{ github.run_attempt }}",
             "distributed-coverage-1",
+            "light sharding contract mismatch: Retain distributed coverage",
         ),
         (
             "artifacts/distributed-coverage/.coverage\n          uv run coverage combine",
             "artifacts/distributed-coverage/.coverage\n          uv run coverage json",
+            MISSING_COVERAGE_COMBINE_COMMAND,
         ),
         (
             "coverage json -o coverage.json --fail-under=90",
             "coverage json -o coverage.json --fail-under=0",
+            MISSING_COVERAGE_COMBINE_COMMAND,
         ),
         (
             "PYTHON_TESTS_RESULT: ${{ needs.python-tests.result }}",
             "PYTHON_TESTS_RESULT: success",
+            "final gate must bind actual Python job results",
         ),
         (
             "PYTHON_COVERAGE_RESULT: ${{ needs.python-coverage.result }}",
             "PYTHON_COVERAGE_RESULT: success",
+            "final gate must bind actual Python job results",
         ),
         (
             "needs: [detect, light, python-tests, python-coverage, domain-plan, heavy, "
             "build-images, final-image, mutation]",
             "needs: [detect, light, domain-plan, heavy]",
+            "Python coverage must require both shards and distributed storage",
         ),
         (
             "needs: [detect, light, python-tests, python-coverage, domain-plan, heavy, "
             "build-images, final-image, mutation]",
             "needs: [detect, light, python-tests, python-coverage, domain-plan, heavy, "
             "mutation]",
+            "Python coverage must require both shards and distributed storage",
         ),
-    ],
-)
-def test_sharded_light_cannot_omit_tests_or_weaken_aggregate_gate(
-    original: str, replacement: str
-) -> None:
-    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
-    assert original in workflow
-    assert validate_workflow_text(workflow.replace(original, replacement, 1))
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize(
-    ("original", "replacement"),
-    [
         (
             "tests/integration/postgres tests/integration/s3",
             "tests/integration/postgres",
+            "missing required workflow command: "
+            "'uv run pytest tests/integration/postgres tests/integration/s3",
         ),
         (
             "      - name: Prepare the RustFS test bucket\n"
             "        run: uv run python -m scripts.ci.prepare_s3_test_bucket\n",
             "",
+            "distributed coverage must run the complete storage cohort",
         ),
         (
             "name: distributed-coverage-${{ github.run_attempt }}",
             "name: distributed-coverage-1",
+            "light sharding contract mismatch: Retain distributed coverage",
         ),
         (
             "path: artifacts/distributed-coverage",
             "path: artifacts/light-coverage/0",
+            "light sharding contract mismatch: Download distributed coverage",
         ),
     ],
+    ids=[
+        "single-shard",
+        "shard-timeout",
+        "serial-shard",
+        "load-distribution",
+        "one-worker",
+        "coverage-without-distributed",
+        "hidden-coverage-file",
+        "second-shard-artifact",
+        "second-shard-check",
+        "distributed-check",
+        "distributed-retain-name",
+        "combine-skipped",
+        "coverage-threshold",
+        "gate-python-tests-result",
+        "gate-python-coverage-result",
+        "gate-drops-python-jobs",
+        "gate-drops-image-jobs",
+        "distributed-cohort-path",
+        "distributed-bucket-preparation",
+        "distributed-artifact-name",
+        "distributed-artifact-path",
+    ],
 )
-def test_distributed_coverage_cohort_and_artifact_cannot_be_dropped(
-    original: str, replacement: str
+def test_python_coverage_cannot_omit_tests_or_weaken_aggregate_gate(
+    original: str, replacement: str, message: str
 ) -> None:
+    """Light shards, distributed coverage and the aggregate gate stay complete."""
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
     assert original in workflow
-    assert validate_workflow_text(workflow.replace(original, replacement, 1))
+    _assert_reports(
+        validate_workflow_text(workflow.replace(original, replacement, 1)), message
+    )
 
 
 @pytest.mark.unit
@@ -2329,7 +2418,12 @@ def test_split_jobs_reuse_dependencies_and_only_trusted_main_writes_compiler_cac
     assert "hashFiles('pnpm-lock.yaml')" in restore["with"]["restore-keys"]
     assert "github.event_name == 'push'" in save["if"]
     assert "github.ref == 'refs/heads/main'" in save["if"]
-    assert validate_workflow_text(text.replace(save["if"], "${{ always() }}"))
+    _assert_reports(
+        validate_workflow_text(text.replace(save["if"], "${{ always() }}")),
+        "step 'Save the Next.js compiler cache from trusted main' in job 'light' "
+        "condition does not match the explicit policy",
+        "cache writes must be limited to trusted pushes on main",
+    )
 
 
 @pytest.mark.unit
