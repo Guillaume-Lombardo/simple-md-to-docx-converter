@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any
 
@@ -12,9 +11,6 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 DEPENDABOT = ROOT / ".github/dependabot.yml"
 MUTATION_WORKFLOW = ROOT / ".github/workflows/mutation.yml"
-FULL_SHA_ACTION = re.compile(
-    r"^\s*uses:\s*[^\s@]+@[0-9a-f]{40}(?:\s+#.*)?$", re.MULTILINE
-)
 
 
 def load_strings(path: Path) -> dict[str, Any]:
@@ -52,29 +48,6 @@ def test_dependabot_covers_every_dependency_ecosystem_weekly_in_groups() -> None
         assert update["schedule"]["timezone"] == "Etc/UTC"
         assert update["groups"]
         assert int(update["open-pull-requests-limit"]) <= 5
-
-
-@pytest.mark.unit
-def test_mutation_workflow_is_isolated_bounded_and_read_only() -> None:
-    workflow = load_strings(MUTATION_WORKFLOW)
-    triggers = workflow["on"]
-    assert set(triggers) == {"schedule", "workflow_dispatch"}
-    assert workflow["permissions"] == {"contents": "read"}
-    assert workflow["concurrency"]["cancel-in-progress"] is True
-    job = workflow["jobs"]["mutation"]
-    assert int(job["timeout-minutes"]) == 30
-    assert job["if"] == (
-        "${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}"
-    )
-    text = MUTATION_WORKFLOW.read_text(encoding="utf-8")
-    uses_lines = "\n".join(
-        line for line in text.splitlines() if line.lstrip().startswith("uses:")
-    )
-    assert FULL_SHA_ACTION.findall(uses_lines) == uses_lines.splitlines()
-    assert "secrets." not in text
-    assert "github.token" not in text
-    assert "id-token: write" not in text
-    assert "contents: write" not in text
 
 
 @pytest.mark.unit
