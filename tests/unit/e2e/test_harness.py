@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -893,13 +894,17 @@ def test_router_uses_current_numeric_frontend_address_during_scanner_outage() ->
     )
 
     outage_probe = runner.split("probe_scanner_outage_routes() {", 1)[1].split(
-        "\nadmission_frontend_origin() {", 1
+        "\nrequire_reserved_address() {", 1
     )[0]
     assert '["frontend_alias", "http://frontend:3000/login"]' in outage_probe
     assert '["frontend_numeric", `${process.env.E2E_FRONTEND_ORIGIN}/login`]' in (
         outage_probe
     )
-    assert 'name !== "frontend_alias" && status !== "200"' in outage_probe
+    assert (
+        'const required = new Set(["router_login", "frontend_numeric", '
+        '"backend_ready"]);'
+    ) in outage_probe
+    assert 'required.has(name) && status !== "200"' in outage_probe
 
 
 @pytest.mark.unit
@@ -1562,3 +1567,399 @@ def test_runner_invokes_local_image_packaging_in_both_profiles() -> None:
         "Document image exceeds configured limits.",
     ):
         assert scenario in workflow
+
+
+def _runner_function(runner: str, name: str, following: str) -> str:
+    body = runner.split(f"{name}() {{", 1)[1].split(f"\n{following}() {{", 1)[0]
+    return f"{name}() {{{body}"
+
+
+@pytest.mark.unit
+def test_scanner_outage_probe_is_a_documented_bounded_poll() -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    probe = _runner_function(
+        runner, "probe_scanner_outage_routes", "require_reserved_address"
+    )
+    rationale = runner.split("probe_scanner_outage_routes() {", 1)[0][-900:]
+
+    assert "const pollWindowMs = 20_000;" in probe
+    assert "const intervalMs = 250;" in probe
+    assert "AbortSignal.timeout(2000)" in probe
+    assert "if (Date.now() + intervalMs >= deadline) break;" in probe
+    assert "scanner-outage attempt ${attempt}" in probe
+    assert "scanner-outage route ${name} status=${status}" in probe
+    assert "scanner-outage attempts=${attempt} elapsed_ms=" in probe
+    assert '!required.has(name) || status === "200"' in probe
+    assert 'record_name_resolution "$application_name" >&2 || true' in probe
+    assert "A persistent failure of any required route still" in rationale
+    assert "real readiness or routing regression is not masked" in rationale
+    stop = runner.index('podman stop --time 5 "$clamav_name" >/dev/null')
+    assert runner.index("probe_scanner_outage_routes\n", stop) > stop
+
+
+@pytest.mark.unit
+@pytest.mark.container_runtime_guard_exempt(
+    reason="the bash script stubs podman with a shell function; no runtime starts"
+)
+@pytest.mark.parametrize(("probe_status", "expected_code"), [(0, 0), (1, 1)])
+def test_failed_scanner_outage_probe_records_name_resolution(
+    probe_status: int, expected_code: int
+) -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    probe = _runner_function(
+        runner, "probe_scanner_outage_routes", "require_reserved_address"
+    )
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            "set -euo pipefail\n"
+            'application_name="e2e-api"\n'
+            "admission_frontend_origin() { printf 'http://10.89.0.252:3000\\n'; }\n"
+            "record_name_resolution() {\n"
+            "  printf 'name-resolution for %s\\n' \"$1\"\n"
+            "}\n"
+            "podman() {\n"
+            "  printf 'probed %s\\n' \"$*\" | head -c 80; echo\n"
+            '  return "$PROBE_STATUS"\n'
+            "}\n"
+            f"{probe}\n"
+            "probe_scanner_outage_routes",
+            "bash",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ | {"PROBE_STATUS": str(probe_status)},
+    )
+
+    assert result.returncode == expected_code
+    assert "probed exec --env E2E_FRONTEND_ORIGIN=http://10.89.0.252:3000" in (
+        result.stdout
+    )
+    assert ("name-resolution for e2e-api" in result.stderr) is bool(probe_status)
+
+
+@pytest.mark.unit
+def test_name_resolution_record_covers_pinned_and_resolver_paths() -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    record = _runner_function(
+        runner, "record_name_resolution", "probe_scanner_outage_routes"
+    )
+    collector = runner.split("collect_failure_artifacts() {", 1)[1].split(
+        "\ncleanup() {", 1
+    )[0]
+
+    assert 'for name in ("postgres", "rustfs", "frontend", "e2e-clamav"):' in record
+    assert 'for query in (name, f"{name}.dns.podman"):' in record
+    assert '("getent", "ahosts", query)' in record
+    assert "timeout=5," in record
+    assert "elapsed_ms={elapsed}" in record
+    assert (
+        'for resource in "$application_name" "$worker_one_name" "$worker_two_name"; do'
+    ) in collector
+    assert 'record_name_resolution "$resource" \\' in collector
+    assert '"$artifact_directory/$resource.name-resolution.txt" 2>&1 || true' in (
+        collector
+    )
+
+
+def _reservation_program(runner: str) -> str:
+    return runner.split(
+        'reserved_addresses="$(podman network inspect "$network_name" '
+        "| uv run python -c '",
+        1,
+    )[1].split("\n')\"", 1)[0]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("subnet", "gateway", "expected"),
+    [
+        ("10.89.0.0/24", "10.89.0.1", "10.89.0.2 10.89.0.254 10.89.0.253"),
+        ("10.89.4.0/23", "10.89.4.1", "10.89.4.2 10.89.5.254 10.89.5.253"),
+        ("10.89.0.0/29", "10.89.0.1", "10.89.0.2 10.89.0.6 10.89.0.5"),
+        ("10.89.0.0/30", "10.89.0.1", None),
+        ("10.89.0.0/29", "10.89.0.5", None),
+    ],
+)
+def test_e2e_network_reserves_distinct_usable_peer_addresses(
+    subnet: str, gateway: str, expected: str | None
+) -> None:
+    program = _reservation_program(RUNNER.read_text(encoding="utf-8"))
+    inspected = f'[{{"subnets": [{{"subnet": "{subnet}", "gateway": "{gateway}"}}]}}]'
+    result = subprocess.run(
+        [sys.executable, "-c", program],
+        check=False,
+        capture_output=True,
+        input=inspected,
+        text=True,
+    )
+
+    if expected is None:
+        assert result.returncode != 0
+        assert "no usable reserved IPv4 addresses" in result.stderr
+    else:
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == f"{expected}\n"
+
+
+@pytest.mark.unit
+def test_storage_peers_use_reserved_addresses_and_host_entries() -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    start_frontend = _runner_function(
+        runner, "start_frontend", "record_name_resolution"
+    )
+    mapping = runner.split("# Pin the storage peers the same way.", 1)[1].split(
+        "\nreverse_digest=", 1
+    )[0]
+
+    assert (
+        "read -r scanner_static_address postgres_static_address rustfs_static_address \\\n"
+        '  <<<"$reserved_addresses"'
+    ) in runner
+    assert '--network-alias postgres --ip "$postgres_static_address"' in runner
+    assert '--network-alias rustfs --ip "$rustfs_static_address"' in runner
+    # Replaced frontend containers keep dynamic addresses: reusing one address
+    # for a new container left a stale neighbor entry on Podman 4.9.
+    assert "frontend_static_address" not in runner
+    assert '--add-host "frontend:' not in runner
+    assert runner.count("--network-alias frontend --user") == 2
+    assert "require_reserved_address" not in start_frontend
+    for name in ("postgres", "rustfs"):
+        check = f'require_reserved_address "${name}_name" "${name}_static_address"'
+        assert runner.count(check) == 2
+        start = runner.index(f'podman start "${name}_name" >/dev/null')
+        assert runner.index(check, start) > start
+    assert "service_host_mapping=()" in mapping
+    assert '--add-host "postgres:$postgres_static_address"' in mapping
+    assert '--add-host "rustfs:$rustfs_static_address"' in mapping
+    assert 'scanner_host_mapping+=("${service_host_mapping[@]}")' in mapping
+    application_runs = runner.count(
+        "--network-alias application --publish 127.0.0.1::8080 \\\n"
+    )
+    assert application_runs == runner.count(
+        "--network-alias application --publish 127.0.0.1::8080 \\\n"
+        '  "${scanner_host_mapping[@]}" \\\n'
+    ) + runner.count(
+        "--network-alias application --publish 127.0.0.1::8080 \\\n"
+        '    "${scanner_host_mapping[@]}" \\\n'
+    ) + runner.count(
+        "--network-alias application --publish 127.0.0.1::8080 \\\n"
+        '  "${service_host_mapping[@]}" \\\n'
+    )
+    assert runner.count('      "${scanner_host_mapping[@]}" \\\n') == 1
+
+
+@pytest.mark.unit
+@pytest.mark.container_runtime_guard_exempt(
+    reason="the bash script stubs podman with a shell function; no runtime starts"
+)
+@pytest.mark.parametrize(
+    ("inspected", "expected_code"), [("10.89.0.253", 0), ("10.89.0.7", 1)]
+)
+def test_reserved_address_check_rejects_a_moved_peer(
+    inspected: str, expected_code: int
+) -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    check = _runner_function(
+        runner, "require_reserved_address", "admission_frontend_origin"
+    )
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            "set -euo pipefail\n"
+            'network_name="e2e-network"\n'
+            "podman() { printf '%s\\n' \"$INSPECTED_ADDRESS\"; }\n"
+            f"{check}\n"
+            "require_reserved_address e2e-rustfs 10.89.0.253",
+            "bash",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ | {"INSPECTED_ADDRESS": inspected},
+    )
+
+    assert result.returncode == expected_code
+    if expected_code:
+        assert "did not keep its reserved E2E network address" in result.stderr
+
+
+# A Node preload that replaces fetch, Date.now and setTimeout for the extracted
+# scanner-outage poll. Each route follows a scripted list of outcomes (the last
+# one repeats); "timeout" advances the virtual clock by the 2-second request
+# bound, and the 250 ms pause advances it by its interval, so the 20-second
+# window is exercised deterministically in milliseconds of wall time.
+SCANNER_OUTAGE_RUNTIME = r"""
+const plan = JSON.parse(process.env.SCANNER_OUTAGE_PLAN);
+const origin = process.env.E2E_FRONTEND_ORIGIN;
+const realNow = Date.now.bind(Date);
+const base = realNow();
+let virtualMs = 0;
+Date.now = () => base + virtualMs;
+globalThis.setTimeout = (callback, delay = 0, ...args) => {
+  virtualMs += delay;
+  return setImmediate(callback, ...args);
+};
+const calls = new Map();
+const route = (url) => {
+  if (url === "http://localhost:3100/login") return "router_login";
+  if (url === "http://frontend:3000/login") return "frontend_alias";
+  if (url === `${origin}/login`) return "frontend_numeric";
+  if (url === "http://127.0.0.1:8080/health/ready") return "backend_ready";
+  throw new Error(`unexpected probe URL ${url}`);
+};
+globalThis.fetch = async (url, options) => {
+  if (!(options?.signal instanceof AbortSignal)) throw new Error("unbounded probe");
+  const name = route(String(url));
+  const index = calls.get(name) ?? 0;
+  calls.set(name, index + 1);
+  const outcomes = plan[name] ?? ["200"];
+  const outcome = outcomes[Math.min(index, outcomes.length - 1)];
+  if (outcome === "timeout") {
+    virtualMs += 2000;
+    throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+  }
+  if (outcome === "reject") {
+    throw new TypeError("fetch failed", { cause: { code: "ECONNREFUSED" } });
+  }
+  return { status: Number(outcome) };
+};
+"""
+
+REQUIRED_OUTAGE_ROUTES = ("router_login", "frontend_numeric", "backend_ready")
+
+
+def _run_scanner_outage_probe(
+    tmp_path: Path, plan: dict[str, list[str]]
+) -> subprocess.CompletedProcess[str]:
+    runner = RUNNER.read_text(encoding="utf-8")
+    probe = _runner_function(
+        runner, "probe_scanner_outage_routes", "require_reserved_address"
+    )
+    preload = tmp_path / "scanner-outage-runtime.mjs"
+    preload.write_text(SCANNER_OUTAGE_RUNTIME, encoding="utf-8")
+    return subprocess.run(
+        [
+            "bash",
+            "-c",
+            "set -euo pipefail\n"
+            'application_name="e2e-api"\n'
+            "admission_frontend_origin() { printf 'http://10.89.0.252:3000\\n'; }\n"
+            "record_name_resolution() { printf 'name-resolution for %s\\n' \"$1\"; }\n"
+            "podman() {\n"
+            '  [[ "$1" == exec ]] || return 97\n'
+            "  shift\n"
+            "  local -a environment=()\n"
+            '  while [[ "$1" == --env ]]; do environment+=("$2"); shift 2; done\n'
+            '  [[ "$1" == "$application_name" && "$2" == node ]] || return 98\n'
+            "  shift 2\n"
+            '  env "${environment[@]}" node --import "$SCANNER_OUTAGE_PRELOAD" "$@"\n'
+            "}\n"
+            f"{probe}\n"
+            "probe_scanner_outage_routes",
+            "bash",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=os.environ
+        | {
+            "SCANNER_OUTAGE_PLAN": json.dumps(plan),
+            "SCANNER_OUTAGE_PRELOAD": preload.as_uri(),
+        },
+    )
+
+
+def _outage_summary(stdout: str) -> tuple[dict[str, str], int, int]:
+    statuses = {}
+    attempts = elapsed = -1
+    for line in stdout.splitlines():
+        if line.startswith("scanner-outage route "):
+            name, status = line.removeprefix("scanner-outage route ").split(
+                " status=", 1
+            )
+            statuses[name] = status
+        elif line.startswith("scanner-outage attempts="):
+            fields = dict(field.split("=", 1) for field in line.split()[1:])
+            attempts = int(fields["attempts"])
+            elapsed = int(fields["elapsed_ms"])
+    return statuses, attempts, elapsed
+
+
+@pytest.mark.unit
+@pytest.mark.container_runtime_guard_exempt(
+    reason="the bash script stubs podman with a shell function that runs Node; no runtime starts"
+)
+@pytest.mark.parametrize("route", REQUIRED_OUTAGE_ROUTES)
+@pytest.mark.parametrize(
+    ("outcome", "reported"),
+    [
+        ("503", "503"),
+        ("reject", "error:ECONNREFUSED"),
+        ("timeout", "error:TimeoutError"),
+    ],
+)
+def test_scanner_outage_poll_fails_on_any_persistent_required_route_failure(
+    tmp_path: Path, route: str, outcome: str, reported: str
+) -> None:
+    result = _run_scanner_outage_probe(tmp_path, {route: [outcome]})
+    statuses, attempts, elapsed = _outage_summary(result.stdout)
+
+    assert result.returncode == 1, result.stderr
+    assert "name-resolution for e2e-api" in result.stderr
+    assert statuses[route] == reported
+    assert all(
+        statuses[name] == "200" for name in REQUIRED_OUTAGE_ROUTES if name != route
+    )
+    assert 1 < attempts <= 80
+    assert 20_000 - 250 <= elapsed <= 20_000 + 2_000
+    assert result.stdout.count("scanner-outage attempt ") == attempts
+
+
+@pytest.mark.unit
+@pytest.mark.container_runtime_guard_exempt(
+    reason="the bash script stubs podman with a shell function that runs Node; no runtime starts"
+)
+def test_scanner_outage_poll_recovers_from_a_transient_stall(tmp_path: Path) -> None:
+    result = _run_scanner_outage_probe(
+        tmp_path,
+        {
+            "frontend_alias": ["timeout", "timeout", "200"],
+            "backend_ready": ["timeout", "503", "200"],
+        },
+    )
+    statuses, attempts, elapsed = _outage_summary(result.stdout)
+
+    assert result.returncode == 0, result.stderr
+    assert "name-resolution" not in result.stderr
+    assert statuses == dict.fromkeys(
+        ("router_login", "frontend_alias", "frontend_numeric", "backend_ready"), "200"
+    )
+    assert attempts == 3
+    assert elapsed < 20_000
+    assert "scanner-outage attempt 1 " in result.stdout
+    assert "backend_ready=error:TimeoutError" in result.stdout
+    assert "scanner-outage attempt 2 " in result.stdout
+    assert "scanner-outage attempt 3 " not in result.stdout
+
+
+@pytest.mark.unit
+@pytest.mark.container_runtime_guard_exempt(
+    reason="the bash script stubs podman with a shell function that runs Node; no runtime starts"
+)
+@pytest.mark.parametrize("outcome", ["503", "reject", "timeout"])
+def test_scanner_outage_alias_failure_alone_stays_diagnostic(
+    tmp_path: Path, outcome: str
+) -> None:
+    result = _run_scanner_outage_probe(tmp_path, {"frontend_alias": [outcome]})
+    statuses, attempts, _elapsed = _outage_summary(result.stdout)
+
+    assert result.returncode == 0, result.stderr
+    assert "name-resolution" not in result.stderr
+    assert statuses["frontend_alias"] != "200"
+    assert all(statuses[name] == "200" for name in REQUIRED_OUTAGE_ROUTES)
+    assert attempts == 1

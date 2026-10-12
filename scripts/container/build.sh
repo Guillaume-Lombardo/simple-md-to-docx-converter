@@ -10,8 +10,9 @@ readonly application_version
 MARKWEAVE_TOOLCHAIN_CACHE_DIRECTORY="$toolchain_cache_directory" \
   bash scripts/ci/prepare-libreoffice-archive.sh rpm
 
+bash scripts/container/pull-base-images.sh Containerfile
 env -u SOURCE_DATE_EPOCH podman build \
-  --pull=false \
+  --pull=never \
   --timestamp="$source_date_epoch" \
   --build-arg "APPLICATION_VERSION=$application_version" \
   --build-context "libreoffice-archive=$toolchain_cache_directory" \

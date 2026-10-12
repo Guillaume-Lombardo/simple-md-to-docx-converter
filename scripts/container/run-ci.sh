@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly base_digest=sha256:194df4e35e0e5467e1b57266f4d61f821e1b1f567135f074d23066d3604ae653
-readonly base_image="registry.access.redhat.com/ubi9/python-314@$base_digest"
 readonly final_image=localhost/md-converter:t20-ci
 readonly reverse_attempt_image=localhost/markweave-reverse-attempt:t70-ci
 readonly frontend_image=localhost/md-converter-web:t64-ci
@@ -23,7 +21,8 @@ record_ci_status() {
 trap record_ci_status EXIT
 
 test "$(podman info --format '{{.Host.Security.Rootless}}')" = true
-bash scripts/ci/pull-immutable-image.sh "$base_image" "$base_digest"
+bash scripts/container/pull-base-images.sh \
+  Containerfile containers/reverse-attempt/Containerfile web/Containerfile
 bash scripts/container/build.sh "$final_image"
 bash scripts/container/build-reverse-attempt.sh "$reverse_attempt_image"
 bash scripts/container/smoke-reverse-attempt.sh "$reverse_attempt_image"
@@ -32,8 +31,7 @@ MARKWEAVE_T70_PODMAN_TEST_IMAGE="$reverse_attempt_image" \
     -m integration --no-cov
 source_date_epoch="$(git show -s --format=%ct HEAD)"
 readonly source_date_epoch
-podman build --format oci --timestamp "$source_date_epoch" \
-  --tag "$frontend_image" --file web/Containerfile .
+bash scripts/container/build-frontend.sh "$frontend_image" "$source_date_epoch"
 frontend_image_id="$(podman image inspect "$frontend_image" --format '{{.Id}}')"
 readonly frontend_image_id
 [[ "$frontend_image_id" =~ ^[0-9a-f]{64}$ ]]

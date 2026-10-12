@@ -90,8 +90,6 @@ if [[ -n "$local_image" ]]; then
   fi
 fi
 readonly image="${published_image:-${local_image:-localhost/md-converter:t21-$profile}}"
-readonly base_digest=sha256:194df4e35e0e5467e1b57266f4d61f821e1b1f567135f074d23066d3604ae653
-readonly base_image="registry.access.redhat.com/ubi9/python-314@$base_digest"
 readonly prefix="md-converter-t21-$profile"
 readonly network_name="$prefix"
 readonly application_name="$prefix-api"
@@ -107,6 +105,8 @@ readonly clamav_probe_name="$prefix-clamav-probe"
 readonly composer_provider_name="$prefix-composer-provider"
 readonly postgres_name="$prefix-postgres"
 readonly rustfs_name="$prefix-rustfs"
+readonly postgres_image=docker.io/library/postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8
+readonly rustfs_image=ghcr.io/rustfs/rustfs:1.0.0-beta.12-glibc@sha256:6d693c8d0c09a1c5770f1780303a5d58b9e864c313fd2644ecd561e92b79ae04
 readonly worker_one_name="$prefix-worker-1"
 readonly worker_two_name="$prefix-worker-2"
 readonly runtime_uid="${T21_RUNTIME_UID:-51000}"
@@ -243,6 +243,12 @@ collect_failure_artifacts() {
       podman inspect "$resource" \
         --format 'name={{.Name}} state={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' \
         >"$artifact_directory/$resource.state" 2>&1 || true
+    fi
+  done
+  for resource in "$application_name" "$worker_one_name" "$worker_two_name"; do
+    if [[ "$(podman inspect "$resource" --format '{{.State.Running}}' 2>/dev/null)" == true ]]; then
+      record_name_resolution "$resource" \
+        >"$artifact_directory/$resource.name-resolution.txt" 2>&1 || true
     fi
   done
   if [[ -d "$temporary_directory/browser-artifacts" ]]; then
@@ -674,10 +680,53 @@ start_frontend() {
   return 1
 }
 
+# Record how long each peer name takes to resolve inside a container. Pinned
+# bare names resolve through host entries, the frontend through the resolver,
+# and every `.dns.podman` name through the network's aardvark-dns resolver, so a
+# stalled resolver remains visible.
+record_name_resolution() {
+  local container="$1"
+  podman exec "$container" python -c '
+import subprocess
+import time
+
+for name in ("postgres", "rustfs", "frontend", "e2e-clamav"):
+    for query in (name, f"{name}.dns.podman"):
+        started = time.monotonic()
+        try:
+            result = subprocess.run(
+                ("getent", "ahosts", query),
+                capture_output=True,
+                check=False,
+                text=True,
+                timeout=5,
+            )
+        except subprocess.TimeoutExpired:
+            outcome = "timeout"
+        except OSError as error:
+            outcome = f"error:{type(error).__name__}"
+        else:
+            fields = result.stdout.split()
+            outcome = fields[0] if result.returncode == 0 and fields else (
+                f"exit:{result.returncode}"
+            )
+        elapsed = round((time.monotonic() - started) * 1000)
+        print(f"name-resolution {query} result={outcome} elapsed_ms={elapsed}")
+'
+}
+
+# Stopping the scanner tears down its network endpoint, which reloads the
+# network's aardvark-dns resolver. Hosted runs showed DNS-dependent routes timing
+# out for a moment right afterwards while numeric routes answered. The storage
+# peers behind readiness are now pinned through host entries, and the frontend
+# alias remains a diagnostic DNS route. This bounded poll (attempts 250 ms apart
+# that start within 20 seconds, each request bounded to 2 seconds) only absorbs
+# a transient runtime stall. A persistent failure of any required route still
+# fails the scenario, so a real readiness or routing regression is not masked.
 probe_scanner_outage_routes() {
   local frontend_origin
   frontend_origin="$(admission_frontend_origin)"
-  podman exec --env "E2E_FRONTEND_ORIGIN=$frontend_origin" \
+  if podman exec --env "E2E_FRONTEND_ORIGIN=$frontend_origin" \
     "$application_name" node --input-type=module -e '
 const targets = [
   ["router_login", "http://localhost:3100/login"],
@@ -685,7 +734,10 @@ const targets = [
   ["frontend_numeric", `${process.env.E2E_FRONTEND_ORIGIN}/login`],
   ["backend_ready", "http://127.0.0.1:8080/health/ready"],
 ];
-const results = await Promise.all(targets.map(async ([name, url]) => {
+const required = new Set(["router_login", "frontend_numeric", "backend_ready"]);
+const pollWindowMs = 20_000;
+const intervalMs = 250;
+const probe = async () => Promise.all(targets.map(async ([name, url]) => {
   try {
     const response = await fetch(url, { signal: AbortSignal.timeout(2000) });
     return [name, String(response.status)];
@@ -693,11 +745,39 @@ const results = await Promise.all(targets.map(async ([name, url]) => {
     return [name, `error:${error.cause?.code ?? error.name}`];
   }
 }));
+const started = Date.now();
+const deadline = started + pollWindowMs;
+let results = [];
+let attempt = 0;
+for (;;) {
+  attempt += 1;
+  results = await probe();
+  if (results.every(([name, status]) => !required.has(name) || status === "200"))
+    break;
+  console.log(`scanner-outage attempt ${attempt} ${results.map(([name, status]) => `${name}=${status}`).join(" ")}`);
+  if (Date.now() + intervalMs >= deadline) break;
+  await new Promise((resolve) => setTimeout(resolve, intervalMs));
+}
 for (const [name, status] of results)
   console.log(`scanner-outage route ${name} status=${status}`);
-if (results.some(([name, status]) => name !== "frontend_alias" && status !== "200"))
+console.log(`scanner-outage attempts=${attempt} elapsed_ms=${Date.now() - started}`);
+if (results.some(([name, status]) => required.has(name) && status !== "200"))
   process.exitCode = 1;
-'
+'; then
+    return 0
+  fi
+  record_name_resolution "$application_name" >&2 || true
+  return 1
+}
+
+require_reserved_address() {
+  local container="$1" expected="$2" actual
+  actual="$(podman inspect "$container" --format \
+    "{{with index .NetworkSettings.Networks \"$network_name\"}}{{.IPAddress}}{{end}}")"
+  if [[ "$actual" != "$expected" ]]; then
+    echo "Container $container did not keep its reserved E2E network address." >&2
+    return 1
+  fi
 }
 
 admission_frontend_origin() {
@@ -1045,10 +1125,19 @@ elif [[ -n "$local_image" ]]; then
   podman image exists "$image"
   podman image exists "$frontend_image"
 else
-  bash scripts/ci/pull-immutable-image.sh "$base_image" "$base_digest"
+  # Acquire every pinned base with bounded retries before the long builds; the
+  # build scripts then run with `--pull=never` and reuse these verified images.
+  bash scripts/container/pull-base-images.sh \
+    Containerfile containers/reverse-attempt/Containerfile web/Containerfile
   bash scripts/container/build.sh "$image"
-  podman build --format oci --tag "$frontend_image" --file web/Containerfile .
+  bash scripts/container/build-frontend.sh "$frontend_image"
   bash scripts/container/build-reverse-attempt.sh "$reverse_attempt_image"
+fi
+if [[ "$profile" == distributed ]]; then
+  # Acquire the digest-pinned storage services with bounded retries so the
+  # later `podman run --pull=never` never depends on an implicit pull.
+  bash scripts/ci/pull-immutable-image.sh "$postgres_image" "${postgres_image##*@}"
+  bash scripts/ci/pull-immutable-image.sh "$rustfs_image" "${rustfs_image##*@}"
 fi
 
 
@@ -1070,7 +1159,16 @@ fi
 
 podman network create "$network_name" >/dev/null
 created+=("network:$network_name")
-scanner_static_address="$(podman network inspect "$network_name" | uv run python -c '
+# Reserve static addresses before any peer starts. The scanner takes the first
+# host address after the gateway; PostgreSQL and RustFS take the last host
+# addresses, which dynamic allocation reaches only after exhausting the rest of
+# the subnet. Every address is validated as a distinct usable host. These peers
+# keep their container across restarts. The frontend is deliberately not
+# pinned: the harness replaces it with new containers, and on Podman 4.9 a new
+# container reusing the same address stayed unreachable for about five seconds
+# from the application's network namespace, which still held the previous
+# container's neighbor entry. No required route resolves the frontend by name.
+reserved_addresses="$(podman network inspect "$network_name" | uv run python -c '
 import ipaddress
 import json
 import sys
@@ -1084,14 +1182,32 @@ for subnet in networks[0].get("subnets", []):
         gateway = ipaddress.IPv4Address(subnet["gateway"])
     except (KeyError, ValueError, TypeError):
         continue
-    address = gateway + 1
-    if gateway in network and address in network and address != network.broadcast_address:
-        print(address)
+    addresses = [
+        gateway + 1,
+        network.broadcast_address - 1,
+        network.broadcast_address - 2,
+    ]
+    unusable = {network.network_address, network.broadcast_address, gateway}
+    if (
+        gateway in network
+        and all(address in network and address not in unusable for address in addresses)
+        and len(set(addresses)) == len(addresses)
+    ):
+        print(" ".join(str(address) for address in addresses))
         break
 else:
-    raise SystemExit("E2E network has no usable scanner IPv4 address")
+    raise SystemExit("E2E network has no usable reserved IPv4 addresses")
 ')"
-readonly scanner_static_address
+read -r scanner_static_address postgres_static_address rustfs_static_address \
+  <<<"$reserved_addresses"
+for reserved_address in "$scanner_static_address" "$postgres_static_address" \
+  "$rustfs_static_address"; do
+  if [[ ! "$reserved_address" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "E2E network address reservation is incomplete." >&2
+    exit 1
+  fi
+done
+readonly scanner_static_address postgres_static_address rustfs_static_address
 
 created=("$clamav_name" "${created[@]}")
 e2e_run_in_harness_directory \
@@ -1167,6 +1283,19 @@ if [[ ! "$composer_provider_address" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; the
   exit 1
 fi
 scanner_host_mapping+=(--add-host "e2e-llm:$composer_provider_address")
+# Pin the storage peers the same way. Stopping a peer reloads aardvark-dns, and
+# hosted runs showed alias lookups stalling right after the scanner stopped
+# while numeric routes kept answering. The router shares the application's
+# network namespace and therefore its host entries; it reaches the frontend by
+# its current numeric address.
+service_host_mapping=()
+if [[ "$profile" == distributed ]]; then
+  service_host_mapping+=(
+    --add-host "postgres:$postgres_static_address"
+    --add-host "rustfs:$rustfs_static_address"
+  )
+fi
+scanner_host_mapping+=("${service_host_mapping[@]}")
 
 reverse_digest="$(podman image inspect "$reverse_attempt_image" --format '{{.Digest}}')"
 if [[ ! "$reverse_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
@@ -1204,20 +1333,21 @@ else
   created=("$postgres_name" "${created[@]}")
   e2e_run_in_harness_directory \
     "$temporary_directory" "$temporary_directory_identity" \
-    podman run --detach --name "$postgres_name" --network "$network_name" \
-    --network-alias postgres --env POSTGRES_DB=md_converter_e2e \
+    podman run --detach --pull=never --name "$postgres_name" --network "$network_name" \
+    --network-alias postgres --ip "$postgres_static_address" \
+    --env POSTGRES_DB=md_converter_e2e \
     --env POSTGRES_PASSWORD=e2e-postgres-password \
-    docker.io/library/postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8 \
-    >/dev/null
+    "$postgres_image" >/dev/null
+  require_reserved_address "$postgres_name" "$postgres_static_address"
   created=("$rustfs_name" "${created[@]}")
   e2e_run_in_harness_directory \
     "$temporary_directory" "$temporary_directory_identity" \
-    podman run --detach --name "$rustfs_name" --network "$network_name" \
-    --network-alias rustfs --publish 127.0.0.1::9000 \
+    podman run --detach --pull=never --name "$rustfs_name" --network "$network_name" \
+    --network-alias rustfs --ip "$rustfs_static_address" --publish 127.0.0.1::9000 \
     --env RUSTFS_ACCESS_KEY=e2eaccess --env RUSTFS_SECRET_KEY=e2esecret \
     --env RUSTFS_ADDRESS=0.0.0.0:9000 --env RUSTFS_CONSOLE_ENABLE=false \
-    ghcr.io/rustfs/rustfs:1.0.0-beta.12-glibc@sha256:6d693c8d0c09a1c5770f1780303a5d58b9e864c313fd2644ecd561e92b79ae04 \
-    >/dev/null
+    "$rustfs_image" >/dev/null
+  require_reserved_address "$rustfs_name" "$rustfs_static_address"
   for _ in $(seq 1 120); do
     podman exec "$postgres_name" pg_isready -U postgres -d md_converter_e2e \
       >/dev/null 2>&1 && break
@@ -1578,12 +1708,14 @@ if [[ "$profile" == standalone ]]; then
   chmod 0770 "$data_directory"
 else
   podman start "$rustfs_name" >/dev/null
+  require_reserved_address "$rustfs_name" "$rustfs_static_address"
   wait_for_url "http://127.0.0.1:$rustfs_port/health" "$rustfs_name" ""
   wait_for_url "$base_url/health/ready" "$application_name" '"status":"ready"'
   podman stop --time 10 "$postgres_name" >/dev/null
   require_http_status "$base_url/health/ready" 503
   require_http_status "$base_url/health/live" 200
   podman start "$postgres_name" >/dev/null
+  require_reserved_address "$postgres_name" "$postgres_static_address"
   for _ in $(seq 1 120); do
     podman exec "$postgres_name" pg_isready -U postgres -d md_converter_e2e \
       >/dev/null 2>&1 && break
@@ -1990,6 +2122,7 @@ e2e_run_in_harness_directory \
   "$temporary_directory" "$temporary_directory_identity" \
   podman run --detach --name "$insecure_application_name" --network "$network_name" \
   --network-alias application --publish 127.0.0.1::8080 \
+  "${service_host_mapping[@]}" \
   --env MARKWEAVE_INSECURE_EVALUATION_MODE=true \
   "${hardened_runtime[@]}" "${application_volumes[@]}" "${application_settings[@]}" \
   "$image" "$application_mode" >/dev/null

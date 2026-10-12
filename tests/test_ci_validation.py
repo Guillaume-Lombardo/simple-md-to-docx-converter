@@ -246,7 +246,54 @@ def test_approved_complete_suite_schedule_and_parallelism_are_fixed() -> None:
     assert workflow["on"]["schedule"] == [{"cron": "17 3 * * 0"}]
     assert workflow["jobs"]["light"]["timeout-minutes"] == 20
     assert workflow["jobs"]["heavy"]["timeout-minutes"] == 45
-    assert workflow["jobs"]["heavy"]["strategy"]["max-parallel"] == 2
+    assert workflow["jobs"]["heavy"]["strategy"]["max-parallel"] == 8
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("needle", "replacement", "message"),
+    [
+        (
+            "      max-parallel: 8\n      matrix:\n        domain:",
+            "      max-parallel: 2\n      matrix:\n        domain:",
+            "heavy domains must run the reviewed matrix with max-parallel 8",
+        ),
+        (
+            "          cache-suffix: py314-heavy",
+            "          cache-suffix: py314-${{ matrix.domain }}",
+            "heavy domains must share the 'py314-heavy' uv cache suffix",
+        ),
+        (
+            "          (( BASH_REMATCH[1] >= 4 ))\n",
+            "          sudo apt-get update\n          sudo apt-get install --yes podman\n",
+            "missing required workflow command",
+        ),
+    ],
+)
+def test_heavy_matrix_parallelism_cache_and_podman_contract_are_enforced(
+    needle: str, replacement: str, message: str
+) -> None:
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert workflow.count(needle) == 1
+    errors = validate_workflow_text(workflow.replace(needle, replacement, 1))
+    assert any(message in error for error in errors), errors
+
+
+@pytest.mark.unit
+def test_heavy_jobs_assert_the_preinstalled_podman_instead_of_installing_it() -> None:
+    workflow = yaml.load(
+        Path(".github/workflows/ci.yml").read_text(encoding="utf-8"),
+        Loader=WorkflowLoader,  # noqa: S506 - no Python object constructors
+    )
+    step = next(
+        step
+        for step in workflow["jobs"]["heavy"]["steps"]
+        if step["name"]
+        == "Verify preinstalled rootless Podman for container validation"
+    )
+    assert "apt-get" not in step["run"]
+    assert "podman version --format '{{.Client.Version}}'" in step["run"]
+    assert "grep -Fx true" in step["run"]
 
 
 @pytest.mark.unit

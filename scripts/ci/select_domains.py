@@ -127,7 +127,12 @@ DOMAIN_PATTERNS: Mapping[str, tuple[str, ...]] = {
         "deploy/**",
     ),
     "functional": ("src/**", "tests/functional/**", "tests/integration/auth/**"),
-    "frontend": ("web/**", "openapi/v1.json"),
+    "frontend": (
+        "web/**",
+        "openapi/v1.json",
+        "scripts/container/build-frontend.sh",
+        "scripts/container/pull-base-images.sh",
+    ),
     "storage-distributed": (
         "tests/integration/test_local_test_services_lifecycle.py",
         "compose.test.yaml",
@@ -143,6 +148,14 @@ DOMAIN_PATTERNS: Mapping[str, tuple[str, ...]] = {
         "tests/integration/storage/**",
         "tests/integration/sqlite/**",
     ),
+}
+
+# Paths that a domain's broad patterns would otherwise match but that its suite
+# never executes. The Compose runners are self-contained and run only in the
+# compose domain, so they must not also select both final-image E2E profiles.
+DOMAIN_EXCLUSIONS: Mapping[str, tuple[str, ...]] = {
+    "e2e-distributed": ("scripts/e2e/run-compose*.sh",),
+    "e2e-standalone": ("scripts/e2e/run-compose*.sh",),
 }
 
 GLOBAL_PATTERNS = (
@@ -209,7 +222,11 @@ def select_domains(paths: Iterable[str], *, full: bool = False) -> list[str]:
     return sorted(
         domain
         for domain, patterns in DOMAIN_PATTERNS.items()
-        if any(_matches(path, patterns) for path in normalized)
+        if any(
+            _matches(path, patterns)
+            and not _matches(path, DOMAIN_EXCLUSIONS.get(domain, ()))
+            for path in normalized
+        )
     )
 
 

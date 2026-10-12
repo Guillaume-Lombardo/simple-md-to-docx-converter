@@ -1,7 +1,9 @@
 """The E2E scanner rejects only the explicit opt-in test marker, within bounds."""
 
 import importlib
+import signal
 import struct
+import threading
 from typing import Any
 
 import pytest
@@ -51,3 +53,18 @@ def test_scanner_still_bounds_payload_before_reading(
     )
     SCANNER.Handler(request, ("127.0.0.1", 1), None)
     assert request.response == b""
+
+
+@pytest.mark.unit
+def test_scanner_stops_serving_on_sigterm(mocker: Any) -> None:
+    registered = mocker.patch.object(SCANNER.signal, "signal")
+    stopped = threading.Event()
+    server = mocker.Mock(shutdown=mocker.Mock(side_effect=stopped.set))
+
+    SCANNER.stop_on_sigterm(server)
+
+    (signum, handler), _ = registered.call_args
+    assert signum == signal.SIGTERM
+    handler(signal.SIGTERM, None)
+    assert stopped.wait(timeout=2)
+    server.shutdown.assert_called_once_with()

@@ -54,8 +54,40 @@ install_tool() {
   tar --extract --gzip --file "$archive" --directory "$tool_directory" "$name"
 }
 
+# Fetch the current Grype database into a private per-invocation directory with
+# bounded retries, then scan only against it. The database is never reused
+# across invocations, so every scan still uses the latest database published at
+# scan time; only the download gains retries, and the gate itself is unchanged.
+readonly grype_database_directory="$tool_directory/grype-db"
+readonly grype_database_retry_delays_seconds=(5 15 45)
+update_grype_database() {
+  local attempts=$((${#grype_database_retry_delays_seconds[@]} + 1))
+  local attempt delay
+  for attempt in $(seq 1 "$attempts"); do
+    if GRYPE_DB_CACHE_DIR="$grype_database_directory" "$tool_directory/grype" \
+      db update; then
+      GRYPE_DB_CACHE_DIR="$grype_database_directory" "$tool_directory/grype" db status
+      return 0
+    fi
+    if ((attempt < attempts)); then
+      delay="${grype_database_retry_delays_seconds[attempt - 1]}"
+      printf 'Grype database update attempt %s/%s failed; retrying in %ss.\n' \
+        "$attempt" "$attempts" "$delay" >&2
+      sleep "$delay"
+    fi
+  done
+  printf 'Grype database update failed after %s attempts.\n' "$attempts" >&2
+  return 1
+}
+
+scan_vulnerabilities() {
+  GRYPE_DB_AUTO_UPDATE=false GRYPE_DB_CACHE_DIR="$grype_database_directory" \
+    "$tool_directory/grype" "$@"
+}
+
 install_tool syft "$syft_version" "$syft_sha256"
 install_tool grype "$grype_version" "$grype_sha256"
+update_grype_database
 image_id="$(podman image inspect "$image" --format '{{.Id}}')"
 readonly image_id
 [[ "$image_id" =~ ^[0-9a-f]{64}$ ]]
@@ -65,8 +97,7 @@ podman save --format oci-archive --output "$image_archive" "$image_id"
 "$tool_directory/syft" "oci-archive:$image_archive" \
   --output "cyclonedx-json=$staging_directory/sbom.cdx.json" \
   --output "spdx-json=$staging_directory/sbom.spdx.json"
-GRYPE_DB_AUTO_UPDATE=true "$tool_directory/grype" \
-  "sbom:$staging_directory/sbom.cdx.json" \
+scan_vulnerabilities "sbom:$staging_directory/sbom.cdx.json" \
   --output json > "$staging_directory/vulnerabilities.json"
 summary_arguments=(
   --image "$image"
@@ -82,8 +113,7 @@ if [[ "$evidence_profile" == "reverse-attempt" ]]; then
   extraction_container=""
   uv run python -m scripts.container.verify_anydoc_cargo_sbom \
     "$staging_directory/anydoc-cargo.cdx.json"
-  GRYPE_DB_AUTO_UPDATE=true "$tool_directory/grype" \
-    "sbom:$staging_directory/anydoc-cargo.cdx.json" \
+  scan_vulnerabilities "sbom:$staging_directory/anydoc-cargo.cdx.json" \
     --output json > \
     "$staging_directory/anydoc-cargo-vulnerabilities.json"
   summary_arguments+=(

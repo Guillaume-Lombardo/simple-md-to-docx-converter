@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 import os
+import signal
 import socketserver
 import struct
+import threading
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from types import FrameType
 
 MAX_STREAM_BYTES = 2_000_000
 EICAR_TEST_MARKER = (
@@ -74,6 +80,22 @@ class Server(socketserver.ThreadingTCPServer):
     request_queue_size = 64
 
 
+def stop_on_sigterm(server: Server) -> None:
+    """Stop serving promptly when the container runtime sends SIGTERM.
+
+    The responder runs as PID 1, which has no default SIGTERM action, so without
+    this handler every ``podman stop`` waits for its grace period and then
+    resorts to SIGKILL. ``shutdown`` blocks until ``serve_forever`` returns, so it
+    must run outside the main thread that executes the signal handler.
+    """
+
+    def handle(_signum: int, _frame: FrameType | None) -> None:
+        threading.Thread(target=server.shutdown, daemon=True).start()
+
+    signal.signal(signal.SIGTERM, handle)
+
+
 if __name__ == "__main__":
     with Server(("0.0.0.0", 3310), Handler) as server:  # noqa: S104 - test sidecar
+        stop_on_sigterm(server)
         server.serve_forever()

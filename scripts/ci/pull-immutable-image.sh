@@ -8,8 +8,10 @@ fi
 
 readonly image="$1"
 readonly expected_digest="$2"
-readonly attempts=3
-readonly retry_delay_seconds=2
+# Exponential backoff between the four bounded attempts absorbs short registry
+# and CDN outages; permanent and integrity failures are never retried.
+readonly retry_delays_seconds=(5 15 45)
+readonly attempts=$((${#retry_delays_seconds[@]} + 1))
 
 if [[ ! "$image" =~ @sha256:[0-9a-f]{64}$ ]] || \
   [[ ! "$expected_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || \
@@ -35,6 +37,16 @@ is_permanent_or_integrity_failure() {
     "$temporary_output"
 }
 
+# A local image addressed by this digest is the exact pinned content, so an
+# offline rebuild reuses it instead of contacting the registry again.
+if podman image exists "$image" >/dev/null 2>&1 && \
+  actual_digest="$(podman image inspect "$image" --format '{{.Digest}}' 2>/dev/null)" && \
+  [[ "$actual_digest" == "$expected_digest" ]]; then
+  printf 'Using local immutable image %s with verified digest %s.\n' \
+    "$image" "$expected_digest"
+  exit 0
+fi
+
 for attempt in $(seq 1 "$attempts"); do
   if podman pull --quiet "$image" >"$temporary_output" 2>&1; then
     if actual_digest="$(podman image inspect "$image" --format '{{.Digest}}')" && \
@@ -49,6 +61,7 @@ for attempt in $(seq 1 "$attempts"); do
 
   if ! is_permanent_or_integrity_failure && is_transient_transport_failure && \
     ((attempt < attempts)); then
+    retry_delay_seconds="${retry_delays_seconds[attempt - 1]}"
     printf 'Image acquisition attempt %s/%s failed with a transient transport error; retrying in %ss.\n' \
       "$attempt" "$attempts" "$retry_delay_seconds" >&2
     sleep "$retry_delay_seconds"
