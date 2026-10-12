@@ -108,3 +108,11 @@ that stays populated past the bound raises `Podman stable unit cgroup is not emp
     lifecycle test, which left a running managed container behind, no longer affected the other
     eight tests.
   - `docs/reverse-broker-deployment.md` documents the bounded emptiness wait.
+- 2026-10-12: Opened PR #301. Local checks:
+  - `ruff format --check`, `ruff check` and `ty check` pass.
+  - `tests/unit/broker/`: 1,040 passed.
+  - The real rootless Podman module passed 9 of 9 in five consecutive runs.
+  - The default canonical command: 6,051 passed and 8 failed, with 94.36% total coverage, 100% of
+    changed application lines and 90.48% branch coverage. The 8 failures are in the untouched
+    `tests/integration/test_local_test_services_interruption.py`, which passes alone (15 passed).
+  - The three consecutive hosted `container` runs are still pending.
