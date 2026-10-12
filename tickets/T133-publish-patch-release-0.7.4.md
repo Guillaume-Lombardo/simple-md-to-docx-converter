@@ -121,6 +121,45 @@ a corrective 0.7.5 release:
   release supply-chain gate. The reverse-attempt image passed its smoke and the reverse-attempt
   release gate. Neither has a fixable Critical finding. Hosted container and E2E jobs must pass
   before merge.
+- 2026-10-12: PR #295 was squash-merged as `d54a9c5f9440205bc415e7a49c4583f502392c29`. Release
+  run 38223418529 succeeded in every job (`detect`, `build-and-verify`, `create-release`,
+  `publish`, `container / build-and-publish`, `container / attest` and
+  `container / release-evidence`; `container / recover-evidence` was skipped). PyPI `markweave`
+  0.7.5 carries the wheel and sdist with PEP 740 attestations from `release.yml` in the `pypi`
+  environment. Tag `v0.7.5` and its non-draft GitHub Release target that source, and the Release
+  carries `release-images.json`, `release-images.sha256` and every role's receipt, metadata, SBOMs,
+  vulnerability reports and bundle checksums. `release-images.json` (schema 2) binds the three
+  roles to version 0.7.5, that source and frontend lockfile digest
+  `9c40e366fdf12532ba3f0d64a6172a55c633fd046c53a9739ff5d40da9a8c7f1`. The published receipts are
+  backend `ghcr.io/guillaume-lombardo/md-converter`
+  `sha256:237597e5aee89a744f29027e3ad0e10845296f435da8902d1ee5af2b7f591677`, frontend
+  `ghcr.io/guillaume-lombardo/md-converter-web`
+  `sha256:f628055556c61b04cfbd3202e32464ad38719d7b057ea87ed9b249e44c6d01ce` and reverse attempt
+  `ghcr.io/guillaume-lombardo/md-converter-reverse-attempt`
+  `sha256:104d35de4f75459ed5bab4583a5fc472d521247cc23a339ed9b8995296ec97bc`. Anonymous GHCR
+  requests for the `0.7.5` and source tags and for each digest returned these exact digests, and
+  each digest has SLSA provenance from `container-release.yml` on `main` at that source.
+- 2026-10-12: Main CI run 38223418603 for `d54a9c5` failed on attempt 1 only in
+  `CI / e2e-distributed`, on the known scanner-outage readiness timeouts (`frontend_alias` and
+  `backend_ready` `TimeoutError`, tracked by T130). The failed job was rerun. Attempt 2 completed with conclusion `failure`: in `CI / e2e-distributed`
+  (job 114743365865) the scanner-outage routes all returned 200, but the
+  `browser-next-reversion` structured-PPTX step timed out after 30 seconds waiting for the
+  `PPTX preview` text after source capture in Composer (`TimeoutError`,
+  `tests/e2e/browser-next-reversion.test.mjs:124`), and `CI / gate` failed as a consequence. Every
+  other job passed. The failure is in the hosted E2E harness after the release run had already
+  published; it is not the T130 signature and needs its own triage.
+- 2026-10-12: Branch `chore/T133-adopt-0.7.5-images` adopts the verified backend and frontend
+  receipts in `compose.yaml`, both quickstart helpers and the Podman insecure E2E runner, records
+  the reverse-attempt digest for the native-broker deployment, and records the publication in the
+  release history and the published-image documentation. `scripts.release.public_alignment`
+  reports `aligned` for the branch with both the `pull_request` and `schedule` events. The
+  repository `release_pair verify` helper accepted the retained `container-release-v0.7.5`
+  artifact against those digests, the source and the frontend lockfile digest. Against the
+  anonymously pulled 0.7.5 images, the local simple Docker, simple rootless Podman and Podman
+  insecure quickstart E2E runners passed and left no container, volume or network behind. The
+  secure Docker runner could not run locally because its loop-device setup needs an interactive
+  `sudo` password; hosted CI covers that path. Status stays In Progress until the adoption is
+  verified on `main`.
 
 ## Synchronization
 
