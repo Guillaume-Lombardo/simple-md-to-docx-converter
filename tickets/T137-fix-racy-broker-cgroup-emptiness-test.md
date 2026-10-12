@@ -134,7 +134,58 @@ that stays populated past the bound raises `Podman stable unit cgroup is not emp
       and restores readiness.
     - Both tests fail when the product reverts to a single read.
     - These two tests replace the earlier runtime-only persistent-member test.
-  - Major finding, step (b), final-image E2E: pending. `scripts/e2e/run.sh` is frozen until
-    T135 (PR #300) lands.
+  - Major finding, step (b), final-image E2E: started after T135 (PR #300) landed on `main` as
+    `0e0f7f3`. `origin/main` was merged into the branch; nothing was rebased or force-pushed.
   - Local checks: ruff and ty pass. Broker unit tests: 1,053 passed. Changed application lines
     are 100% covered (31/31). The Podman module passed 10 of 10 in eight consecutive runs.
+- 2026-10-12: Final-image E2E and dispatch deadline.
+  - Scenario. `scripts/e2e/reverse_broker.py watch-member --mode transient|persistent` is a
+    prearmed observer. It binds to the single new managed unit and starts a
+    `systemd-run --user --slice=<unit slice>` member. It then re-reads the signed inventory: the
+    unit must still be before `EXIT_CONFIRMED`, which proves that the member is in place before
+    every emptiness read. The observer refuses any emptiness proof while the member is alive.
+    `tests/e2e/reverse_lifecycle_workflow.py prepare-member` / `verify-member` submit one real
+    reverse job and verify its outcome. `run_reverse_member_fault` runs both modes in the
+    `reverse-lifecycle` phase (shard 2).
+  - Transient expectations: first-attempt publication, no new broker fault, readiness kept.
+  - Persistent expectations: the worker records a new `termination_unproven` fault and no
+    `transport_failure`. The job publishes only after reconciliation proves the released slice
+    empty and recovery runs. In both modes the observed unit must match attempt 1's `unit_id`
+    and `proof_unit_id`, and the proof must be recorded after the member is released.
+  - Known limit, not an exception. For the transient member the E2E proves the outcome: no proof
+    while the member is alive, first-attempt publication and readiness kept. It cannot prove that
+    the broker's first emptiness read came before the release, because the broker exposes no
+    signal for its reads. The real rootless integration test proves the retry itself.
+  - The first local E2E run found a regression introduced by this branch. Both transports treat a
+    dispatch that outlives `transport.operation_timeout_seconds` as fatal (`_watch_dispatch`). The
+    fixed five-second wait, plus the other termination steps, exceeded the E2E's five-second
+    deadline: the broker stopped serving, and a persistent member crashed the broker instead of
+    producing a clean `TERMINATION_UNPROVEN`.
+  - Owner decision (2026-10-12): optional configuration with a derived default.
+    - The `podman` object accepts optional `cgroup_emptiness_timeout_seconds` and
+      `cgroup_emptiness_poll_interval_seconds`, named after the Kubernetes
+      `attester_readiness_*` keys.
+    - When absent, the timeout is `min(5 s, transport.operation_timeout_seconds / 4)` and the poll
+      interval is 50 ms, capped by the timeout.
+    - A configured timeout above a quarter of the transport operation timeout, a poll interval
+      above the timeout, and non-positive or non-finite values are rejected.
+    - The templates enumerate only required keys and are unchanged. Existing configurations keep
+      working. `docs/reverse-broker-deployment.md` documents the rule.
+  - Regression test. A new real rootless Podman integration test runs real `UnixBrokerServer`
+    and `MtlsBrokerServer` instances with a four-second operation timeout. A persistent member's
+    terminate returns `TERMINATION_UNPROVEN` after the one-second bound and within the deadline.
+    The server is neither failed nor stopping and still answers `READY` (not ready). After the
+    member exits, reconciliation restores readiness and the unit reaches `REMOVED`. With the old
+    five-second wait, both transports fail with `_watch_dispatch` stopping the server.
+  - Verification (2026-10-13), on images built with `scripts.container.ci_images build`:
+    - `e2e-standalone-2` passed in 7 min 26 s: reverse-lifecycle 88 s, browser-workspaces 181 s,
+      browser-runtime 151 s.
+    - `e2e-distributed-2` passed in 7 min 48 s: reverse-lifecycle 90 s, browser-workspaces 186 s,
+      browser-runtime 161 s.
+    - The real rootless Podman module passed 12 of 12 in three consecutive runs.
+    - `ruff format --check`, `ruff check`, `ty check`, `scripts.ci.e2e_shards` and `validate_ci`
+      all pass.
+    - The default canonical command: 6,186 passed and 8 failed, with 94.37% total coverage. The 8
+      failures are again only in the untouched `test_local_test_services_interruption.py`, which
+      passes alone (15 passed).
+    - Changed application lines are 100% covered (57/57); branch coverage is 90.53%.
