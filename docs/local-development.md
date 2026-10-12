@@ -74,8 +74,8 @@ Verify the native final-image browser support module with the locked, dependency
 package. Its command blocks below 90% line, branch, or function coverage:
 
 The [JavaScript package-management guide](package-management.md) records the reviewed bootstrap,
-workspace boundary, isolated Mermaid exception, cache policy, benchmark requirements, and rollback
-procedure.
+workspace boundary, isolated Mermaid exception, cache policy, and the historical T67 benchmark and
+rollback record.
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"

@@ -53,7 +53,8 @@ npm ci --prefix toolchain/document-engines --omit=dev --ignore-scripts
 The T67 npm-to-pnpm migration is complete. Its one-time rollback rehearsal, baseline lock digests,
 benchmark requirements and measured image sizes are retained in the
 [historical migration record](evidence/release-migration-history.md#t67-package-manager-migration).
-T80 removed the migration-specific CI steps; current installations use the reviewed bootstrap above.
+T80 removed the migration-specific CI steps, and T139 removed the retired rehearsal and benchmark
+scripts; current installations use the reviewed bootstrap above.
 
 Historical release-evidence recovery selects `pnpm-lock.yaml` when present at the release source
 SHA and otherwise binds the old `web/package-lock.json`. Retained npm-era releases remain
