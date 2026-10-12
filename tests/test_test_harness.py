@@ -6,6 +6,9 @@ import gc
 from pathlib import Path
 
 import pytest
+from pytest_mock import MockerFixture
+
+from tests import conftest
 
 pytest_plugins = ["pytester"]
 
@@ -167,3 +170,30 @@ def test_closed_long_lived_resource_passes_the_session_backstop(
     result.assert_outcomes(passed=2)
     assert result.ret == pytest.ExitCode.OK
     assert SESSION_SECTION not in result.stdout.str()
+
+
+REAPED = ("markweave-tests-reaped",)
+CRASH_SCENARIOS = {
+    "no-crash": (False, False, None, ()),
+    "external-services": (True, True, None, ()),
+    "crash": (True, False, None, REAPED),
+    "docker-unavailable": (True, False, RuntimeError("docker"), ()),
+}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("scenario", CRASH_SCENARIOS)
+def test_controller_reaps_service_stacks_after_a_worker_crash(
+    mocker: MockerFixture, scenario: str
+) -> None:
+    """A crashed worker's stack is removed before the session ends."""
+    crashed, configured, failure, expected = CRASH_SCENARIOS[scenario]
+    config = mocker.Mock(stash=pytest.Stash())
+    node = mocker.Mock(config=config, workeroutput={})
+    conftest.pytest_testnodedown(node, "worker crashed" if crashed else None)
+    mocker.patch.object(conftest, "configured_environment", return_value=configured)
+    reap = mocker.patch.object(
+        conftest, "reap_stale_stacks", return_value=REAPED, side_effect=failure
+    )
+    assert conftest.reap_after_worker_crash(config) == expected
+    assert reap.called is (crashed and not configured)

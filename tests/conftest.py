@@ -1,6 +1,7 @@
 """Shared fixtures for the reference corpus."""
 
 import gc
+import os
 import sys
 import traceback
 from collections.abc import Callable, Iterator
@@ -10,7 +11,11 @@ from typing import Any
 import pytest
 
 from markweave.persistence import sql as sql_persistence
-from scripts.testing.services import distributed_services
+from scripts.testing.services import (
+    configured_environment,
+    distributed_services,
+    reap_stale_stacks,
+)
 from tests.container_runtime_guard import ContainerRuntimeGuard
 from tests.golden.corpus import CorpusManifest, materialize_case, read_manifest
 
@@ -18,6 +23,7 @@ DISTRIBUTED_SERVICE_MARKERS = ("requires_postgres", "requires_s3")
 DISTRIBUTED_SERVICES_GROUP = "distributed-services"
 SESSION_LEAKS = pytest.StashKey[list[str]]()
 WORKER_LEAKS_OUTPUT = "markweave_session_resource_leaks"
+WORKER_CRASHED = pytest.StashKey[bool]()
 
 
 @pytest.hookimpl(tryfirst=True)
@@ -142,6 +148,7 @@ def pytest_sessionfinish(session: pytest.Session) -> None:
     An xdist worker hands its findings to the controller, which reports them.
     """
     config = session.config
+    reap_after_worker_crash(config)
     leaks = config.stash.setdefault(SESSION_LEAKS, [])
     leaks.extend(_collect_frozen_garbage())
     worker_output = getattr(config, "workeroutput", None)
@@ -154,10 +161,28 @@ def pytest_sessionfinish(session: pytest.Session) -> None:
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
+def reap_after_worker_crash(config: pytest.Config) -> tuple[str, ...]:
+    """Remove the service stack a crashed xdist worker could not tear down.
+
+    A crashed worker releases its stack lock with its process, so the
+    controller can prove the stack abandoned without waiting for the next
+    session. Stacks of live workers and sessions keep their locks and stay.
+    """
+    if not config.stash.get(WORKER_CRASHED, False) or configured_environment(
+        os.environ
+    ):
+        return ()
+    try:
+        return reap_stale_stacks()
+    except RuntimeError:
+        return ()
+
+
 @pytest.hookimpl(optionalhook=True)
 def pytest_testnodedown(node: Any, error: object) -> None:
-    """Collect the session-finish leaks reported by a finished xdist worker."""
-    del error
+    """Collect a finished xdist worker's leaks and remember a crashed worker."""
+    if error is not None:
+        node.config.stash[WORKER_CRASHED] = True
     worker_output = getattr(node, "workeroutput", None) or {}
     node.config.stash.setdefault(SESSION_LEAKS, []).extend(
         worker_output.get(WORKER_LEAKS_OUTPUT, ())

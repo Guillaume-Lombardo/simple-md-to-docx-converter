@@ -111,8 +111,23 @@ The local Docker Engine socket `/var/run/docker.sock` and `docker compose` must 
 to the current user. The helper explicitly selects that socket, ignoring remote Docker contexts.
 No `sudo`, system
 package installation, external credentials, persistent `.env`, or manual exports are needed.
-The first run may pull the pinned images. Do not interrupt cleanup with SIGKILL; after a host
-crash, inspect projects with `docker compose ls --all` and remove only the exact abandoned
+The first run may pull the pinned images.
+
+Every stack, its volumes and its network carry the labels `io.markweave.tests.stack=local-services`,
+`io.markweave.tests.lock`, `io.markweave.tests.created` and `io.markweave.tests.host`. The owning
+session holds an exclusive lock on the labelled file (under `$XDG_RUNTIME_DIR`, or the temporary
+directory, in `markweave-test-services-<uid>/`) for the stack's whole life. Teardown runs after
+test failures, `Ctrl-C`, `SIGTERM` and interpreter exit, and `SIGINT`/`SIGTERM` wait until
+`docker compose down` has finished. Interruptions that no process can handle, such as `SIGKILL`,
+a pytest-xdist worker crash or a host crash, release the lock with the process. The next session
+that acquires services then removes every labelled stack on the same host whose lock nobody
+holds; the pytest-xdist controller does the same as soon as a worker crashes. A stack whose
+owner still holds its lock is never touched, and unlabelled projects are never removed. When a
+lock file has disappeared, so the owner cannot be proven gone, a stack is removed only after
+`MARKWEAVE_TEST_SERVICES_STALE_AFTER_SECONDS` (default 3600). Run the same removal on demand with
+`uv run python -c "from scripts.testing.services import reap_stale_stacks; print(reap_stale_stacks())"`.
+To clean up by hand, inspect
+projects with `docker compose ls --all` and remove only the exact abandoned
 `markweave-tests-<id>` project using `compose.test.yaml`.
 
 To use externally managed services instead, configure **all six** variables:
