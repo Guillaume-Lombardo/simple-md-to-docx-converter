@@ -28,6 +28,7 @@ from markweave.broker.models import (
 )
 from markweave.broker.podman_runtime import (
     BoundedCommandRunner,
+    CgroupEmptinessWait,
     PodmanCommandLimits,
     PodmanIsolationRuntime,
     PodmanRuntimeError,
@@ -353,6 +354,45 @@ def created_runtime(
     command: PodmanDouble, unit: ManagedUnit, policy: BrokerPolicy
 ) -> PodmanRuntimeUnit:
     return runtime(command).create(unit, policy)
+
+
+class FakeClock:
+    """Deterministic monotonic clock advanced only by recorded pauses."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.pauses: list[float] = []
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def pause(self, seconds: float) -> None:
+        self.pauses.append(seconds)
+        self.now += seconds
+
+
+def emptiness_runtime(
+    command: PodmanDouble,
+    events: Callable[[], bytes],
+    clock: FakeClock,
+    wait: CgroupEmptinessWait | None = None,
+) -> PodmanIsolationRuntime:
+    return PodmanIsolationRuntime(
+        image_repository=IMAGE_REPOSITORY,
+        run_as_uid=1001,
+        command=command,
+        cgroup_root=CGROUP_ROOT,
+        hooks_directory=HOOKS,
+        cgroup_remove=command.remove_cgroup,
+        hooks_directory_validate=lambda path: None,
+        cgroup_root_validate=lambda path: None,
+        cgroup_create=lambda path: None,
+        cgroup_read=lambda path: events(),
+        process_cgroup_read=lambda pid: f"0::{CGROUP_RUNTIME_PATH}\n".encode(),
+        emptiness_wait=wait,
+        clock=clock.monotonic,
+        pause=clock.pause,
+    )
 
 
 @pytest.mark.unit
@@ -1288,6 +1328,7 @@ def test_empty_proof_requires_top_level_exec_ids_and_positive_cgroup_evidence(
         runtime(command).confirm_empty(runtime_unit)
 
     command.removed_paths.clear()
+    clock = FakeClock()
     backend = PodmanIsolationRuntime(
         image_repository=IMAGE_REPOSITORY,
         run_as_uid=1001,
@@ -1298,9 +1339,157 @@ def test_empty_proof_requires_top_level_exec_ids_and_positive_cgroup_evidence(
         hooks_directory_validate=lambda path: None,
         cgroup_root_validate=lambda path: None,
         cgroup_read=lambda path: b"populated 1\nfrozen 0\n",
+        emptiness_wait=CgroupEmptinessWait(0.5, 0.25),
+        clock=clock.monotonic,
+        pause=clock.pause,
     )
     with pytest.raises(PodmanRuntimeError, match="cgroup"):
         backend.confirm_empty(runtime_unit)
+
+
+@pytest.mark.unit
+def test_empty_proof_waits_for_transiently_populated_unit_slice(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    command = PodmanDouble()
+    runtime_unit = created_runtime(command, unit, policy)
+    command.status = "exited"
+    observations = iter(
+        (
+            b"populated 1\nfrozen 0\n",
+            b"populated 1\nfrozen 0\n",
+            b"populated 0\nfrozen 0\n",
+        )
+    )
+    reads: list[bytes] = []
+
+    def events() -> bytes:
+        reads.append(next(observations))
+        return reads[-1]
+
+    clock = FakeClock()
+    waited = emptiness_runtime(command, events, clock).confirm_empty(runtime_unit)
+    immediate = emptiness_runtime(
+        command, lambda: b"populated 0\nfrozen 0\n", FakeClock()
+    ).confirm_empty(runtime_unit)
+
+    assert waited == immediate
+    assert len(reads) == 3
+    assert clock.pauses == [0.05, 0.05]
+
+
+@pytest.mark.unit
+def test_empty_proof_fails_closed_when_unit_slice_stays_populated(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    command = PodmanDouble()
+    runtime_unit = created_runtime(command, unit, policy)
+    command.status = "exited"
+    reads: list[float] = []
+    clock = FakeClock()
+
+    def events() -> bytes:
+        reads.append(clock.now)
+        return b"populated 1\nfrozen 0\n"
+
+    backend = emptiness_runtime(command, events, clock, CgroupEmptinessWait(1.0, 0.375))
+    with pytest.raises(PodmanRuntimeError, match="cgroup is not empty"):
+        backend.confirm_empty(runtime_unit)
+
+    assert clock.pauses == [0.375, 0.375, 0.25]
+    assert reads == [0.0, 0.375, 0.75, 1.0]
+    assert clock.now == 1.0
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "evidence",
+    [b"populated 2\nfrozen 0\n", b"populated 1\n", b""],
+)
+def test_empty_proof_never_retries_invalid_cgroup_evidence(
+    unit: ManagedUnit, policy: BrokerPolicy, evidence: bytes
+) -> None:
+    command = PodmanDouble()
+    runtime_unit = created_runtime(command, unit, policy)
+    command.status = "exited"
+    clock = FakeClock()
+
+    with pytest.raises(PodmanRuntimeError, match="cgroup evidence is invalid"):
+        emptiness_runtime(command, lambda: evidence, clock).confirm_empty(runtime_unit)
+
+    assert clock.pauses == []
+
+
+@pytest.mark.unit
+def test_empty_proof_rechecks_runtime_state_before_waiting(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    command = PodmanDouble()
+    runtime_unit = created_runtime(command, unit, policy)
+    clock = FakeClock()
+
+    with pytest.raises(PodmanRuntimeError, match="stable unit is not empty"):
+        emptiness_runtime(
+            command, lambda: b"populated 1\nfrozen 0\n", clock
+        ).confirm_empty(runtime_unit)
+
+    assert clock.pauses == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("timeout_seconds", "poll_interval_seconds"),
+    [
+        (0, 0.05),
+        (-1.0, 0.05),
+        (float("inf"), 0.05),
+        (float("nan"), 0.05),
+        (1.0, 0),
+        (1.0, float("nan")),
+        (1.0, 2.0),
+        (True, 0.05),
+        ("1", 0.05),
+        (1.0, "0.05"),
+    ],
+)
+def test_cgroup_emptiness_wait_rejects_unbounded_or_invalid_policy(
+    timeout_seconds: object, poll_interval_seconds: object
+) -> None:
+    with pytest.raises(ValueError, match="emptiness wait is invalid"):
+        CgroupEmptinessWait(
+            cast(Any, timeout_seconds), cast(Any, poll_interval_seconds)
+        )
+
+
+@pytest.mark.unit
+def test_cgroup_emptiness_wait_defaults_are_short_and_bounded() -> None:
+    wait = CgroupEmptinessWait()
+    assert wait.timeout_seconds == 5.0
+    assert wait.poll_interval_seconds == 0.05
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"emptiness_wait": (5.0, 0.05)},
+        {"clock": 1.0},
+        {"pause": "sleep"},
+    ],
+)
+def test_runtime_rejects_invalid_emptiness_wait_dependencies(
+    override: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError, match="configuration is invalid"):
+        PodmanIsolationRuntime(
+            image_repository=IMAGE_REPOSITORY,
+            run_as_uid=1001,
+            command=lambda *args, **kwargs: (0, b""),
+            cgroup_root=CGROUP_ROOT,
+            hooks_directory=HOOKS,
+            cgroup_remove=lambda path: None,
+            **cast(Any, override),
+        )
 
 
 @pytest.mark.unit

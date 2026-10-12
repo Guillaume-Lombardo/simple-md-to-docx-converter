@@ -117,6 +117,11 @@ attempt before reopening its listener. If reconciliation or termination proof ca
 the broker remains unavailable and fails closed. Never delete the inventory or managed Podman
 objects to force readiness.
 
+Podman reports a killed attempt as exited before its conmon monitor and that monitor's cleanup
+command leave the attempt's systemd slice. The emptiness proof therefore re-reads the slice's
+cgroup-v2 `populated` flag within a short bound (five seconds by default) instead of failing on
+the first read; a slice that stays populated past the bound still fails closed.
+
 ## Troubleshooting
 
 If the worker cannot obtain `READY`, first check the user unit and its content-free journal as the
