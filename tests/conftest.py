@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from fastapi.dependencies import models as fastapi_dependency_models
 
 from markweave.persistence import sql as sql_persistence
 from scripts.testing.services import (
@@ -24,6 +25,11 @@ DISTRIBUTED_SERVICES_GROUP = "distributed-services"
 SESSION_LEAKS = pytest.StashKey[list[str]]()
 WORKER_LEAKS_OUTPUT = "markweave_session_resource_leaks"
 WORKER_CRASHED = pytest.StashKey[bool]()
+FASTAPI_DEPENDENCY_CACHES = (
+    "_is_gen_callable_cached",
+    "_is_async_gen_callable_cached",
+    "_is_coroutine_callable_cached",
+)
 
 
 @pytest.hookimpl(tryfirst=True)
@@ -106,10 +112,28 @@ def collect_unreachable_resources() -> Iterator[None]:
     by earlier tests and suite time grew quadratically. Frozen objects that
     become unreachable later, such as module- or session-scoped fixture state,
     are collected by the session-finish backstop instead.
+
+    pytest orders autouse fixtures of one conftest by name, so this fixture is
+    set up first and torn down after the other shared function fixtures.
     """
     yield
+    clear_fastapi_dependency_caches()
     gc.collect()
     gc.freeze()
+
+
+def clear_fastapi_dependency_caches() -> None:
+    """Drop FastAPI's per-process callable caches, which pin test-built apps.
+
+    Each cache key wraps a bound dependency method, so every application,
+    engine and metadata object a test builds stays reachable until the entry
+    is evicted. A missing cache is skipped here and fails the guard test in
+    ``tests/test_test_harness.py`` instead of every test.
+    """
+    for name in FASTAPI_DEPENDENCY_CACHES:
+        cache = getattr(fastapi_dependency_models, name, None)
+        if cache is not None:
+            cache.cache_clear()
 
 
 def _collect_frozen_garbage() -> list[str]:

@@ -181,11 +181,12 @@ abandoned in a reference cycle fails the test that created it, and then freezes 
 objects (`gc.freeze()`). Each collection therefore traverses only the objects one test created.
 Without the freeze, every collection traversed everything earlier tests retained (FastAPI's
 module-level dependency caches alone keep test-built applications alive), and the suite time grew
-quadratically with the number of tests. Objects frozen while alive that are abandoned later, such
-as module- or session-scoped fixture state, are collected once more after the last fixture
-teardown; an unclosed resource found there fails the session under the heading "resources
-abandoned outside a single test". Under pytest-xdist each worker reports its findings to the
-controller.
+quadratically with the number of tests. The same teardown clears those three FastAPI caches,
+which lowers peak memory, and a guard test fails if a FastAPI upgrade renames them. Objects
+frozen while alive that are abandoned later, such as module- or session-scoped fixture state, are
+collected once more after the last fixture teardown; an unclosed resource found there fails the
+session under the heading "resources abandoned outside a single test". Under pytest-xdist each
+worker reports its findings to the controller.
 
 pytest-xdist requires every worker to collect the same test identifiers, and `--lf` relies on the
 same property. Give `pytest.mark.parametrize` explicit `ids` (or fixed constants) whenever a value

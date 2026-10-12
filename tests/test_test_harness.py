@@ -6,6 +6,9 @@ import gc
 from pathlib import Path
 
 import pytest
+from fastapi import Depends, FastAPI
+from fastapi.dependencies import models
+from fastapi.testclient import TestClient
 from pytest_mock import MockerFixture
 
 from tests import conftest
@@ -197,3 +200,30 @@ def test_controller_reaps_service_stacks_after_a_worker_crash(
     )
     assert conftest.reap_after_worker_crash(config) == expected
     assert reap.called is (crashed and not configured)
+
+
+@pytest.mark.unit
+def test_fastapi_dependency_caches_still_exist_and_are_cleared() -> None:
+    """Fail loudly when a FastAPI upgrade renames the caches the harness clears."""
+    found = [getattr(models, name, None) for name in conftest.FASTAPI_DEPENDENCY_CACHES]
+    caches = [cache for cache in found if hasattr(cache, "cache_info")]
+    assert len(caches) == len(found), (
+        "FastAPI renamed its dependency caches; update FASTAPI_DEPENDENCY_CACHES "
+        "in tests/conftest.py or drop the clearing."
+    )
+
+    class Dependency:
+        def __call__(self) -> int:
+            return 1
+
+    application = FastAPI()
+
+    @application.get("/")
+    def read(value: int = Depends(Dependency())) -> int:
+        return value
+
+    with TestClient(application) as client:
+        assert client.get("/").json() == 1
+    assert sum(cache.cache_info().currsize for cache in caches) > 0
+    conftest.clear_fastapi_dependency_caches()
+    assert sum(cache.cache_info().currsize for cache in caches) == 0
