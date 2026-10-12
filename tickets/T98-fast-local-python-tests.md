@@ -148,13 +148,27 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
   kept, the exit fallback then retries), a transient removal failure, and a repeated one; reaper
   unit tests cover the same three leftovers. Removing the proof from the release point, from the
   helper, from the teardown or from the reaper each fails the new tests.
-- 2026-10-12: Remaining work. Adopt `-n auto --dist loadgroup` in the CI Python shard commands
-  and lower the shard `timeout-minutes` from 40 to about 15 in `.github/workflows/ci.yml`,
-  `scripts/ci/validate_ci.py` and `tests/test_ci_validation.py` after PR #297 (T130) merges.
-  Known parallel risks to settle with that change: the timing-based
-  `test_failed_authentication_medians_have_no_legacy_or_malformed_fast_path` failed once under
-  `-n auto` on the loaded host, and the `tests/unit/broker/test_process.py` factory tests take
-  the real per-user broker authority lock, so they fail while any host broker runs.
+- 2026-10-12: Independent review round 6 approved `c679a79` with no findings. The branch was
+  rebased onto main `a10645a` (T130 #297) as twelve unchanged commits and force-pushed with
+  lease, as the owner authorised.
+- 2026-10-12: Step (e), CI adoption. The Python shard command now runs
+  `uv run pytest -m "unit or light_coverage" -n auto --dist loadgroup` with the unchanged
+  sharding plugin, coverage flags and per-shard coverage upload, and the shard `timeout-minutes`
+  fell from 40 to 15. `scripts/ci/validate_ci.py` pins the new command, bound and workflow
+  digest, and `tests/test_ci_validation.py` rejects dropping `-n auto`, using `-n 1` or
+  `--dist load`. The distributed coverage job stays serial: its PostgreSQL/S3 tests share one
+  `xdist_group`, and other distribution modes would share the single provisioned database and
+  bucket. Parallel-run hazards settled before adoption: the argon2 medians test measures the
+  CPU time of the measuring thread instead of wall time, with the same samples and threshold;
+  the broker factory tests take the real authority lock under a per-test directory name; the
+  interruption-table helper thread no longer reads `time.monotonic`, which a later test on the
+  same worker could have patched, and is stopped and joined; and a shared fixture removes
+  application log handlers a test installed, since one bound to a closed capture stream made
+  `test_cli_conversion_lifecycle_idempotency_capacity_authorization_and_downloads` fail
+  intermittently under xdist. Locally, `tests/unit` plus `tests/integration/auth` passed five
+  times out of five with `-n auto` while the production broker lock was held, and both CI
+  shards passed five times out of five with `-n auto --dist loadgroup` and CI coverage flags
+  (shard 0 3,060 tests in about 44 s, shard 1 2,697 tests in about 58 s on the 4-vCPU host).
 
 ## Synchronization
 

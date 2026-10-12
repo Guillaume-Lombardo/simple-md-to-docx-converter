@@ -219,7 +219,10 @@ pytest-xdist requires every worker to collect the same test identifiers, and `--
 same property. Give `pytest.mark.parametrize` explicit `ids` (or fixed constants) whenever a value
 is derived from randomness or the clock, such as `uuid4()` or the timestamps in a generated ZIP
 archive; `tests/test_parallel_execution.py` collects the suite in two processes and fails on any
-difference.
+difference. Tests that run in parallel must not share host-global state either: timing assertions
+measure the CPU time of the measuring thread rather than wall time, tests take the broker
+authority lock under a per-test name, and the shared configuration removes application log
+handlers a test installed, so none outlives its capture stream.
 
 ## Continuous integration
 
@@ -325,15 +328,19 @@ The marker also selects local SQLite, filesystem, loopback HTTP/TLS, and functio
 boundary tests. A separate, always-run coverage job uses the pinned PostgreSQL and
 RustFS services to run the `storage-distributed` test selection. This job runs for
 every pull request, even when affected-domain selection omits the heavier storage
-suite. Both light shards have a 25-minute job bound, measured against the expanded
-cohort while preserving the same two-partition selection. The normal local test
-commands remain unchanged.
+suite. Each light shard runs its partition on every runner core with
+`-n auto --dist loadgroup` and has a 15-minute job bound; pytest-cov combines the
+worker data on the shard controller, so each shard still uploads one raw coverage file.
+The distributed coverage job stays serial: its PostgreSQL and S3 tests share one
+`xdist_group`, so workers would not shorten it, and other distribution modes would
+share the single provisioned database and bucket between workers. The normal local
+test commands remain unchanged.
 
 To reproduce a partition, use index `0` or `1` and a distinct coverage data file:
 
 ```bash
 COVERAGE_FILE=.coverage.shard0 uv run pytest -m 'unit or light_coverage' \
-  -p no:scripts.ci.pytest_branch_coverage \
+  -n auto --dist loadgroup -p no:scripts.ci.pytest_branch_coverage \
   -p scripts.ci.light_sharding --light-shard-count=2 --light-shard-index=0 \
   --cov-fail-under=0 --cov-report=
 ```
