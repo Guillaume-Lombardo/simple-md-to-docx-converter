@@ -2,7 +2,7 @@
 ticket: T22
 linear_id: G1L-332
 linear_url: https://linear.app/g1lom/issue/G1L-332/
-status: Done
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -437,3 +437,85 @@ In Progress until the adoption change is verified on main and final records clos
   The unrelated worktree with uncommitted 0.6.4 adoption work is preserved.
 - Docker-box remains on the previous test candidate: SSH authentication is
   unavailable in this session. No deployment of the published 0.7.0 pair is claimed.
+
+
+## October 12, 2026 Dependabot maintenance
+
+- Review Python PR #294 and Actions PR #280 against main at e37e7b0.
+- Retain Kubernetes 36.0.3: SDK 37.0.0 changes the generated exec method contract
+  and fails static compatibility checks; its migration requires separate qualification.
+- Update PDFium 5.14.0 qualification while preserving historical golden provenance.
+- Refresh the exact workflow fingerprints and action-pin regression assertions.
+- Preserve project.version 0.7.5 and its published receipt digests.
+- Mermaid PR #274 is incompatible with the current adapter: CLI 12 removes
+  --width/--height, which src/markweave/conversion/mermaid.py still passes.
+  Keep CLI 11.17.0 pending an adapter migration and engine/golden/final-image
+  qualification; do not refresh checksums merely to make the raw bump pass.
+- Canonical build constraints are regenerated from uv.lock, retaining the
+  explicitly constrained trove-classifiers version rather than Dependabot
+  export drift.
+- Targeted checks: 219 workflow/package/PDFium tests and 73 Kubernetes/package
+  integration tests pass; hash-required sdist/wheel build passes; Ruff, ty and
+  the CI security validator pass. ty 0.0.85 rejects 24 compatibility warnings;
+  update context-manager Generator/AsyncGenerator annotations and remove one
+  redundant cast, then require a clean ty result. These changes preserve runtime
+  behavior; the existing boundary tests cover the same paths.
+- Canonical default suite: 5,880 passed, 114 engine/runtime cases deselected,
+  15 warnings; 94.36% total coverage and 90.48% branch coverage.
+- Changed application coverage passes at 100.00% (22/22 lines).
+- Pytest reports 15 non-blocking warnings from Starlette/httpx, pypdf,
+  SQLAlchemy, and legacy session configuration.
+- Separate branch checks: 201 Actions tests and 85 Python/package/PDFium checks
+  pass; Ruff formatting/lint and ty pass cleanly on each branch.
+- All nine application modules touched for ty compatibility retain their
+  executable bodies and line positions. All four workflow diffs are limited
+  to the independently verified immutable Action substitutions.
+- Full document-engine and final-image
+  qualification remains a hosted CI gate; Pandoc, Mermaid and LibreOffice
+  executables are unavailable on the local PATH.
+- Publication and merge await the explicit AGENTS.md approval.
+
+## Prepared pull-request updates
+
+### PR #294: `chore/T22-python-dependencies`
+
+Changed files relative to current main:
+
+- `build-constraints.txt`
+- `docs/pdf-conversion.md`
+- `pyproject.toml`
+- `scripts/generate_t11_pdf_golden.py`
+- `scripts/release/artifacts.py`
+- `scripts/release/process.py`
+- `scripts/testing/services.py`
+- `src/markweave/broker/inventory_storage.py`
+- `src/markweave/broker/kubernetes_attester_inventory.py`
+- `src/markweave/conversion/libreoffice.py`
+- `src/markweave/http/lifecycle.py`
+- `src/markweave/jobs/worker_execution.py`
+- `src/markweave/observability.py`
+- `src/markweave/persistence/migrations/versions/20260920_18_presentations.py`
+- `src/markweave/persistence/sql.py`
+- `src/markweave/recovery_adapters.py`
+- `tests/integration/auth/test_http_session.py`
+- `tests/integration/broker/test_broker_process_integration.py`
+- `tests/integration/document_engines/test_pdf_rasterizer.py`
+- `tests/integration/test_cli_composer_http.py`
+- `tests/unit/broker/test_kubernetes_deployment.py`
+- `tests/unit/test_cli_local_outputs.py`
+- `tickets/T22-finalize-cicd.md`
+- `uv.lock`
+
+### PR #280: `chore/T22-workflow-actions`
+
+Changed files relative to current main:
+
+- `.github/workflows/ci.yml`
+- `.github/workflows/container-release.yml`
+- `.github/workflows/mutation.yml`
+- `.github/workflows/release.yml`
+- `scripts/ci/validate_ci.py`
+- `tests/test_ci_validation.py`
+- `tickets/T22-finalize-cicd.md`
+
+The existing Dependabot head and current main are ancestors of each local branch; publication uses a normal fast-forward push to the existing PR branch, without history rewriting. No remote update, merge or closure has been performed.

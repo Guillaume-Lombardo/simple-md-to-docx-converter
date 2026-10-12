@@ -154,14 +154,14 @@ class ReleaseWorkflowPolicy:
 
 
 CONTAINER_RELEASE_CANONICAL_DIGEST = (
-    "fcc32df9fab25e5055a84b8beddba4a233ed57740aebf61bf83df086e9eebb3d"
+    "1239cf2ddeedb9d12c2b7cd9cb7af352af0f91ee49534228140870018971179a"
 )
 CONTAINER_PAIR_PUBLISHER_CANONICAL_DIGEST = (
     "3a61c6bd75e47afe761ead42b77f73ae46cc0da2e8430f09e5dce0f74a7d6fdc"
 )
 RELEASE_IMAGE_ROLES = ("backend", "frontend", "reverse_attempt")
 PRODUCTION_RELEASE_CANONICAL_DIGEST = (
-    "7f1e229cb775c2d79c397bae9269c410676dd7ab624cfb7b15c3b44636e60392"
+    "551f9d8bbf8af46f201ffa0d7ef2362052e2f5ea0e671b9ed6df1fe5e2fbabdd"
 )
 
 
@@ -369,7 +369,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
             ): "${{ always() && matrix.domain == 'container' }}",
             ("mutation", "Retain mutation evidence"): "${{ always() }}",
         },
-        canonical_digest="d43d509b8903a54cc575a39936689c7ed7d53fb73b14a6d61b042efa8d124002",
+        canonical_digest="9cfc2e9294c7ab1f3de38711394982b06131ae9818c66cf10a018df1cba46be1",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -389,7 +389,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
         },
         job_conditions={"mutation": TRUSTED_REPOSITORY_GUARD},
         step_conditions={("mutation", "Retain mutation evidence"): "${{ always() }}"},
-        canonical_digest="d063841d981c669f56a1c573b4dc59e1ad7f3601f0f8c1d606f601212128b6d1",
+        canonical_digest="0120c14455f755108abf809941575c6e32e19758d7b663ae5f0fc64017f9f2a2",
     ),
 }
 
@@ -1114,7 +1114,7 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
     if (
         len(frontend_node_steps) != 1
         or frontend_node_steps[0].get("uses")
-        != "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
+        != "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1"
         or frontend_node_options
         != {
             "node-version": "24.19.0",
