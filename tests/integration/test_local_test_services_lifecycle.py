@@ -4,9 +4,11 @@ import os
 import signal
 import subprocess
 import sys
+import time
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from pytest_mock import MockerFixture
@@ -197,3 +199,46 @@ def test_controller_removes_the_stack_of_a_crashed_xdist_worker(
     project = record.read_text()
     assert services.PROJECT_PATTERN.fullmatch(project)
     assert _resources(project) == {}
+
+
+STARTING_OWNER = """\
+import sys
+import uuid
+
+from scripts.testing import services
+
+services.uuid4 = lambda: uuid.UUID(sys.argv[1])
+with services.distributed_services():
+    pass
+"""
+
+
+@pytest.mark.slow
+def test_interrupt_during_real_startup_leaves_no_resource_behind() -> None:
+    """Interrupt ``compose up`` as soon as its first resource exists."""
+    identifier = uuid4()
+    project = f"{services.PROJECT_PREFIX}{identifier.hex}"
+    process = subprocess.Popen(
+        [sys.executable, "-c", STARTING_OWNER, str(identifier)],
+        cwd=ROOT,
+        env=_child_environment(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        deadline = time.monotonic() + 120
+        while not _resources(project) and time.monotonic() < deadline:
+            assert process.poll() is None, process.communicate()
+            time.sleep(0.05)
+        process.send_signal(signal.SIGINT)
+        process.communicate(timeout=120)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.communicate(timeout=60)
+    assert process.returncode != 0
+    # A surviving Compose plugin would keep creating the stack after removal.
+    time.sleep(10)
+    assert _resources(project) == {}
+    assert not (services.lock_directory() / f"{project}.lock").exists()

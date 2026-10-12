@@ -98,6 +98,17 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
   two broker unit tests that failed in the serial run while another worktree's host broker held
   the per-user broker authority lock, plus a few timing-dependent branches. Thresholds and CI
   gates are unchanged.
+- 2026-10-12: Review round 2 (independent review of `1b602a2`, one major finding). Startup
+  commands ran in their own session, so an interrupt or timeout killed only the direct Docker CLI
+  while a Compose plugin child could keep creating resources after teardown had removed the
+  stack and released its lock. Docker commands now run under `Popen` in a new session; an
+  interrupt or timeout stops the whole process group (SIGTERM, bounded wait, SIGKILL) and waits
+  until the leader is reaped and the group is gone. A group that survives is recorded as
+  unsettled. A stack whose startup did not finish is removed repeatedly until the engine lists no
+  resource of the project, and ownership and the lock are kept when that cannot be proven. A
+  fake-plugin integration test (interrupt and timeout during `up`) proves no late resource appears
+  after cleanup and fails with direct-child-only termination; a real Docker test interrupts
+  `compose up` at its first resource and finds nothing left.
 - 2026-10-12: Remaining work. Adopt `-n auto --dist loadgroup` in the CI Python shard commands
   and lower the shard `timeout-minutes` from 40 to about 15 in `.github/workflows/ci.yml`,
   `scripts/ci/validate_ci.py` and `tests/test_ci_validation.py` after PR #297 (T130) merges.

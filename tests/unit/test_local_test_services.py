@@ -33,11 +33,13 @@ def clear_service_environment(
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
     yield
     services._OWNED.clear()
+    services._UNSETTLED.clear()
 
 
 @pytest.fixture
 def reaper(mocker: MockerFixture) -> MockType:
-    """Keep unit lifecycle tests away from the real Docker listing."""
+    """Keep unit lifecycle tests away from the real Docker listings."""
+    mocker.patch.object(services, "project_resources", return_value=False)
     return mocker.patch.object(services, "reap_stale_stacks", return_value=())
 
 
@@ -337,28 +339,161 @@ def test_only_single_valid_loopback_bindings_are_accepted(value: str) -> None:
         services._port(value)
 
 
+def _popen(
+    mocker: MockerFixture, *, returncode: int = 0, error: BaseException | None = None
+) -> MockType:
+    process = mocker.Mock(pid=4242, returncode=returncode)
+    if error is None:
+        process.communicate.return_value = ("out\n", "private-diagnostic")
+    else:
+        process.communicate.side_effect = error
+    return mocker.patch.object(services.subprocess, "Popen", return_value=process)
+
+
 def test_compose_failure_does_not_echo_environment_or_diagnostics(
     mocker: MockerFixture,
 ) -> None:
-    run = mocker.patch.object(
-        services.subprocess,
-        "run",
-        return_value=subprocess.CompletedProcess([], 1, "", "private-diagnostic"),
-    )
+    popen = _popen(mocker, returncode=1)
     with pytest.raises(RuntimeError, match="Compose up failed") as error:
         services._compose("markweave-tests-example", {}, "up")
     assert "private-diagnostic" not in str(error.value)
-    assert run.call_args.kwargs["timeout"] == 300
-    assert run.call_args.kwargs["start_new_session"] is True
-    assert "shell" not in run.call_args.kwargs
+    process = popen.return_value
+    assert process.communicate.call_args.kwargs["timeout"] == 300
+    assert popen.call_args.kwargs["start_new_session"] is True
+    assert "shell" not in popen.call_args.kwargs
+
+
+def test_successful_command_returns_stripped_output(mocker: MockerFixture) -> None:
+    _popen(mocker)
+    assert services._compose("markweave-tests-example", {}, "port") == "out"
 
 
 def test_missing_engine_reports_configuration_alternative(
     mocker: MockerFixture,
 ) -> None:
-    mocker.patch.object(services.subprocess, "run", side_effect=FileNotFoundError)
+    mocker.patch.object(services.subprocess, "Popen", side_effect=FileNotFoundError)
     with pytest.raises(RuntimeError, match="Docker Compose"):
         services._compose("markweave-tests-example", {}, "up")
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (subprocess.TimeoutExpired("docker", 300), RuntimeError),
+        (KeyboardInterrupt(), KeyboardInterrupt),
+    ],
+    ids=["timeout", "interrupt"],
+)
+def test_interrupted_command_stops_its_whole_process_group(
+    mocker: MockerFixture, error: BaseException, expected: type[BaseException]
+) -> None:
+    _popen(mocker, error=error)
+    stop = mocker.patch.object(services, "stop_process_group", return_value=True)
+    with pytest.raises(expected) as raised:
+        services._compose("markweave-tests-example", {}, "up")
+    assert not isinstance(raised.value, services.UnsettledCommandError)
+    stop.assert_called_once()
+    assert not services._UNSETTLED
+
+
+def test_surviving_process_group_is_recorded_as_unsettled(
+    mocker: MockerFixture,
+) -> None:
+    _popen(mocker, error=KeyboardInterrupt())
+    mocker.patch.object(services, "stop_process_group", return_value=False)
+    alive = mocker.patch.object(services, "_group_alive", return_value=True)
+    with pytest.raises(services.UnsettledCommandError, match="did not stop"):
+        services._compose("markweave-tests-example", {}, "up")
+    assert services.unsettled_commands()
+    alive.return_value = False
+    assert not services.unsettled_commands()
+
+
+def test_stop_process_group_escalates_and_reports_survivors(
+    mocker: MockerFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(services, "STOP_GRACE_SECONDS", 0.05)
+    monkeypatch.setattr(services, "STOP_KILL_SECONDS", 0.05)
+    killpg = mocker.patch.object(services.os, "killpg")
+    process = mocker.Mock(pid=4242)
+    process.poll.return_value = None
+    assert services.stop_process_group(process) is False
+    signals = [call.args[1] for call in killpg.call_args_list if call.args[1]]
+    assert signals[0] == signal.SIGTERM
+    assert signals[-1] == signal.SIGKILL
+
+
+@pytest.mark.parametrize(
+    ("failure", "alive"),
+    [(None, True), (ProcessLookupError, False), (PermissionError, True)],
+    ids=["alive", "gone", "foreign"],
+)
+def test_group_liveness_probe(
+    mocker: MockerFixture, failure: type[OSError] | None, alive: bool
+) -> None:
+    mocker.patch.object(services.os, "killpg", side_effect=failure)
+    assert services._group_alive(4242) is alive
+
+
+def test_interrupted_startup_is_removed_until_the_engine_is_empty(
+    mocker: MockerFixture, reaper: MockType
+) -> None:
+    """A late resource from an interrupted startup triggers another removal."""
+    del reaper
+    removals: list[str] = []
+
+    def compose(project: str, environment: dict[str, str], *args: str) -> str:
+        del project, environment
+        if args[0] == "up":
+            raise KeyboardInterrupt
+        removals.append(args[0])
+        return ""
+
+    mocker.patch.object(services, "_compose", side_effect=compose)
+    mocker.patch.object(services, "project_resources", side_effect=[True, False])
+    with pytest.raises(KeyboardInterrupt), services.distributed_services():
+        pass
+    assert removals == ["down", "down"]
+    assert not services._OWNED
+    assert not list(services.lock_directory().iterdir())
+
+
+@pytest.mark.parametrize("cause", ["resources", "survivor"])
+def test_unsettled_startup_keeps_ownership_and_lock(
+    mocker: MockerFixture, reaper: MockType, cause: str
+) -> None:
+    del reaper
+
+    def compose(project: str, environment: dict[str, str], *args: str) -> str:
+        del project, environment
+        if args[0] == "up":
+            raise KeyboardInterrupt
+        return ""
+
+    mocker.patch.object(services, "_compose", side_effect=compose)
+    mocker.patch.object(
+        services, "project_resources", return_value=cause == "resources"
+    )
+    mocker.patch.object(
+        services, "unsettled_commands", return_value=cause == "survivor"
+    )
+    with (
+        pytest.raises(RuntimeError, match="could not be settled"),
+        services.distributed_services(),
+    ):
+        pass
+    (lock,) = services.lock_directory().iterdir()
+    assert not _locked_elsewhere(lock)
+    assert len(services._OWNED) == 1
+
+
+def test_project_resource_listing_filters_by_compose_project(
+    mocker: MockerFixture,
+) -> None:
+    docker = mocker.patch.object(services, "_docker", side_effect=["", "volume", ""])
+    assert services.project_resources(PROJECT) is True
+    filters = {call.args[0][-1] for call in docker.call_args_list}
+    assert filters == {f"label=com.docker.compose.project={PROJECT}"}
 
 
 def test_lock_directory_falls_back_to_the_temporary_directory(
