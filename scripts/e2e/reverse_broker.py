@@ -14,7 +14,9 @@ import ssl
 import subprocess
 import sys
 import time
+import urllib.request
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from itertools import islice
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -23,6 +25,7 @@ from markweave.broker.command_runner import BoundedCommandRunner
 from markweave.broker.inventory import SQLiteBrokerInventory
 from markweave.broker.models import (
     AuthenticatedPrincipal,
+    ManagedUnitState,
     policy_specification_evidence,
 )
 from markweave.broker.mtls_transport import (
@@ -59,6 +62,20 @@ _MAX_SUPERVISOR_THREADS = 256
 _MAX_DIAGNOSTIC_BYTES = 65_536
 _MAX_DIAGNOSTIC_ATTEMPTS = 32
 CHANNEL_LIMITS = {"max_input_bytes": 1_000_000, "max_output_bytes": 4_000_000}
+MEMBER_UNIT_PREFIX = "markweave-e2e-slice-member-"
+MEMBER_MODES = ("transient", "persistent")
+# The transient member must leave well inside the broker's emptiness bound and
+# the 5-second worker operation timeout, so the terminate request still succeeds.
+_MEMBER_TRANSIENT_HOLD_SECONDS = 0.5
+_MEMBER_PRE_EXIT_STATES = frozenset(
+    {
+        ManagedUnitState.RESERVED,
+        ManagedUnitState.CREATE_INTENT,
+        ManagedUnitState.CREATED,
+    }
+)
+_MEMBER_BROKER_FAULT_CODES = ("termination_unproven", "transport_failure")
+_MAX_METRICS_BYTES = 1_048_576
 
 
 def _openssl(root: Path, *arguments: str) -> None:
@@ -539,6 +556,249 @@ def watch_pause(  # noqa: PLR0912, PLR0915 - linear fail-closed test observer
                 raise
 
 
+def _systemctl_user(*arguments: str, check: bool = True) -> str:
+    _, systemd_environment = _runtime_environment()
+    completed = subprocess.run(  # noqa: S603 - fixed absolute executable
+        ("/usr/bin/systemctl", "--user", *arguments),
+        check=check,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        env=systemd_environment,
+    )
+    return completed.stdout.strip()
+
+
+def _start_slice_member(slice_name: str, member: str) -> None:
+    _, systemd_environment = _runtime_environment()
+    subprocess.run(  # noqa: S603 - fixed absolute executable and arguments
+        (
+            "/usr/bin/systemd-run",
+            "--user",
+            f"--slice={slice_name}",
+            f"--unit={member}",
+            "--collect",
+            "--quiet",
+            "/usr/bin/sleep",
+            "600",
+        ),
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        env=systemd_environment,
+    )
+
+
+def _unit_slice_exists(path: Path) -> bool:
+    return (path / "cgroup.events").exists()
+
+
+def _read_metrics(url: str) -> dict[str, float]:
+    """Return the loopback worker metric samples keyed by exact series."""
+    if not url.startswith("http://127.0.0.1:"):
+        raise RuntimeError("T137 metrics endpoint must be loopback HTTP")
+    with urllib.request.urlopen(url, timeout=2) as response:  # noqa: S310
+        raw = response.read(_MAX_METRICS_BYTES + 1)
+    if len(raw) > _MAX_METRICS_BYTES:
+        raise RuntimeError("T137 metrics exceed their byte limit")
+    samples: dict[str, float] = {}
+    for line in raw.decode("utf-8").splitlines():
+        if not line or line.startswith("#"):
+            continue
+        series, _, value = line.rpartition(" ")
+        samples[series] = float(value)
+    return samples
+
+
+def _member_metrics(url: str) -> dict[str, float | None]:
+    samples = _read_metrics(url)
+    projected: dict[str, float | None] = {
+        "broker_ready": samples.get("md_converter_reversion_broker_ready"),
+        "broker_fault": samples.get("md_converter_reversion_broker_fault"),
+    }
+    for code in _MEMBER_BROKER_FAULT_CODES:
+        projected[f"faults_{code}"] = samples.get(
+            f'md_converter_reversion_runtime_faults_total{{code="{code}"}}', 0.0
+        )
+    if projected["broker_ready"] is None or projected["broker_fault"] is None:
+        raise RuntimeError("T137 worker reverse runtime gauges are unavailable")
+    return projected
+
+
+def _broker_faults(metrics: Mapping[str, float | None]) -> float:
+    return sum(metrics[f"faults_{code}"] or 0.0 for code in _MEMBER_BROKER_FAULT_CODES)
+
+
+def watch_member(  # noqa: PLR0912, PLR0915 - linear fail-closed test observer
+    root: Path,
+    mode: str,
+    metrics_url: str,
+    ready: Path,
+    report: Path,
+) -> None:
+    """Hold a foreign process in the next managed unit slice, then release it.
+
+    This prearmed bounded observer is test chaos, not production orchestration.
+    It binds only to the single unit created after it is armed, starts the member
+    while the broker inventory still proves the unit has not reached
+    ``EXIT_CONFIRMED``, and requires the broker to refuse emptiness while the
+    member is alive. ``transient`` releases the member shortly after the broker
+    starts waiting; ``persistent`` keeps it until the worker reports a broker
+    fault. Every exit stops the member.
+    """
+    if mode not in MEMBER_MODES:
+        raise ValueError("T137 member mode is invalid")
+    config = load_broker_process_config(root / "broker.json")
+    inventory = SQLiteBrokerInventory(
+        config.state_directory / "inventory.sqlite3",
+        config.authentication_key,
+        max_records=config.max_units,
+    )
+    cgroup_root = Path(
+        f"/sys/fs/cgroup/user.slice/user-{os.geteuid()}.slice/user@{os.geteuid()}.service"
+    )
+    started_ns = time.monotonic_ns()
+    member: str | None = None
+    timings: dict[str, int] = {}
+    snapshot: dict[str, object] = {
+        "schema": "t137-reverse-member-v1",
+        "mode": mode,
+        "phase": "prearmed",
+        "unit_id": None,
+        "armed_state": None,
+        "baseline_metrics": None,
+        "held_state": None,
+        "held_metrics": None,
+        "released_at": None,
+        "final_state": None,
+        "final_metrics": None,
+        "failure": None,
+        "timings_millis": timings,
+    }
+
+    def mark(phase: str) -> None:
+        snapshot["phase"] = phase
+        timings[phase] = (time.monotonic_ns() - started_ns) // 1_000_000
+
+    def interrupted(_signum: int, _frame: object) -> None:
+        raise InterruptedError("T137 member observer interrupted")
+
+    def state_of(unit_id: UUID) -> ManagedUnitState | None:
+        current = inventory.get(unit_id)
+        return None if current is None else current.state
+
+    previous_handler = signal.signal(signal.SIGTERM, interrupted)
+    try:
+        previous = {
+            unit.unit_id for unit in inventory.unacknowledged(limit=config.max_units)
+        }
+        baseline = _member_metrics(metrics_url)
+        snapshot["baseline_metrics"] = baseline
+        mark("prearmed")
+        ready.write_text("ready\n")
+        deadline = time.monotonic() + 60
+        unit_id: UUID | None = None
+        while unit_id is None:
+            candidates = [
+                unit.unit_id
+                for unit in inventory.unacknowledged(limit=config.max_units)
+                if unit.unit_id not in previous
+                and unit.principal.principal_id == WORKER_ID
+                and unit.policy_revision == POLICY
+            ]
+            if len(candidates) > 1:
+                raise RuntimeError("T137 new managed unit is not unique")
+            if candidates:
+                unit_id = candidates[0]
+            elif time.monotonic() >= deadline:
+                raise RuntimeError("T137 new managed unit did not appear")
+            else:
+                time.sleep(0.005)
+        snapshot["unit_id"] = str(unit_id)
+        mark("unit-observed")
+        slice_name = f"markweavet70{unit_id.hex}.slice"
+        while not _unit_slice_exists(cgroup_root / slice_name):
+            if state_of(unit_id) not in _MEMBER_PRE_EXIT_STATES:
+                raise RuntimeError("T137 unit progressed before its slice appeared")
+            if time.monotonic() >= deadline:
+                raise RuntimeError("T137 managed unit slice did not appear")
+            time.sleep(0.005)
+        member = f"{MEMBER_UNIT_PREFIX}{unit_id.hex}.service"
+        _start_slice_member(slice_name, member)
+        if _systemctl_user("is-active", member, check=False) != "active":
+            raise RuntimeError("T137 slice member did not start")
+        # The broker persists EXIT_CONFIRMED before it reads emptiness, so an
+        # earlier state here proves the member precedes every emptiness read.
+        armed_state = state_of(unit_id)
+        snapshot["armed_state"] = None if armed_state is None else armed_state.value
+        if armed_state not in _MEMBER_PRE_EXIT_STATES:
+            raise RuntimeError("T137 member was not armed before unit exit")
+        mark("member-armed")
+        deadline = time.monotonic() + 120
+        while (current := state_of(unit_id)) is not ManagedUnitState.EXIT_CONFIRMED:
+            if current not in _MEMBER_PRE_EXIT_STATES:
+                raise RuntimeError("T137 broker proved emptiness with a live member")
+            if time.monotonic() >= deadline:
+                raise RuntimeError("T137 broker did not confirm unit exit")
+            time.sleep(0.01)
+        mark("exit-confirmed")
+        if mode == "transient":
+            time.sleep(_MEMBER_TRANSIENT_HOLD_SECONDS)
+            held_metrics = _member_metrics(metrics_url)
+        else:
+            deadline = time.monotonic() + 90
+            while True:
+                held_metrics = _member_metrics(metrics_url)
+                if held_metrics["broker_fault"] == 1 and _broker_faults(
+                    held_metrics
+                ) > _broker_faults(baseline):
+                    break
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("T137 worker did not report the broker fault")
+                time.sleep(0.1)
+        snapshot["held_metrics"] = held_metrics
+        held_state = state_of(unit_id)
+        snapshot["held_state"] = None if held_state is None else held_state.value
+        if (
+            held_state is not ManagedUnitState.EXIT_CONFIRMED
+            or inventory.get_proof(unit_id) is not None
+            or _systemctl_user("is-active", member, check=False) != "active"
+        ):
+            raise RuntimeError("T137 broker proved emptiness with a live member")
+        mark("held")
+        snapshot["released_at"] = datetime.now(UTC).isoformat()
+        _systemctl_user("stop", member)
+        member = None
+        mark("released")
+        deadline = time.monotonic() + 120
+        while (current := state_of(unit_id)) not in {None, ManagedUnitState.REMOVED}:
+            if time.monotonic() >= deadline:
+                raise RuntimeError("T137 broker did not prove removal after release")
+            time.sleep(0.05)
+        snapshot["final_state"] = "absent" if current is None else current.value
+        while True:
+            final_metrics = _member_metrics(metrics_url)
+            if final_metrics["broker_ready"] == 1:
+                break
+            if time.monotonic() >= deadline:
+                raise RuntimeError("T137 worker broker readiness did not recover")
+            time.sleep(0.1)
+        snapshot["final_metrics"] = final_metrics
+        mark("proven")
+        _write_bounded_json(report, snapshot)
+    except Exception as error:
+        snapshot["failure"] = type(error).__name__
+        mark("failed")
+        with contextlib.suppress(Exception):
+            _write_bounded_json(report, snapshot)
+        raise
+    finally:
+        signal.signal(signal.SIGTERM, previous_handler)
+        if member is not None:
+            _systemctl_user("stop", member, check=False)
+
+
 def _proc_read(path: Path) -> bytes:
     with path.open("rb") as stream:
         data = stream.read(_MAX_PROCESS_METADATA_BYTES + 1)
@@ -619,7 +879,8 @@ def signal_broker(root: Path, parent_pid: int, signal_name: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "operation", choices=("prepare", "ready", "sweep", "watch-pause", "signal")
+        "operation",
+        choices=("prepare", "ready", "sweep", "watch-pause", "watch-member", "signal"),
     )
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--image-repository")
@@ -631,6 +892,10 @@ def main() -> None:
     parser.add_argument("--diagnostics", type=Path)
     parser.add_argument("--parent-pid", type=int)
     parser.add_argument("--signal", choices=("TERM", "KILL"))
+    parser.add_argument("--mode", choices=MEMBER_MODES)
+    parser.add_argument("--metrics-url")
+    parser.add_argument("--ready", type=Path)
+    parser.add_argument("--report", type=Path)
     args = parser.parse_args()
     if args.operation == "prepare":
         if not all((args.image_repository, args.image_digest, args.worker_host)):
@@ -649,6 +914,13 @@ def main() -> None:
             args.barrier,
             args.diagnostics,
         )
+    elif args.operation == "watch-member":
+        if any(
+            value is None
+            for value in (args.mode, args.metrics_url, args.ready, args.report)
+        ):
+            parser.error("watch-member requires mode, metrics URL, ready and report")
+        watch_member(args.root, args.mode, args.metrics_url, args.ready, args.report)
     elif args.operation == "signal":
         if args.parent_pid is None or args.signal is None:
             parser.error("signal requires parent PID and signal")

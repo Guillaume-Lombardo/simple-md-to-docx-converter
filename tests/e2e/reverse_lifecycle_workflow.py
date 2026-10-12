@@ -12,7 +12,7 @@ import time
 import uuid
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import UTC, datetime
 from hashlib import sha256
 from itertools import pairwise
 from pathlib import Path
@@ -59,6 +59,9 @@ _SOURCE = Path("spikes/anydoc/corpus/docx/text.docx")
 _SUBMISSION_COUNT = 4
 _SCENARIOS = ("worker-restart", "broker-restart")
 _MAX_DIAGNOSTIC_ATTEMPTS = 32
+_MEMBER_SCHEMA = "t137-reverse-member-scenario-v1"
+_MEMBER_REPORT_SCHEMA = "t137-reverse-member-v1"
+_MEMBER_SCENARIOS = ("member-transient", "member-persistent")
 
 
 def _username(profile: str, scenario: str) -> str:
@@ -407,6 +410,196 @@ def verify(  # noqa: PLR0913, PLR0917 - explicit final-image evidence inputs
         )
 
 
+def _read_member_state(
+    path: Path, profile: str | None = None, scenario: str | None = None
+) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_bytes())
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise WorkflowFailure("reverse member state is unreadable") from error
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"schema", "profile", "scenario", "owner", "job_id"}
+        or value.get("schema") != _MEMBER_SCHEMA
+        or value.get("scenario") not in _MEMBER_SCENARIOS
+        or (profile is not None and value.get("profile") != profile)
+        or (scenario is not None and value.get("scenario") != scenario)
+        or value.get("owner")
+        != _username(str(value.get("profile")), str(value.get("scenario")))
+    ):
+        raise WorkflowFailure("reverse member state identity is invalid")
+    try:
+        value["job_id"] = str(UUID(value["job_id"]))
+    except (TypeError, ValueError) as error:
+        raise WorkflowFailure("reverse member job identity is invalid") from error
+    return value
+
+
+def _diagnostic_state(path: Path) -> dict[str, Any]:
+    """Return the job binding of either lifecycle or slice-member state."""
+    try:
+        schema = json.loads(path.read_bytes()).get("schema")
+    except OSError, AttributeError, json.JSONDecodeError, UnicodeDecodeError:
+        schema = None
+    if schema == _MEMBER_SCHEMA:
+        member = _read_member_state(path)
+        return {
+            "profile": member["profile"],
+            "scenario": member["scenario"],
+            "job_ids": [member["job_id"]],
+            "recovery_job_id": member["job_id"],
+        }
+    return _read_state(path)
+
+
+def prepare_member(
+    base_url: str, profile: str, scenario: str, state_file: Path
+) -> None:
+    """Submit the single reverse job whose unit slice the observer populates."""
+    if scenario not in _MEMBER_SCENARIOS:
+        raise WorkflowFailure("reverse member scenario is invalid")
+    admin = ServiceClient(base_url)
+    admin.login("e2e-admin", "e2e-admin-password")
+    create_user(admin, _username(profile, scenario), _PASSWORD)
+    owner = _owner(base_url, profile, scenario)
+    job_id = _job_id(
+        _submit(owner, _normalized_source(), f"t137-member-{profile}-{scenario}")
+    )
+    _write_json(
+        state_file,
+        {
+            "schema": _MEMBER_SCHEMA,
+            "profile": profile,
+            "scenario": scenario,
+            "owner": _username(profile, scenario),
+            "job_id": job_id,
+        },
+    )
+
+
+def _read_member_report(path: Path, scenario: str) -> dict[str, Any]:
+    try:
+        report = json.loads(path.read_bytes())
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise WorkflowFailure("reverse member observer report is unreadable") from error
+    if (
+        not isinstance(report, dict)
+        or report.get("schema") != _MEMBER_REPORT_SCHEMA
+        or f"member-{report.get('mode')}" != scenario
+        or report.get("phase") != "proven"
+        or report.get("failure") is not None
+        or report.get("armed_state") not in {"reserved", "create_intent", "created"}
+        or report.get("held_state") != "exit_confirmed"
+        or report.get("final_state") not in {"removed", "absent"}
+        or not isinstance(report.get("baseline_metrics"), dict)
+        or not isinstance(report.get("held_metrics"), dict)
+        or not isinstance(report.get("final_metrics"), dict)
+    ):
+        raise WorkflowFailure("reverse member observer did not prove its hold")
+    try:
+        report["unit_id"] = str(UUID(report["unit_id"]))
+    except (KeyError, TypeError, ValueError) as error:
+        raise WorkflowFailure("reverse member observer unit is invalid") from error
+    _timestamp(report.get("released_at"), "member released_at")
+    return report
+
+
+def _broker_fault_count(metrics: dict[str, Any]) -> float:
+    return sum(
+        float(metrics.get(f"faults_{code}") or 0.0)
+        for code in ("termination_unproven", "transport_failure")
+    )
+
+
+def _utc(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+def _require_member_metrics(report: dict[str, Any], scenario: str) -> None:
+    baseline = _broker_fault_count(report["baseline_metrics"])
+    held, final = report["held_metrics"], report["final_metrics"]
+    if scenario == "member-transient":
+        if (
+            held.get("broker_ready") != 1
+            or _broker_fault_count(held) != baseline
+            or _broker_fault_count(final) != baseline
+        ):
+            raise WorkflowFailure("a transient slice member degraded the broker")
+    elif held.get("broker_fault") != 1 or _broker_fault_count(held) <= baseline:
+        raise WorkflowFailure("a persistent slice member did not fault the broker")
+    if final.get("broker_ready") != 1:
+        raise WorkflowFailure("worker broker readiness did not recover")
+
+
+def verify_member(  # noqa: PLR0913, PLR0917 - explicit final-image evidence inputs
+    base_url: str,
+    profile: str,
+    scenario: str,
+    state_file: Path,
+    diagnostics_file: Path | None,
+    observer_report: Path | None,
+) -> None:
+    """Verify publication only after the broker proved the member-free slice."""
+    state = _read_member_state(state_file, profile, scenario)
+    if (diagnostics_file is None) != (observer_report is None):
+        raise WorkflowFailure("member verification needs diagnostics and its report")
+    owner = _owner(base_url, profile, scenario)
+    job = _wait_success(owner, state["job_id"])
+    attempt = job.get("attempt")
+    if not isinstance(attempt, int) or attempt < 1:
+        raise WorkflowFailure("reverse member job attempt is invalid")
+    if scenario == "member-transient" and attempt != 1:
+        raise WorkflowFailure("a transient slice member forced a recovery attempt")
+    if scenario == "member-persistent" and attempt < 2:
+        raise WorkflowFailure("a persistent slice member did not force recovery")
+    first = _download(owner, state["job_id"])
+    if first != _download(owner, state["job_id"]):
+        raise WorkflowFailure("one immutable reverse result changed between downloads")
+    _inspect_package(first)
+    if diagnostics_file is None or observer_report is None:
+        return
+    report = _read_member_report(observer_report, scenario)
+    _require_member_metrics(report, scenario)
+    rows = _member_attempts(diagnostics_file, state)
+    if len(rows) != attempt:
+        raise WorkflowFailure("public and persisted member attempts disagree")
+    released = _utc(_timestamp(report["released_at"], "member released_at"))
+    member_row = rows[0]
+    if (
+        member_row["unit_id"] != report["unit_id"]
+        or member_row["proof_unit_id"] != report["unit_id"]
+        or member_row["proof_id"] is None
+    ):
+        raise WorkflowFailure("the slice member unit lacks its exact proof")
+    recorded = _utc(_timestamp(member_row["proof_recorded_at"], "proof_recorded_at"))
+    if recorded < released:
+        raise WorkflowFailure("termination proof preceded the member release")
+
+
+def _member_attempts(path: Path, state: dict[str, Any]) -> list[dict[str, Any]]:
+    try:
+        evidence = json.loads(path.read_bytes())
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise WorkflowFailure("reverse member diagnostics are unreadable") from error
+    if (
+        not isinstance(evidence, dict)
+        or evidence.get("schema") != _DIAGNOSTICS_SCHEMA
+        or evidence.get("profile") != state["profile"]
+        or evidence.get("scenario") != state["scenario"]
+        or evidence.get("job_ids") != [state["job_id"]]
+        or not isinstance(evidence.get("attempts"), list)
+        or any(
+            not isinstance(row, dict) or row.get("job_id") != state["job_id"]
+            for row in evidence["attempts"]
+        )
+    ):
+        raise WorkflowFailure("reverse member diagnostics schema is invalid")
+    rows = sorted(evidence["attempts"], key=lambda row: row["attempt_number"])
+    if [row["attempt_number"] for row in rows] != list(range(1, len(rows) + 1)):
+        raise WorkflowFailure("reverse member attempt generations are invalid")
+    return rows
+
+
 def diagnostics(
     state_file: Path,
     output: Path,
@@ -416,7 +609,7 @@ def diagnostics(
     output_ready_marker: Path | None = None,
 ) -> None:
     """Project content-free attempt fencing evidence for synthetic job UUIDs only."""
-    state = _read_state(state_file)
+    state = _diagnostic_state(state_file)
     settings = Settings()
     if settings.storage_profile is StorageProfile.STANDALONE:
         if settings.standalone_data_directory is None:
@@ -654,6 +847,17 @@ def main() -> int:
         if operation == "verify":
             command.add_argument("--diagnostics-file", type=Path)
             command.add_argument("--result-receipt", type=Path)
+    for operation in ("prepare-member", "verify-member"):
+        command = subparsers.add_parser(operation)
+        command.add_argument("--base-url", required=True)
+        command.add_argument(
+            "--profile", choices=("standalone", "distributed"), required=True
+        )
+        command.add_argument("--scenario", choices=_MEMBER_SCENARIOS, required=True)
+        command.add_argument("--state-file", type=Path, required=True)
+        if operation == "verify-member":
+            command.add_argument("--diagnostics-file", type=Path)
+            command.add_argument("--observer-report", type=Path)
     command = subparsers.add_parser("diagnostics")
     command.add_argument("--state-file", type=Path, required=True)
     command.add_argument("--output", type=Path, required=True)
@@ -664,6 +868,17 @@ def main() -> int:
     try:
         if args.operation == "prepare":
             prepare(args.base_url, args.profile, args.scenario, args.state_file)
+        elif args.operation == "prepare-member":
+            prepare_member(args.base_url, args.profile, args.scenario, args.state_file)
+        elif args.operation == "verify-member":
+            verify_member(
+                args.base_url,
+                args.profile,
+                args.scenario,
+                args.state_file,
+                args.diagnostics_file,
+                args.observer_report,
+            )
         elif args.operation == "verify":
             verify(
                 args.base_url,
