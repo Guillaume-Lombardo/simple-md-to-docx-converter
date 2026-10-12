@@ -70,8 +70,8 @@ def test_shard_map_covers_the_complete_suite_once() -> None:
     assert "browser-recovery" in first
     assert "browser-next-conversion" in second
     assert "browser-next-conversion-restart-prepare" in second
-    assert "reverse_cli_workflow structured-pptx" in second
-    assert "browser-next-reversion structured" in second
+    assert "reverse_cli_workflow structured-pptx" in first
+    assert "browser-next-reversion structured" in first
     assert "reverse lifecycle broker-restart" in second
     assert "browser-next-reversion recovered" in second
 

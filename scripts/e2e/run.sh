@@ -2068,6 +2068,18 @@ e2e_phase_browser_session() {
     exit 1
   fi
 
+  # Opening a structured PPTX source in Composer needs the ready Composer
+  # connection configured above, so it stays with the Composer chain.
+  uv run python -m tests.e2e.reverse_cli_workflow \
+    --container "$application_name" --profile "$profile" --phase structured-pptx
+  podman cp "$application_name:/tmp/markweave-t83-edited.pptx" \
+    "$evidence_directory/markweave-t83-edited.pptx"
+  chmod a+r "$evidence_directory/markweave-t83-edited.pptx"
+  run_browser_test "$application_name" /e2e/browser-next-reversion.test.mjs \
+    --env MARKWEAVE_E2E_PROFILE="$profile" \
+    --env MARKWEAVE_E2E_REVERSE_PHASE=structured \
+    --env MARKWEAVE_E2E_STRUCTURED_PPTX_SOURCE=/evidence/markweave-t83-edited.pptx
+
   # Composer generations held before execution stay cancellable after restart.
   use_held_runtime
   run_browser_test "$application_name" /e2e/browser-next-composer-resilience.test.mjs \
@@ -2099,15 +2111,6 @@ e2e_phase_browser_workspaces() {
   run_browser_test "$application_name" /e2e/browser-next-reversion.test.mjs \
     --env MARKWEAVE_E2E_PROFILE="$profile" \
     --env MARKWEAVE_E2E_REVERSE_PHASE=primary
-  uv run python -m tests.e2e.reverse_cli_workflow \
-    --container "$application_name" --profile "$profile" --phase structured-pptx
-  podman cp "$application_name:/tmp/markweave-t83-edited.pptx" \
-    "$evidence_directory/markweave-t83-edited.pptx"
-  chmod a+r "$evidence_directory/markweave-t83-edited.pptx"
-  run_browser_test "$application_name" /e2e/browser-next-reversion.test.mjs \
-    --env MARKWEAVE_E2E_PROFILE="$profile" \
-    --env MARKWEAVE_E2E_REVERSE_PHASE=structured \
-    --env MARKWEAVE_E2E_STRUCTURED_PPTX_SOURCE=/evidence/markweave-t83-edited.pptx
   run_browser_test "$application_name" /e2e/browser-next-presentations.test.mjs
   run_browser_test "$application_name" /e2e/browser-next-local-images.test.mjs \
     --env MARKWEAVE_E2E_PROFILE="$profile"
