@@ -34,5 +34,6 @@ assets under `@fontsource-variable/recursive` and `@fontsource/open-sans`. Both
 retain their upstream SIL Open Font License 1.1 and copyright notices in the
 packages' `LICENSE` files installed by the frozen npm graph. These bundled assets
 are separate from the system Fontconfig inventory. The application adapter fixes
-its theme and font family to `default` and Liberation Sans; documents cannot
-select a bundled font, theme, icon pack or resource URL.
+its default theme and font family to `default` and Liberation Sans. Diagram
+styles still pass through the strict Mermaid renderer and image normalization;
+these bundled font assets do not expand the system Fontconfig inventory.

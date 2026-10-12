@@ -575,3 +575,69 @@ The existing Dependabot head and current main are ancestors of each local branch
 - The initial 48 native tests and 642 conversion/workflow tests pass; the final
   graph is requalified after its security and checksum corrections. Canonical
   Python suite and hosted final-image E2E remain pending.
+
+
+## Final local qualification for remaining Dependabot PRs
+
+- PR #294 is verified merged as f31640beb323a7c59474af608aa9ce25b9989352;
+  its main CI run 38255468046 passed all 19 jobs.
+- The frozen combined candidate a414ba19a2f2975b26863bc1d0ffc54644e91c0e
+  passes the canonical default command: 5,886 passed, 118 engine/runtime cases
+  deselected, 15 warnings, 4,562.93 seconds, exit zero.
+- Coverage is 94.36% total and 90.47% branches (8,591 of 9,496).
+  The changed-executable-line gate passes with zero executable changed lines;
+  protocol annotations are excluded and constant/argument changes are traced
+  through their unchanged enclosing statements, which executed in the suite.
+  This is not a claim of positive-line coverage from a zero-line denominator.
+- An earlier run was interrupted after 1,622 passes and five policy failures
+  because its imported workflow fingerprint preceded changes during execution.
+  That inconsistent run is not accepted; the fresh frozen run above supersedes it.
+- The latest Mermaid bot head 1ab86db07ccf89a307a1bd02196df4e78a572920
+  is integrated by normal merge. Its seven transitive package refreshes leave
+  application source identical to the full-suite candidate. Official registry
+  identities and licenses were independently reviewed. The final lock checksum
+  is 7c482e9ea57e31a772ac7004d24cab0cad11bbf1dd5911f3d4019a3202c1e3e2.
+- The refreshed graph passes 279 focused checks, 51 native document-engine
+  checks, and npm audit signatures (194 signatures, 54 attestations verified).
+  npm audit still exits one for four Low occurrences of the documented KaTeX
+  advisory; uv audit exits one for the same six baseline entries as main.
+- Final Mermaid image 888a9441cbb173acea1495e4874e7c67ed129d664d6559f10d45a210c78c9c25
+  and Python image 155d892c5504636f386466cfe1dd3bcfc0e606a530501d2f540ad8cfee8fc8ab
+  pass rootless smoke, local conversion E2E, standalone API conversion, and
+  distributed conversion/SIGTERM/lease-recovery E2E. The SDK 37 attester image
+  also builds and passes non-root import without activating Kubernetes.
+- An earlier Mermaid distributed harness execution exited 141 (SIGPIPE);
+  its unchanged image passed a diagnostic rerun. The refreshed final Mermaid
+  image passes all scripts on its first run, exit zero.
+- Ruff formatting/lint, ty, CI policy and hash-required packaging checks pass.
+  Direct-file CI validator invocation failed to resolve its scripts package;
+  the repository module invocation `uv run python -m scripts.ci.validate_ci`
+  succeeds. This invocation error required no source change.
+  The unrestricted host pytest suite is unavailable with Pandoc, Mermaid and
+  LibreOffice absent on PATH; actual native/container evidence is recorded above.
+  Hosted exact-head CI remains mandatory before merging; no E2E exception applies.
+- Independent review has no outstanding finding. Remote publication, squash
+  merges and cleanup await the explicit repository-required user approval.
+  T22 stays In Progress. Version 0.7.5 and published receipt digests are unchanged.
+
+### Prepared publication: `chore/T22-mermaid-12`
+
+Changed files relative to main:
+
+- `.github/workflows/ci.yml`
+- `docs/conversion-cli.md`
+- `docs/mermaid.md`
+- `docs/t00-toolchain-validation.md`
+- `scripts/ci/validate_ci.py`
+- `scripts/container/smoke.sh`
+- `scripts/generate_t11_pdf_golden.py`
+- `src/markweave/conversion/mermaid.py`
+- `src/markweave/conversion/runtime_manifest.py`
+- `tests/integration/document_engines/test_mermaid_cli.py`
+- `tests/test_ci_validation.py`
+- `tests/test_pnpm_workspace.py`
+- `tests/unit/conversion/test_mermaid.py`
+- `tickets/T22-finalize-cicd.md`
+- `toolchain/document-engines/THIRD_PARTY_NOTICES.md`
+- `toolchain/document-engines/package-lock.json`
+- `toolchain/document-engines/package.json`
