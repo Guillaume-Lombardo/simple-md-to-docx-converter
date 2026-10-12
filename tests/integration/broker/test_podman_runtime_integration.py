@@ -9,9 +9,10 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
+from pytest_mock import MockerFixture
 
 from markweave.broker import podman_runtime
-from markweave.broker.errors import BrokerError
+from markweave.broker.errors import BrokerError, BrokerErrorCategory
 from markweave.broker.inventory import SQLiteBrokerInventory
 from markweave.broker.models import (
     AuthenticatedPrincipal,
@@ -65,6 +66,7 @@ UNIT_IDS = (
     UUID("44444444-4444-4444-8444-444444444445"),
     UUID("44444444-4444-4444-8444-444444444446"),
     UUID("44444444-4444-4444-8444-444444444447"),
+    UUID("44444444-4444-4444-8444-444444444448"),
 )
 
 
@@ -461,6 +463,7 @@ def _runtime(
     hooks_directory: Path,
     command: Callable[..., tuple[int, bytes]] | None = None,
     emptiness_wait: CgroupEmptinessWait | None = None,
+    cgroup_read: Callable[[Path], bytes] | None = None,
 ) -> PodmanIsolationRuntime:
     environment = {
         key: os.environ[key]
@@ -491,18 +494,27 @@ def _runtime(
             )
         ),
         emptiness_wait=emptiness_wait,
+        cgroup_read=cgroup_read,
     )
 
 
-def _service(
-    tmp_path: Path, repository: str, policy: BrokerPolicy, unit_id: UUID
+def _service(  # noqa: PLR0913 - optional emptiness observation seams
+    tmp_path: Path,
+    repository: str,
+    policy: BrokerPolicy,
+    unit_id: UUID,
+    *,
+    emptiness_wait: CgroupEmptinessWait | None = None,
+    cgroup_read: Callable[[Path], bytes] | None = None,
 ) -> tuple[IsolationBrokerService, SQLiteBrokerInventory, PodmanIsolationRuntime]:
     inventory = SQLiteBrokerInventory(
         tmp_path / "inventory.sqlite3", b"i" * 32, max_records=8
     )
     hooks = tmp_path / "hooks"
     hooks.mkdir(mode=0o700, exist_ok=True)
-    runtime = _runtime(repository, hooks)
+    runtime = _runtime(
+        repository, hooks, emptiness_wait=emptiness_wait, cgroup_read=cgroup_read
+    )
     service = IsolationBrokerService(
         inventory,
         runtime,
@@ -755,22 +767,18 @@ def _systemd_run(*arguments: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-@pytest.mark.integration
-def test_empty_proof_refuses_a_persistent_unit_member_after_a_bounded_wait(
-    tmp_path: Path, controlled_image: tuple[str, str]
-) -> None:
-    repository, digest = controlled_image
-    unit_id = UNIT_IDS[6]
-    service, inventory, runtime = _service(
-        tmp_path, repository, _policy(digest), unit_id
-    )
-    attempt_id = UUID("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")
-    created = service.create(ReplayPosition(PRINCIPAL, 1), attempt_id)
-    runtime_unit = runtime.discover(limit=1)[0]
-    runtime.hard_terminate(runtime_unit)
-    runtime.confirm_exit(runtime_unit)
-    assert _await_cgroup_events(unit_id, EMPTY_CGROUP_EVENTS) == EMPTY_CGROUP_EVENTS
-    # A process that outlives the container keeps the whole-unit slice populated.
+MEMBER_SCRIPT = """\
+while [ ! -e "$1" ]; do
+  sleep 0.05
+done
+"""
+
+
+def _start_slice_member(unit_id: UUID, directory: Path, release: Path) -> str:
+    """Run a foreign process in the unit slice until ``release`` exists."""
+
+    script = directory / "slice-member.sh"
+    script.write_text(MEMBER_SCRIPT, encoding="ascii")
     member = f"markweave-t137-member-{unit_id.hex}.service"
     _systemd_run(
         "--user",
@@ -778,32 +786,169 @@ def test_empty_proof_refuses_a_persistent_unit_member_after_a_bounded_wait(
         f"--unit={member}",
         "--collect",
         "--quiet",
-        "/usr/bin/sleep",
-        "300",
+        "/bin/sh",
+        str(script),
+        str(release),
     )
+    assert _systemctl("--user", "is-active", member).stdout.strip() == "active"
+    return member
+
+
+def _await_member_stopped(member: str) -> None:
+    deadline = time.monotonic() + 10
+    state = "active"
+    while time.monotonic() < deadline:
+        state = _systemctl("--user", "is-active", member, check=False).stdout.strip()
+        if state != "active":
+            break
+        time.sleep(0.05)
+    assert state != "active"
+
+
+def _scope_populated(scope: Path) -> bool:
     try:
-        assert (
-            _await_cgroup_events(unit_id, POPULATED_CGROUP_EVENTS)
-            == POPULATED_CGROUP_EVENTS
-        )
-        bounded = _runtime(
-            repository,
-            tmp_path / "hooks",
-            emptiness_wait=CgroupEmptinessWait(1.0, 0.05),
-        )
-        started = time.monotonic()
-        with pytest.raises(PodmanRuntimeError, match="cgroup is not empty"):
-            bounded.confirm_empty(runtime_unit)
-        assert 1.0 <= time.monotonic() - started < 15
-        unproven = inventory.get(created.unit_id)
-        assert unproven is not None and unproven.state is ManagedUnitState.CREATED
+        events = (scope / "cgroup.events").read_text(encoding="ascii")
+    except FileNotFoundError:
+        return False
+    return events.startswith("populated 1\n")
+
+
+@pytest.mark.integration
+def test_terminate_waits_for_a_unit_member_that_exits_within_the_bound(
+    tmp_path: Path, controlled_image: tuple[str, str], mocker: MockerFixture
+) -> None:
+    repository, digest = controlled_image
+    unit_id = UNIT_IDS[6]
+    release = tmp_path / "release-member"
+    container_scope: list[Path] = []
+    observations: list[bytes] = []
+    release_observation: list[int] = []
+
+    def observing_read(path: Path) -> bytes:
+        value = podman_runtime._read_cgroup_events(path)
+        observations.append(value)
+        # Release the member only once the container's own processes are gone,
+        # so the broker must observe the still-populated slice and retry.
+        if (
+            container_scope
+            and not release.exists()
+            and not _scope_populated(container_scope[0])
+        ):
+            release_observation.append(len(observations) - 1)
+            release.touch()
+        return value
+
+    service, inventory, runtime = _service(
+        tmp_path, repository, _policy(digest), unit_id, cgroup_read=observing_read
+    )
+    attempt_id = UUID("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")
+    created = service.create(ReplayPosition(PRINCIPAL, 1), attempt_id)
+    runtime_unit = runtime.discover(limit=1)[0]
+    inspected = json.loads(
+        _podman(
+            "container", "inspect", runtime_unit.container_id, "--format", "json"
+        ).stdout
+    )[0]
+    container_scope.append(
+        Path("/sys/fs/cgroup") / inspected["State"]["CgroupPath"].lstrip("/")
+    )
+    assert _scope_populated(container_scope[0])
+    member = _start_slice_member(unit_id, tmp_path, release)
+    transitions = mocker.spy(inventory, "transition")
+    removals = mocker.spy(inventory, "mark_removed")
+    try:
+        observations.clear()
+        proof = service.terminate(PRINCIPAL, attempt_id, created.unit_id)
     finally:
         _systemctl("--user", "stop", member, check=False)
 
-    proof = service.terminate(PRINCIPAL, attempt_id, created.unit_id)
-
-    assert proof.unit_id == created.unit_id
+    assert len(release_observation) == 1
+    released_at = release_observation[0]
+    assert observations[released_at] == POPULATED_CGROUP_EVENTS.encode()
+    assert len(observations) > released_at + 1
+    assert observations[-1] == EMPTY_CGROUP_EVENTS.encode()
+    assert service.ready is True
+    assert [call.kwargs["target"] for call in transitions.call_args_list] == [
+        ManagedUnitState.EXIT_CONFIRMED,
+        ManagedUnitState.EMPTY_CONFIRMED,
+    ]
+    assert removals.call_count == 1
     retained = inventory.get(created.unit_id)
     assert retained is not None and retained.state is ManagedUnitState.REMOVED
+    assert inventory.get_proof(created.unit_id) == proof
+    assert proof.empty_evidence == retained.empty_evidence
+    assert service.proof(PRINCIPAL, attempt_id, created.unit_id) == proof
+    assert runtime.discover(limit=1) == ()
+    _assert_systemd_slice_clean(unit_id)
+
+
+@pytest.mark.integration
+def test_terminate_refuses_proof_until_reconciliation_after_a_member_outlives_the_bound(
+    tmp_path: Path, controlled_image: tuple[str, str], mocker: MockerFixture
+) -> None:
+    repository, digest = controlled_image
+    unit_id = UNIT_IDS[7]
+    release = tmp_path / "release-member"
+    service, inventory, runtime = _service(
+        tmp_path,
+        repository,
+        _policy(digest),
+        unit_id,
+        emptiness_wait=CgroupEmptinessWait(1.0, 0.05),
+    )
+    attempt_id = UUID("ffffffff-ffff-4fff-8fff-ffffffffffff")
+    created = service.create(ReplayPosition(PRINCIPAL, 1), attempt_id)
+    member = _start_slice_member(unit_id, tmp_path, release)
+    transitions = mocker.spy(inventory, "transition")
+    try:
+        started = time.monotonic()
+        with pytest.raises(BrokerError) as refused:
+            service.terminate(PRINCIPAL, attempt_id, created.unit_id)
+        assert refused.value.category is BrokerErrorCategory.TERMINATION_UNPROVEN
+        assert time.monotonic() - started >= 1.0
+        assert service.ready is False
+        with pytest.raises(BrokerError) as unavailable:
+            service.status(PRINCIPAL, attempt_id, created.unit_id)
+        assert unavailable.value.category is (
+            BrokerErrorCategory.RECONCILIATION_INCOMPLETE
+        )
+        unproven = inventory.get(created.unit_id)
+        assert unproven is not None
+        assert unproven.state is ManagedUnitState.EXIT_CONFIRMED
+        assert unproven.exit_evidence is not None
+        assert unproven.empty_evidence is None
+        assert inventory.get_proof(created.unit_id) is None
+
+        # While the member still holds the slice, a reconciliation sweep must
+        # neither prove emptiness nor restore readiness.
+        with pytest.raises(BrokerError) as sweep:
+            service.start()
+        assert sweep.value.category is BrokerErrorCategory.RECONCILIATION_INCOMPLETE
+        assert service.ready is False
+        swept = inventory.get(created.unit_id)
+        assert swept is not None and swept.state is ManagedUnitState.EXIT_CONFIRMED
+        assert inventory.get_proof(created.unit_id) is None
+
+        release.touch()
+        _await_member_stopped(member)
+    finally:
+        _systemctl("--user", "stop", member, check=False)
+
+    service.start()
+
+    assert service.ready is True
+    assert [call.kwargs["target"] for call in transitions.call_args_list] == [
+        ManagedUnitState.EXIT_CONFIRMED,
+        ManagedUnitState.EMPTY_CONFIRMED,
+    ]
+    reconciled = inventory.get(created.unit_id)
+    assert reconciled is not None and reconciled.state is ManagedUnitState.REMOVED
+    assert reconciled.exit_evidence == unproven.exit_evidence
+    proof = service.proof(PRINCIPAL, attempt_id, created.unit_id)
+    assert proof is not None and proof == inventory.get_proof(created.unit_id)
+    assert proof.empty_evidence == reconciled.empty_evidence
+    assert service.status(PRINCIPAL, attempt_id, created.unit_id).state is (
+        ManagedUnitState.REMOVED
+    )
     assert runtime.discover(limit=1) == ()
     _assert_systemd_slice_clean(unit_id)
