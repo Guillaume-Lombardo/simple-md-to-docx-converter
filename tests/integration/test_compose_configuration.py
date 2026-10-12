@@ -19,12 +19,12 @@ ROOT = Path(__file__).resolve().parents[2]
 CANDIDATE_BACKEND = "localhost/markweave-backend:t64"
 CANDIDATE_FRONTEND = "localhost/markweave-frontend:t64"
 PUBLISHED_BACKEND = (
-    "ghcr.io/guillaume-lombardo/md-converter:0.7.3@"
-    "sha256:c91f97d7c299ad84811876e52ae52350d1ad3b91bd190b4fffb801634729bc83"
+    "ghcr.io/guillaume-lombardo/md-converter:0.7.5@"
+    "sha256:237597e5aee89a744f29027e3ad0e10845296f435da8902d1ee5af2b7f591677"
 )
 PUBLISHED_FRONTEND = (
-    "ghcr.io/guillaume-lombardo/md-converter-web:0.7.3@"
-    "sha256:edee507cf70d15681bae0fe7f9d0755b607d557725fd06e6bd43771350dba9ba"
+    "ghcr.io/guillaume-lombardo/md-converter-web:0.7.5@"
+    "sha256:f628055556c61b04cfbd3202e32464ad38719d7b057ea87ed9b249e44c6d01ce"
 )
 
 
@@ -152,7 +152,7 @@ def test_composer_candidate_overlay_does_not_change_published_quickstart(
 
     published = render([])["services"]["markweave"]
     assert published["image"].startswith(
-        "ghcr.io/guillaume-lombardo/md-converter:0.7.3@sha256:"
+        "ghcr.io/guillaume-lombardo/md-converter:0.7.5@sha256:"
     )
     assert "MARKWEAVE_COMPOSER_ENABLED" not in published["environment"]
     assert not _load_rendered_settings(
