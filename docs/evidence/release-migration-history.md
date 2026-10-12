@@ -206,6 +206,28 @@ other version pair or source, and any extra or forged evidence fail closed. A su
 release must publish one fresh matched three-image set and adopt its actual public receipts before
 unrelated work. Existing container deployments keep their verified `0.7.3` configuration until then.
 
+## Published 0.7.5 corrective release
+
+PR #295 was squash-merged as `d54a9c5f9440205bc415e7a49c4583f502392c29`. Protected release run
+`38223418529` then completed successfully from that source: PyPI `markweave` `0.7.5` carries the
+wheel and sdist with PEP 740 attestations from `release.yml` in the `pypi` environment, tag
+`v0.7.5` and its GitHub Release target that source, and one matched schema-2 three-image set was
+published. Its `release-images.json` binds every role to version `0.7.5`, that source, and frontend
+lockfile digest `9c40e366fdf12532ba3f0d64a6172a55c633fd046c53a9739ff5d40da9a8c7f1`:
+
+| Role | Repository | Published `0.7.5` digest |
+| --- | --- | --- |
+| Backend | `ghcr.io/guillaume-lombardo/md-converter` | `sha256:237597e5aee89a744f29027e3ad0e10845296f435da8902d1ee5af2b7f591677` |
+| Frontend | `ghcr.io/guillaume-lombardo/md-converter-web` | `sha256:f628055556c61b04cfbd3202e32464ad38719d7b057ea87ed9b249e44c6d01ce` |
+| Reverse attempt | `ghcr.io/guillaume-lombardo/md-converter-reverse-attempt` | `sha256:104d35de4f75459ed5bab4583a5fc472d521247cc23a339ed9b8995296ec97bc` |
+
+Anonymous requests for the `0.7.5` and `source-d54a9c5f9440205bc415e7a49c4583f502392c29` tags and
+for each digest returned these exact digests, and each digest has SLSA provenance from
+`container-release.yml` on `refs/heads/main` at that source. The follow-up adoption change pins the
+backend and frontend receipts in Compose and the quickstarts and records the reverse-attempt digest
+for the native-broker deployment. The `0.7.4` to `0.7.5` exception above remains bound to its exact
+transition and cannot authorize another one; deployment-specific verification is a separate step.
+
 ## Next.js cutover and legacy rollback
 
 A release containing the T64 cutover adds a separately published frontend

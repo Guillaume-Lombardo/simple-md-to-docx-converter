@@ -12,10 +12,9 @@ slide-oriented Markdown or Marp from edited PPTX files. It requires a separately
 [capability matrix](docs/index.md#conversion-capabilities) for inputs, outputs, limits and guides.
 
 The project is licensed under [Apache-2.0](LICENSE). The source package version is `0.7.5`.
-The default public quickstart remains pinned to the matched published `0.7.3` backend and Next.js
-frontend images by their verified registry digests until 0.7.5 publication completes and records
-new receipts. Do not substitute candidate or inferred digests; candidate testing may override both
-image references together with another matched immutable pair.
+The default public quickstart pins the matched published `0.7.5` backend and Next.js frontend
+images by their verified registry digests. Do not substitute candidate or inferred digests;
+candidate testing may override both image references together with another matched immutable pair.
 
 The [documentation index](docs/index.md) provides longer guides organized by role. You do not need
 to read them before trying the local profile.
@@ -39,8 +38,8 @@ The first startup can take several minutes while ClamAV loads its signatures.
 
 For editable PowerPoint, open **2pptx** and follow the [PowerPoint guide](docs/powerpoint.md).
 The ordinary quickstart supports both forward workflows; **2md** requires the external broker.
-The currently pinned published 0.7.3 images keep Composer model setup disabled. An explicitly
-supplied, matched Composer-capable backend/frontend pair can opt in with
+The simple quickstart keeps Composer model setup disabled with the pinned published 0.7.5 images.
+An explicitly supplied, matched Composer-capable backend/frontend pair can opt in with
 `MARKWEAVE_SIMPLE_COMPOSER_SETUP=true`; the helper then includes
 `compose.simple-composer.yaml`. Its administrator can
 then open **Administration → LLM settings** to approve an HTTPS destination, enter a write-only

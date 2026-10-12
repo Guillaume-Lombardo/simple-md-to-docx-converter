@@ -8,9 +8,9 @@ personal-connection route for users with that permission.
 ## LLM settings
 
 Open **Administration → LLM settings** (`/admin/llm`) to configure Composer in a compatible
-deployment. The currently pinned published 0.7.3 simple quickstart does not include this setup;
-a matched Composer-capable image pair requires the explicit
-`MARKWEAVE_SIMPLE_COMPOSER_SETUP=true` opt-in until its published release pair is adopted. In that
+deployment. The simple quickstart with the pinned published 0.7.5 images does not include this
+setup by default; an explicitly supplied, matched Composer-capable image pair requires the
+`MARKWEAVE_SIMPLE_COMPOSER_SETUP=true` opt-in. In that
 standalone evaluation setup, the initial policy is disabled with no approved destination. Enter an HTTPS
 endpoint, preview the resolved addresses, then explicitly approve its exact host, port and
 individual addresses. The policy update uses `ETag`/`If-Match`; a stale page must reload before

@@ -36,17 +36,22 @@ claim. `deploy/distributed.yaml.example` separates `serve` API and `worker` depl
 PostgreSQL plus an AWS S3-compatible store. RustFS is the test implementation in
 `deploy/rustfs-ci.yaml`; there is no RustFS-specific application API.
 
-The repository's public Compose quickstart pins the matched `0.7.3` backend and Next.js frontend
+The repository's public Compose quickstart pins the matched `0.7.5` backend and Next.js frontend
 images by their verified registry digests. The backend starts its standalone role with
 `markweave serve`; the same-origin router exposes the browser and API routes. The deployment
 examples use `markweave serve` for API roles and `markweave worker` for distributed workers.
 
-Protected release run `35747017469` published the schema-2 `0.7.3` set from source
-`84e35fed521c61d34823d18767f47eb87253d4eb`. Its public registry manifest digests are:
+Protected release run `38223418529` published the schema-2 `0.7.5` set from source
+`d54a9c5f9440205bc415e7a49c4583f502392c29`. Its public registry manifest digests are:
 
-- backend: `sha256:c91f97d7c299ad84811876e52ae52350d1ad3b91bd190b4fffb801634729bc83`;
-- frontend: `sha256:edee507cf70d15681bae0fe7f9d0755b607d557725fd06e6bd43771350dba9ba`;
-- reverse attempt: `sha256:39f4a68358029977b6ec5ac6cb26fab88ac10e518016b42e8389abd54f517e61`.
+- backend: `sha256:237597e5aee89a744f29027e3ad0e10845296f435da8902d1ee5af2b7f591677`;
+- frontend: `sha256:f628055556c61b04cfbd3202e32464ad38719d7b057ea87ed9b249e44c6d01ce`;
+- reverse attempt: `sha256:104d35de4f75459ed5bab4583a5fc472d521247cc23a339ed9b8995296ec97bc`.
+
+No `0.7.4` image exists; see the
+[0.7.4 incident record](evidence/release-migration-history.md#incomplete-074-container-release).
+The previous `0.7.3` receipts are retained in the
+[release history](evidence/release-migration-history.md#release-incidents-and-receipts-through-073).
 
 The ordinary quickstarts remain reverse-disabled. Configure the reverse-attempt digest only in the
 documented native-broker deployment; do not add the broker or its runtime socket to Compose.
@@ -174,8 +179,8 @@ recorded. This reduces unused attack surface without altering the vulnerability 
 
 ## Approved Next.js cutover topology
 
-The public default pins the verified `0.7.3` image pair published from source
-`84e35fed521c61d34823d18767f47eb87253d4eb`. The deployment uses a separate frontend image and the
+The public default pins the verified `0.7.5` image pair published from source
+`d54a9c5f9440205bc415e7a49c4583f502392c29`. The deployment uses a separate frontend image and the
 literal one-origin routing, resource, probe, supply-chain, and rollback contract defined in
 [the reviewed Next.js migration architecture](nextjs-migration-architecture.md).
 
