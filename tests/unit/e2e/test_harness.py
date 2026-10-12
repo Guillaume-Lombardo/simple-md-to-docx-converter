@@ -893,13 +893,17 @@ def test_router_uses_current_numeric_frontend_address_during_scanner_outage() ->
     )
 
     outage_probe = runner.split("probe_scanner_outage_routes() {", 1)[1].split(
-        "\nadmission_frontend_origin() {", 1
+        "\nrequire_reserved_address() {", 1
     )[0]
     assert '["frontend_alias", "http://frontend:3000/login"]' in outage_probe
     assert '["frontend_numeric", `${process.env.E2E_FRONTEND_ORIGIN}/login`]' in (
         outage_probe
     )
-    assert 'name !== "frontend_alias" && status !== "200"' in outage_probe
+    assert (
+        'const required = new Set(["router_login", "frontend_numeric", '
+        '"backend_ready"]);'
+    ) in outage_probe
+    assert 'required.has(name) && status !== "200"' in outage_probe
 
 
 @pytest.mark.unit
@@ -1562,3 +1566,223 @@ def test_runner_invokes_local_image_packaging_in_both_profiles() -> None:
         "Document image exceeds configured limits.",
     ):
         assert scenario in workflow
+
+
+def _runner_function(runner: str, name: str, following: str) -> str:
+    body = runner.split(f"{name}() {{", 1)[1].split(f"\n{following}() {{", 1)[0]
+    return f"{name}() {{{body}"
+
+
+@pytest.mark.unit
+def test_scanner_outage_probe_is_a_documented_bounded_poll() -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    probe = _runner_function(
+        runner, "probe_scanner_outage_routes", "require_reserved_address"
+    )
+    rationale = runner.split("probe_scanner_outage_routes() {", 1)[0][-900:]
+
+    assert "const pollWindowMs = 20_000;" in probe
+    assert "const intervalMs = 250;" in probe
+    assert "AbortSignal.timeout(2000)" in probe
+    assert "if (Date.now() + intervalMs >= deadline) break;" in probe
+    assert "scanner-outage attempt ${attempt}" in probe
+    assert "scanner-outage route ${name} status=${status}" in probe
+    assert "scanner-outage attempts=${attempt} elapsed_ms=" in probe
+    assert '!required.has(name) || status === "200"' in probe
+    assert 'record_name_resolution "$application_name" >&2 || true' in probe
+    assert "A persistent failure of any required route still" in rationale
+    assert "real readiness or routing regression is not masked" in rationale
+    stop = runner.index('podman stop --time 5 "$clamav_name" >/dev/null')
+    assert runner.index("probe_scanner_outage_routes\n", stop) > stop
+
+
+@pytest.mark.unit
+@pytest.mark.container_runtime_guard_exempt(
+    reason="the bash script stubs podman with a shell function; no runtime starts"
+)
+@pytest.mark.parametrize(("probe_status", "expected_code"), [(0, 0), (1, 1)])
+def test_failed_scanner_outage_probe_records_name_resolution(
+    probe_status: int, expected_code: int
+) -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    probe = _runner_function(
+        runner, "probe_scanner_outage_routes", "require_reserved_address"
+    )
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            "set -euo pipefail\n"
+            'application_name="e2e-api"\n'
+            "admission_frontend_origin() { printf 'http://10.89.0.252:3000\\n'; }\n"
+            "record_name_resolution() {\n"
+            "  printf 'name-resolution for %s\\n' \"$1\"\n"
+            "}\n"
+            "podman() {\n"
+            "  printf 'probed %s\\n' \"$*\" | head -c 80; echo\n"
+            '  return "$PROBE_STATUS"\n'
+            "}\n"
+            f"{probe}\n"
+            "probe_scanner_outage_routes",
+            "bash",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ | {"PROBE_STATUS": str(probe_status)},
+    )
+
+    assert result.returncode == expected_code
+    assert "probed exec --env E2E_FRONTEND_ORIGIN=http://10.89.0.252:3000" in (
+        result.stdout
+    )
+    assert ("name-resolution for e2e-api" in result.stderr) is bool(probe_status)
+
+
+@pytest.mark.unit
+def test_name_resolution_record_covers_pinned_and_resolver_paths() -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    record = _runner_function(
+        runner, "record_name_resolution", "probe_scanner_outage_routes"
+    )
+    collector = runner.split("collect_failure_artifacts() {", 1)[1].split(
+        "\ncleanup() {", 1
+    )[0]
+
+    assert 'for name in ("postgres", "rustfs", "frontend", "e2e-clamav"):' in record
+    assert 'for query in (name, f"{name}.dns.podman"):' in record
+    assert '("getent", "ahosts", query)' in record
+    assert "timeout=5," in record
+    assert "elapsed_ms={elapsed}" in record
+    assert (
+        'for resource in "$application_name" "$worker_one_name" "$worker_two_name"; do'
+    ) in collector
+    assert 'record_name_resolution "$resource" \\' in collector
+    assert '"$artifact_directory/$resource.name-resolution.txt" 2>&1 || true' in (
+        collector
+    )
+
+
+def _reservation_program(runner: str) -> str:
+    return runner.split(
+        'reserved_addresses="$(podman network inspect "$network_name" '
+        "| uv run python -c '",
+        1,
+    )[1].split("\n')\"", 1)[0]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("subnet", "gateway", "expected"),
+    [
+        ("10.89.0.0/24", "10.89.0.1", "10.89.0.2 10.89.0.254 10.89.0.253 10.89.0.252"),
+        ("10.89.4.0/23", "10.89.4.1", "10.89.4.2 10.89.5.254 10.89.5.253 10.89.5.252"),
+        ("10.89.0.0/29", "10.89.0.1", "10.89.0.2 10.89.0.6 10.89.0.5 10.89.0.4"),
+        ("10.89.0.0/30", "10.89.0.1", None),
+        ("10.89.0.0/29", "10.89.0.5", None),
+    ],
+)
+def test_e2e_network_reserves_distinct_usable_peer_addresses(
+    subnet: str, gateway: str, expected: str | None
+) -> None:
+    program = _reservation_program(RUNNER.read_text(encoding="utf-8"))
+    inspected = f'[{{"subnets": [{{"subnet": "{subnet}", "gateway": "{gateway}"}}]}}]'
+    result = subprocess.run(
+        [sys.executable, "-c", program],
+        check=False,
+        capture_output=True,
+        input=inspected,
+        text=True,
+    )
+
+    if expected is None:
+        assert result.returncode != 0
+        assert "no usable reserved IPv4 addresses" in result.stderr
+    else:
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == f"{expected}\n"
+
+
+@pytest.mark.unit
+def test_storage_and_frontend_peers_use_reserved_addresses_and_host_entries() -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    start_frontend = _runner_function(
+        runner, "start_frontend", "record_name_resolution"
+    )
+    mapping = runner.split("# Pin the remaining peers the same way.", 1)[1].split(
+        "\nreverse_digest=", 1
+    )[0]
+
+    assert (
+        "read -r scanner_static_address postgres_static_address rustfs_static_address \\\n"
+        '  frontend_static_address <<<"$reserved_addresses"'
+    ) in runner
+    assert '--network-alias postgres --ip "$postgres_static_address"' in runner
+    assert '--network-alias rustfs --ip "$rustfs_static_address"' in runner
+    assert runner.count('--network-alias frontend --ip "$frontend_static_address"') == 2
+    assert "--network-alias frontend --user" not in runner
+    assert (
+        'require_reserved_address "$frontend_name" "$frontend_static_address"'
+        in start_frontend
+    )
+    for name in ("postgres", "rustfs"):
+        check = f'require_reserved_address "${name}_name" "${name}_static_address"'
+        assert runner.count(check) == 2
+        start = runner.index(f'podman start "${name}_name" >/dev/null')
+        assert runner.index(check, start) > start
+    assert 'service_host_mapping=(--add-host "frontend:$frontend_static_address")' in (
+        mapping
+    )
+    assert '--add-host "postgres:$postgres_static_address"' in mapping
+    assert '--add-host "rustfs:$rustfs_static_address"' in mapping
+    assert 'scanner_host_mapping+=("${service_host_mapping[@]}")' in mapping
+    application_runs = runner.count(
+        "--network-alias application --publish 127.0.0.1::8080 \\\n"
+    )
+    assert application_runs == runner.count(
+        "--network-alias application --publish 127.0.0.1::8080 \\\n"
+        '  "${scanner_host_mapping[@]}" \\\n'
+    ) + runner.count(
+        "--network-alias application --publish 127.0.0.1::8080 \\\n"
+        '    "${scanner_host_mapping[@]}" \\\n'
+    ) + runner.count(
+        "--network-alias application --publish 127.0.0.1::8080 \\\n"
+        '  "${service_host_mapping[@]}" \\\n'
+    )
+    assert runner.count('      "${scanner_host_mapping[@]}" \\\n') == 1
+
+
+@pytest.mark.unit
+@pytest.mark.container_runtime_guard_exempt(
+    reason="the bash script stubs podman with a shell function; no runtime starts"
+)
+@pytest.mark.parametrize(
+    ("inspected", "expected_code"), [("10.89.0.253", 0), ("10.89.0.7", 1)]
+)
+def test_reserved_address_check_rejects_a_moved_peer(
+    inspected: str, expected_code: int
+) -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    check = _runner_function(
+        runner, "require_reserved_address", "admission_frontend_origin"
+    )
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            "set -euo pipefail\n"
+            'network_name="e2e-network"\n'
+            "podman() { printf '%s\\n' \"$INSPECTED_ADDRESS\"; }\n"
+            f"{check}\n"
+            "require_reserved_address e2e-rustfs 10.89.0.253",
+            "bash",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ | {"INSPECTED_ADDRESS": inspected},
+    )
+
+    assert result.returncode == expected_code
+    if expected_code:
+        assert "did not keep its reserved E2E network address" in result.stderr

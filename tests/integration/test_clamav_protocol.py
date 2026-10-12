@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import runpy
+import signal
 import socket
 import socketserver
+import subprocess
+import sys
 from threading import Thread
 from typing import cast
 
@@ -78,3 +81,35 @@ def test_container_fake_clamav_answers_health_and_scan_protocols() -> None:
             server.shutdown()
             thread.join(timeout=2)
         assert not thread.is_alive()
+
+
+@pytest.mark.integration
+def test_container_fake_clamav_exits_cleanly_on_sigterm() -> None:
+    launcher = (
+        "import runpy, sys\n"
+        "namespace = runpy.run_path(sys.argv[1])\n"
+        "server = namespace['Server'](('127.0.0.1', 0), namespace['Handler'])\n"
+        "namespace['stop_on_sigterm'](server)\n"
+        "print(server.server_address[1], flush=True)\n"
+        "server.serve_forever()\n"
+        "server.server_close()\n"
+    )
+    process = subprocess.Popen(
+        [sys.executable, "-c", launcher, "scripts/container/fake-clamav.py"],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert process.stdout is not None
+        port = int(process.stdout.readline())
+        with socket.create_connection(("127.0.0.1", port), timeout=2) as connection:
+            connection.sendall(b"zPING\0")
+            assert connection.recv(64) == b"PONG\0"
+        process.send_signal(signal.SIGTERM)
+        assert process.wait(timeout=5) == 0
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+        if process.stdout is not None:
+            process.stdout.close()
