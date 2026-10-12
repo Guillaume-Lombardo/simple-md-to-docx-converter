@@ -200,7 +200,7 @@ manifest. `--require-pinned` turns that warning into an `engine_version_unpinned
 any document engine runs.
 
 The approved pins are the qualified component versions the service records for every job
-(`COMPONENT_VERSIONS`): Pandoc 3.10.2, LibreOffice 26.2.5.2, Mermaid CLI 11.17.0, and Chromium
+(`COMPONENT_VERSIONS`): Pandoc 3.10.2, LibreOffice 26.2.5.2, Mermaid CLI 12.0.0, and Chromium
 151.0.7922.173. The final image ships exactly these engines, so `--require-pinned` accepts every
 supported document there, including documents with Mermaid diagrams.
 
