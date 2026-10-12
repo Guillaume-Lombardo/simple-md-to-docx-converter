@@ -16,6 +16,7 @@ from scripts.testing import services
 pytestmark = pytest.mark.unit
 
 NOW = 1_800_000_000
+DEFERRED = (signal.SIGINT, signal.SIGTERM)
 PROJECT = "markweave-tests-" + "a" * 32
 OTHER = "markweave-tests-" + "b" * 32
 
@@ -269,23 +270,55 @@ def test_interrupt_during_removal_waits_until_removal_is_recorded(
 
     mocker.patch.object(services, "_compose", side_effect=compose)
     mocker.patch.object(services, "prepare_bucket")
-    with pytest.raises(KeyboardInterrupt), services.distributed_services():
-        pass
+    handlers = {signum: signal.getsignal(signum) for signum in DEFERRED}
+    previous = signal.signal(signal.SIGINT, signal.default_int_handler)
+    try:
+        with pytest.raises(KeyboardInterrupt), services.distributed_services():
+            pass
+    finally:
+        signal.signal(signal.SIGINT, previous)
     assert finished == ["down"]
     assert not services._OWNED
     assert not list(services.lock_directory().iterdir())
-    assert signal.SIGINT not in signal.pthread_sigmask(signal.SIG_BLOCK, ())
+    assert {signum: signal.getsignal(signum) for signum in DEFERRED} == handlers
+
+
+def test_deferred_sigterm_reaches_the_restored_handler() -> None:
+    """A SIGTERM during removal is raised again once removal has finished."""
+    received: list[str] = []
+
+    def handler(signum: int, frame: object) -> None:
+        del signum, frame
+        received.append("handled")
+
+    previous = signal.signal(signal.SIGTERM, handler)
+    try:
+        with services._deferred_interrupts():
+            os.kill(os.getpid(), signal.SIGTERM)
+            received.append("finished")
+        assert received == ["finished", "handled"]
+        assert signal.getsignal(signal.SIGTERM) is handler
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
+def test_handlers_installed_outside_python_are_left_alone(
+    mocker: MockerFixture,
+) -> None:
+    mocker.patch.object(services.signal, "getsignal", return_value=None)
+    install = mocker.spy(services.signal, "signal")
+    with services._deferred_interrupts():
+        pass
+    install.assert_not_called()
 
 
 def test_compose_interrupts_are_not_deferred_outside_the_main_thread(
     mocker: MockerFixture,
 ) -> None:
     mocker.patch.object(services.threading, "current_thread", return_value=object())
-    mask = mocker.spy(services.signal, "pthread_sigmask")
     install = mocker.spy(services.signal, "signal")
     with services._deferred_interrupts(), services._sigterm_as_interrupt():
         pass
-    mask.assert_not_called()
     install.assert_not_called()
 
 

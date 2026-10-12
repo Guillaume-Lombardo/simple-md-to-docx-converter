@@ -63,7 +63,7 @@ _PROJECT_FORMAT = "\t".join(
     for label in ("com.docker.compose.project", *OWNERSHIP_LABELS)
 )
 _LISTINGS = (("container", "ls", "--all"), ("volume", "ls"), ("network", "ls"))
-_DEFERRED_SIGNALS = frozenset({signal.SIGINT, signal.SIGTERM})
+_DEFERRED_SIGNALS = (signal.SIGINT, signal.SIGTERM)
 # Projects this process owns, with their Compose environment, for the exit net.
 _OWNED: dict[str, dict[str, str]] = {}
 
@@ -157,15 +157,36 @@ def _close_lock(descriptor: int, path: Path, *, remove: bool) -> None:
 
 @contextmanager
 def _deferred_interrupts() -> Generator[None]:
-    """Deliver SIGINT and SIGTERM only after the protected block has finished."""
+    """Deliver SIGINT and SIGTERM only after the protected block has finished.
+
+    Python runs signal handlers in the main thread whichever thread the kernel
+    picks, so replacing the handlers defers the signals even in processes with
+    other threads, such as pytest-xdist workers. The first deferred signal is
+    raised again once the previous handlers are back.
+    """
     if threading.current_thread() is not threading.main_thread():
         yield
         return
-    previous = signal.pthread_sigmask(signal.SIG_BLOCK, _DEFERRED_SIGNALS)
+    pending: list[int] = []
+
+    def defer(signum: int, frame: FrameType | None) -> None:
+        del frame
+        pending.append(signum)
+
+    previous = {
+        signum: handler
+        for signum in _DEFERRED_SIGNALS
+        if (handler := signal.getsignal(signum)) is not None
+    }
+    for signum in previous:
+        signal.signal(signum, defer)
     try:
         yield
     finally:
-        signal.pthread_sigmask(signal.SIG_SETMASK, previous)
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+        if pending:
+            signal.raise_signal(pending[0])
 
 
 def _interrupt(signum: int, frame: FrameType | None) -> None:
