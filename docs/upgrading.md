@@ -28,7 +28,7 @@ has no qualified published container set; see the [incident record](evidence/rel
 Version `0.7.4` was published to PyPI only and has no container images; container deployments
 upgrade from `0.7.3` directly to `0.7.5`. See the
 [0.7.4 incident record](evidence/release-migration-history.md#incomplete-074-container-release).
-The repository quickstarts pin the matched published `0.7.3` backend/frontend images. Reverse-enabled
+The repository quickstarts pin the matched published `0.7.5` backend/frontend images. Reverse-enabled
 deployments also require the matching reverse-attempt image and native broker.
 
 ## Upgrade procedure
@@ -137,9 +137,16 @@ the deleted files from your `-f` list; every supported mode renders the same con
 before. The image override variables `MARKWEAVE_CUTOVER_BACKEND_IMAGE` and
 `MARKWEAVE_CUTOVER_FRONTEND_IMAGE` are unchanged.
 
-The repository quickstarts keep their verified `0.7.3` image pins until the `0.7.5` images are
-published and their exact receipts are adopted. Do not run a `0.7.4` or `0.7.5` package against
-`0.7.3` images, invent a `0.7.4` image digest, or substitute an inferred `0.7.5` digest.
+Protected release run `38223418529` published the matched schema-2 `0.7.5` backend, frontend and
+reverse-attempt images from source `d54a9c5f9440205bc415e7a49c4583f502392c29`. The repository
+Compose file and quickstarts now pin the exact verified `0.7.5` receipts: backend
+`sha256:237597e5aee89a744f29027e3ad0e10845296f435da8902d1ee5af2b7f591677` and frontend
+`sha256:f628055556c61b04cfbd3202e32464ad38719d7b057ea87ed9b249e44c6d01ce`. Reverse-enabled
+deployments configure the native broker with the reverse-attempt digest
+`sha256:104d35de4f75459ed5bab4583a5fc472d521247cc23a339ed9b8995296ec97bc`. Existing deployments
+keep their verified `0.7.3` configuration until they adopt these exact pins and complete
+deployment-specific verification. Do not run a `0.7.4` or `0.7.5` package against `0.7.3` images
+or invent a `0.7.4` image digest.
 
 ## Configuration compatibility
 
