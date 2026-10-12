@@ -2154,68 +2154,61 @@ def test_release_policy_rejects_extra_job_and_dependency(
 
 
 @pytest.mark.unit
-def test_release_policy_rejects_missing_repository_guard(
-    valid_release_workflow: str,
+@pytest.mark.parametrize(
+    ("needle", "replacement"),
+    [
+        (
+            "    if: ${{ github.repository == "
+            "'Guillaume-Lombardo/simple-md-to-docx-converter' }}\n",
+            "",
+        ),
+        (
+            "simple-md-to-docx-converter' }}",
+            "simple-md-to-docx-converter' || true }}",
+        ),
+        (
+            "github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter'",
+            "!(github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter')",
+        ),
+    ],
+    ids=["missing", "always-true-disjunction", "negated"],
+)
+def test_release_policy_rejects_missing_or_neutralized_repository_guard(
+    valid_release_workflow: str, needle: str, replacement: str
 ) -> None:
-    """Every release job is tied to the intended upstream repository."""
-    weakened = valid_release_workflow.replace(
-        "    if: ${{ github.repository == "
-        "'Guillaume-Lombardo/simple-md-to-docx-converter' }}\n",
-        "",
-        1,
-    )
+    """Every release job is tied to the intended upstream repository.
+
+    A trusted comparison can be neither removed, neutralized by an always-true
+    disjunction, nor accepted inside a negated expression.
+    """
+    weakened = valid_release_workflow.replace(needle, replacement, 1)
     errors = validate_release_workflow_text(weakened, policy=RELEASE_POLICY)
     assert "release job 'build-and-verify' lacks the trusted repository guard" in errors
 
 
 @pytest.mark.unit
-def test_release_policy_rejects_bypassable_repository_guard(
-    valid_release_workflow: str,
+@pytest.mark.parametrize(
+    ("needle", "replacement"),
+    [
+        (
+            f"pypa/gh-action-pypi-publish@{FULL_SHA_E}",
+            "pypa/gh-action-pypi-publish@release/v1",
+        ),
+        (
+            f"uses: pypa/gh-action-pypi-publish@{FULL_SHA_E}",
+            "uses : pypa/gh-action-pypi-publish@release/v1",
+        ),
+    ],
+    ids=["mutable-ref", "mutable-ref-with-spaced-key"],
+)
+def test_release_policy_rejects_mutable_action(
+    valid_release_workflow: str, needle: str, replacement: str
 ) -> None:
-    """A trusted comparison cannot be neutralized by an always-true disjunction."""
-    weakened = valid_release_workflow.replace(
-        "simple-md-to-docx-converter' }}",
-        "simple-md-to-docx-converter' || true }}",
-        1,
-    )
-    errors = validate_release_workflow_text(weakened, policy=RELEASE_POLICY)
-    assert "release job 'build-and-verify' lacks the trusted repository guard" in errors
+    """Release actions follow the immutable full-SHA policy of CI.
 
-
-@pytest.mark.unit
-def test_release_policy_rejects_negated_repository_guard(
-    valid_release_workflow: str,
-) -> None:
-    """The trusted comparison cannot be accepted inside a negated expression."""
-    weakened = valid_release_workflow.replace(
-        "github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter'",
-        "!(github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter')",
-        1,
-    )
-    errors = validate_release_workflow_text(weakened, policy=RELEASE_POLICY)
-    assert "release job 'build-and-verify' lacks the trusted repository guard" in errors
-
-
-@pytest.mark.unit
-def test_release_policy_rejects_mutable_action(valid_release_workflow: str) -> None:
-    """Release actions follow the same immutable full-SHA policy as CI."""
-    weakened = valid_release_workflow.replace(
-        f"pypa/gh-action-pypi-publish@{FULL_SHA_E}",
-        "pypa/gh-action-pypi-publish@release/v1",
-    )
-    errors = validate_release_workflow_text(weakened, policy=RELEASE_POLICY)
-    assert any("every action reference must be pinned" in error for error in errors)
-
-
-@pytest.mark.unit
-def test_release_policy_rejects_mutable_action_with_spaced_key(
-    valid_release_workflow: str,
-) -> None:
-    """Release pinning is based on parsed action fields, not lexical layout."""
-    weakened = valid_release_workflow.replace(
-        f"uses: pypa/gh-action-pypi-publish@{FULL_SHA_E}",
-        "uses : pypa/gh-action-pypi-publish@release/v1",
-    )
+    Pinning is based on parsed action fields, not on lexical layout.
+    """
+    weakened = valid_release_workflow.replace(needle, replacement)
     errors = validate_release_workflow_text(weakened, policy=RELEASE_POLICY)
     assert any("every action reference must be pinned" in error for error in errors)
 

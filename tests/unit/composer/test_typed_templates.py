@@ -125,6 +125,41 @@ def test_missing_nested_required_path(
         lambda data: data["repeats"][0]["fields"].append(
             copy.deepcopy(data["repeats"][0]["fields"][0])
         ),
+        lambda data: data["fields"][0]["constraints"].update(min_length=-1),
+        lambda data: data["fields"][0]["constraints"].update(min_length=41),
+        lambda data: data["fields"][0]["constraints"].update(enum=["A", "A"]),
+        lambda data: data["fields"][0]["constraints"].update(enum=[""]),
+        lambda data: data["fields"][1]["constraints"].update(maximum="2025-01-01"),
+        lambda data: data["fields"][1]["constraints"].update(minimum="2026-02-31"),
+        lambda data: data["repeats"][0]["fields"][1]["constraints"].update(
+            minimum=True
+        ),
+        lambda data: data["repeats"][0]["fields"][1]["constraints"].update(minimum=11),
+        lambda data: data["repeats"][0]["fields"][0].update(name="bad.name"),
+        lambda data: data["repeats"][0].update(fields=[]),
+        lambda data: data.update(fields="wrong"),
+        lambda data: data.update(fields=[], repeats=[]),
+    ],
+    ids=[
+        "extra-top-level-field",
+        "duplicate-field",
+        "unsupported-type",
+        "empty-default",
+        "pattern-constraint",
+        "repeat-max-items-above-limit",
+        "duplicate-repeat-field",
+        "negative-min-length",
+        "min-length-above-max-length",
+        "duplicate-enum",
+        "empty-enum-value",
+        "maximum-before-minimum-date",
+        "impossible-minimum-date",
+        "boolean-minimum",
+        "minimum-above-maximum",
+        "invalid-repeat-field-name",
+        "empty-repeat-fields",
+        "non-list-fields",
+        "no-fields-or-repeats",
     ],
 )
 def test_malformed_schema_rejected(
@@ -151,6 +186,20 @@ def test_malformed_schema_rejected(
             "findings[0].score",
         ),
         ({"author": "Ada", "findings": []}, "findings"),
+        ({"author": "Ada", "due": "2025-12-31", "findings": [{"title": "A"}]}, "due"),
+        ({"author": "Ada", "due": "2027-01-01", "findings": [{"title": "A"}]}, "due"),
+        ({"author": "Ada\n", "findings": [{"title": "A"}]}, "author"),
+        ({"author": 4, "findings": [{"title": "A"}]}, "author"),
+        ({"author": "X" * 41, "findings": [{"title": "A"}]}, "author"),
+        (
+            {"author": "Ada", "findings": [{"title": "A", "score": 11}]},
+            "findings[0].score",
+        ),
+        (
+            {"author": "Ada", "findings": [{"title": "A", "score": -1}]},
+            "findings[0].score",
+        ),
+        ({"author": "Ada", "findings": [{"title": "A", "extra": "x"}]}, "findings[0]"),
     ],
 )
 def test_invalid_values_rejected(
@@ -210,69 +259,6 @@ def test_bounded_schema_and_value_json(
     with pytest.raises(TypedTemplateError) as rejected:
         validate_values(parsed, {"author": "Ada", "findings": [{"title": "A"}]})
     assert rejected.value.code == "limit_exceeded"
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize(
-    "change",
-    [
-        lambda data: data["fields"][0]["constraints"].update(min_length=-1),
-        lambda data: data["fields"][0]["constraints"].update(min_length=41),
-        lambda data: data["fields"][0]["constraints"].update(enum=["A", "A"]),
-        lambda data: data["fields"][0]["constraints"].update(enum=[""]),
-        lambda data: data["fields"][1]["constraints"].update(maximum="2025-01-01"),
-        lambda data: data["fields"][1]["constraints"].update(minimum="2026-02-31"),
-        lambda data: data["repeats"][0]["fields"][1]["constraints"].update(
-            minimum=True
-        ),
-        lambda data: data["repeats"][0]["fields"][1]["constraints"].update(minimum=11),
-        lambda data: data["repeats"][0]["fields"][0].update(name="bad.name"),
-        lambda data: data["repeats"][0].update(fields=[]),
-        lambda data: data.update(fields="wrong"),
-        lambda data: data.update(fields=[], repeats=[]),
-    ],
-)
-def test_constraint_contract_rejected(
-    schema: dict[str, object],
-    limits: TypedDocxLimits,
-    change: Callable[[dict[str, object]], object],
-) -> None:
-    change(schema)
-    with pytest.raises(TypedTemplateError) as rejected:
-        parse_schema(schema, limits)
-    assert rejected.value.code == "invalid_schema"
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize(
-    "values,path",
-    [
-        ({"author": "Ada", "due": "2025-12-31", "findings": [{"title": "A"}]}, "due"),
-        ({"author": "Ada", "due": "2027-01-01", "findings": [{"title": "A"}]}, "due"),
-        ({"author": "Ada\n", "findings": [{"title": "A"}]}, "author"),
-        ({"author": 4, "findings": [{"title": "A"}]}, "author"),
-        ({"author": "X" * 41, "findings": [{"title": "A"}]}, "author"),
-        (
-            {"author": "Ada", "findings": [{"title": "A", "score": 11}]},
-            "findings[0].score",
-        ),
-        (
-            {"author": "Ada", "findings": [{"title": "A", "score": -1}]},
-            "findings[0].score",
-        ),
-        ({"author": "Ada", "findings": [{"title": "A", "extra": "x"}]}, "findings[0]"),
-    ],
-)
-def test_more_invalid_value_paths(
-    schema: dict[str, object],
-    limits: TypedDocxLimits,
-    values: dict[str, object],
-    path: str,
-) -> None:
-    with pytest.raises(TypedTemplateError) as rejected:
-        validate_values(parse_schema(schema, limits), values)
-    assert rejected.value.code == "invalid_value"
-    assert rejected.value.paths == (path,)
 
 
 @pytest.mark.unit
