@@ -541,3 +541,38 @@ The existing Dependabot head and current main are ancestors of each local branch
 - T22 remains In Progress while Mermaid #274 awaits its adapter migration
   and engine/golden/final-image qualification. The published version remains
   0.7.5 and Compose receipt digests remain unchanged.
+
+
+## Remaining Actions update (#299)
+
+- Dependabot opened #299 during remaining-PR qualification. Prepare it on
+  `chore/T22-setup-uv-10.3`, based on main f31640b and the existing bot head.
+- Update all 11 setup-uv uses in four workflows to the official v10.3.0 commit
+  1c37ad07a6a961277cf70c0d37d6f313000f5884; retain the pinned uv 0.12.1,
+  Node 24 runtime, inputs, cache settings, triggers and permissions.
+- Upstream architecture selection returns immediately when the new input is
+  empty, as in this repository; its uv 0.13 requirement is not activated.
+- Refresh CI/mutation semantic hashes and release/container exact-text hashes.
+  The unchanged pair-publisher script keeps its existing hash. Initial hash
+  assignment used the wrong policy/hash mode, which validation rejected;
+  correct assignment passes the repository module validator.
+- All 201 policy tests pass. The initial focused invocation also applied global
+  application coverage, exiting one despite those passes (3.92% total);
+  a focused rerun disables coverage collection only. Whole-application coverage
+  remains mandatory in hosted CI. No application source changes in this PR.
+- uv sync, Ruff formatting/lint, ty, CI policy and diff whitespace checks pass.
+  Independent upstream/source review has no outstanding finding.
+- Hosted exact-head execution remains required before squash merge. No remote
+  update, publication or merge has occurred; explicit user approval is pending.
+- T22 stays In Progress; project.version and public receipts are unchanged.
+
+### Prepared publication: `chore/T22-setup-uv-10.3`
+
+Changed files relative to main:
+
+- `.github/workflows/ci.yml`
+- `.github/workflows/container-release.yml`
+- `.github/workflows/mutation.yml`
+- `.github/workflows/release.yml`
+- `scripts/ci/validate_ci.py`
+- `tickets/T22-finalize-cicd.md`
