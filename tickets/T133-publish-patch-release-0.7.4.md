@@ -1,13 +1,13 @@
 ---
 ticket: T133
 linear_id: G1L-686
-linear_url: https://linear.app/g1lom/issue/G1L-686/t133-publish-patch-release-074
+linear_url: https://linear.app/g1lom/issue/G1L-686/t133-publish-patch-release-074-and-corrective-075
 status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
 
-# T133 - Publish patch release 0.7.4
+# T133 - Publish patch release 0.7.4 and corrective 0.7.5
 
 ## Objective
 
@@ -37,6 +37,22 @@ T128 and T129 mirrors.
   any release-owned quickstart command migration. No unrelated work is integrated while the
   published PyPI version and the public Compose pin differ.
 
+## Corrective 0.7.5 release (owner decision 2026-10-12)
+
+The 0.7.4 release run 38182704382 published only the Python package, tag and GitHub Release. The
+frontend image failed the Critical vulnerability gate on `next` 16.3.4 (GHSA-vcvr-r3jv-pc5j, fixed
+in 16.3.6) before any registry mutation, so container-only recovery is impossible. The owner chose
+a corrective 0.7.5 release:
+
+- Upgrade `next` to at least 16.3.8, along with the other frontend dependencies that have an
+  available fix for a High or Critical advisory, within compatible ranges.
+- Add a reviewed, tested, one-time `public_alignment` exception for the exact Python-only partial
+  0.7.4 to 0.7.5 transition, modelled on the 0.7.2 to 0.7.3 exception.
+- Record the 0.7.4 incident in the release history.
+- Move the version to 0.7.5 following `docs/releasing.md`.
+- After the protected merge, monitor the release. On success, adopt the exact 0.7.5 GHCR receipt
+  digests in Compose in the follow-up PR.
+
 ## Dependencies
 
 - T106, T128 and T129 verified on `main`.
@@ -65,6 +81,46 @@ T128 and T129 mirrors.
   Compose, the quickstart helpers and the published-image documentation stay pinned to the
   verified 0.7.3 receipts, as the public-alignment version transition requires, until the
   adoption follow-up. No publication has occurred.
+- 2026-10-12: PR #293 was squash-merged as `5d0ac0bb329018fa3a88d7ba516e575de9abc100`; main CI
+  run 38182704347 succeeded. Release run 38182704382 then completed `detect`, `build-and-verify`,
+  `create-release` and `publish`: PyPI `markweave` 0.7.4 is published and tag `v0.7.4` and its
+  GitHub Release (no assets) target that source. Job `container / build-and-publish`
+  (114598666127) failed at "Generate and verify release SBOM evidence for all three images" with
+  `error: fixable Critical vulnerabilities found`: the backend image passed and the frontend image
+  `md-converter-web` failed on `next` 16.3.4 (GHSA-vcvr-r3jv-pc5j). The failure happened before
+  staging retention and any registry mutation; the run retained only artifact 11718675473
+  (`python-release-v0.7.4`), and GHCR has no `0.7.4` tag in any of the three repositories. The
+  container-only recovery path is impossible. The incident is recorded in
+  `docs/evidence/release-migration-history.md`.
+- 2026-10-12: Owner decision: corrective release 0.7.5 in one pull request. Branch
+  `fix/T133-release-0.7.5` upgrades `next` and `eslint-config-next` to 16.3.8 and moves `sharp`,
+  `undici`, `brace-expansion`, `js-yaml` and `source-map-js` to fixed releases (a scoped
+  `brace-expansion@5` override and the bumped `js-yaml` override in `pnpm-workspace.yaml`). The
+  pinned Grype 0.116.1 reports no High or Critical fixable finding over `pnpm-lock.yaml` and `web/`;
+  the only remaining fixable findings are Low ones in the untouched `toolchain/document-engines`
+  npm lock. A locally built frontend image passed the rootless smoke and
+  `scripts/container/supply-chain.sh` in release mode. `scripts/release/public_alignment.py` adds a
+  one-time exception for the exact partial 0.7.4 to 0.7.5 transition, bound to the source, failed
+  run, Python artifact ID, name and digest, asset-free Release and GHCR tag absence; the 0.7.2
+  exception is unchanged. The version moves to 0.7.5 with release attempt 1; Compose and the
+  quickstarts stay on the verified 0.7.3 receipts until the 0.7.5 adoption follow-up.
+- 2026-10-12: Independent review round 1 of PR #295 at `a98a120` found that hosted CI run
+  38215120037 failed `CI / container` (job 114698006421) and `CI / e2e-distributed` (job
+  114698006523) at the backend RPM inventory gate: the build produced
+  `92063803ffaf534054d2d198abd814d08f22626a4238cb126e03376fb102a99e` instead of the reviewed
+  `2b02ce10a0d8955ff1817b56323d6dd7e091c1d1316b11700e0f87d24319dc90`. The inventory extracted
+  from the main `00a98ec` backend image reproduces the reviewed digest. A cache-free local backend
+  build reproduces the hosted digest, and the only change is `curl-minimal`, `libcurl-minimal` and
+  `libcurl-devel` moving from `0:7.76.1-40.el9_8.7` to `0:7.76.1-40.el9_8.8`. All other 546 rows,
+  names, architectures and licenses are identical. The packages carry the Red Hat `fd431d51`
+  RSA/SHA256 signature, and their changelog records the fixes for CVE-2026-8924 and
+  CVE-2026-11856. The reviewed inventory digest, its Containerfile comment and the fail-closed
+  contract test are refreshed; the gate stays strict, and the base image, engine and public image
+  pins are unchanged. The frontend and reverse-attempt images have no RPM inventory pin. Locally,
+  the backend image passed the final-image, API, distributed API and recovery CLI smokes and the
+  release supply-chain gate. The reverse-attempt image passed its smoke and the reverse-attempt
+  release gate. Neither has a fixable Critical finding. Hosted container and E2E jobs must pass
+  before merge.
 
 ## Synchronization
 

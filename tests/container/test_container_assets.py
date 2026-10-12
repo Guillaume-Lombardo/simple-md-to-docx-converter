@@ -243,7 +243,7 @@ def test_final_image_pins_all_downloaded_artifacts() -> None:
     assert "rpm --checksig /tmp/google-chrome.rpm" in containerfile
     assert (
         "ARG RPM_INVENTORY_SHA256="
-        "2b02ce10a0d8955ff1817b56323d6dd7e091c1d1316b11700e0f87d24319dc90"
+        "92063803ffaf534054d2d198abd814d08f22626a4238cb126e03376fb102a99e"
         in containerfile
     )
     assert (
