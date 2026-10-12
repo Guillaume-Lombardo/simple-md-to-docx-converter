@@ -148,3 +148,38 @@ skipping Python tests for documentation-only changes.
   structured phases and the scanner-outage probe, which reported every route at 200 on the
   first attempt. The standalone profile was not run locally. The repeated-pass criterion still
   requires hosted runs of both profiles at the reviewed head.
+- 2026-10-12: Independent review round 1 required changes. Hosted run 38255823107 at `7e534a3`
+  then failed in three heavy jobs.
+  - **Scanner-outage poll tests.** The poll is now tested by running the extracted JavaScript
+    under Node through the real shell wrapper, with scripted fetch outcomes and a virtual clock.
+    - On each required route, a persistent non-200 response, rejected fetch or request timeout
+      exits nonzero within the window and records name resolution.
+    - A transient stall recovers, and an alias-only failure stays diagnostic.
+    - Mutation checks: disabling the failure exit code fails 9 tests, widening the window fails
+      10, returning success from the shell wrapper fails 10, and making the alias required fails
+      4.
+  - **`CI / container` font download.** The job lost the Liberation font archive
+    (`github.com/liberationfonts/liberation-fonts/files/7261482/...`) to six HTTP 500 responses
+    within 31 seconds (13:28:40 to 13:29:11 UTC). The default curl backoff is 1, 2, 4, 8 and
+    16 seconds.
+    - The URL is the official upstream link: the 2.1.5 release has no assets and links to this
+      attachment. It answered 200 from here minutes later, so the failure was a transient
+      upstream outage.
+    - Font and Containerfile downloads now make eight retries with curl's doubling backoff,
+      about four minutes, bounded by a ten-minute retry budget. Containerfile downloads drop the
+      fixed two-second retry delay that had collapsed their retry window.
+    - Checksums are unchanged. Moving fonts to a host cache or bind mount is a hermetic-toolchain
+      change the owner has not approved, so it is left as a recommendation.
+  - **Both final-image E2E jobs.** `e2e-standalone` and `e2e-distributed` passed the
+    scanner-outage probe on its first attempt, then failed in the frontend admission phase:
+    "Frontend hold request 0 returned HTTP 502 before saturation", after about 5 seconds.
+    - Cause: that phase replaces the frontend with the admission fixture, which reused the
+      pinned frontend address. On Podman 4.9 the application's network namespace, which the
+      router shares, still held the previous container's neighbor entry, so the new container
+      at the same address was unreachable until that entry expired. Standalone, where only the
+      frontend was pinned, failed the same way.
+    - Fix: the frontend is no longer pinned. It keeps a dynamic address as on `main`, and the
+      router keeps using its current numeric origin. No required route resolves the frontend by
+      name, so `frontend_alias` remains a diagnostic resolver route.
+    - PostgreSQL and RustFS stay pinned: they keep the same container across restarts, and the
+      distributed job passed their outage and restart phases.
