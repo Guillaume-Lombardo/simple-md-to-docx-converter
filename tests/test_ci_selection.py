@@ -273,7 +273,14 @@ def test_t06_functional_domain_is_active_and_runnable() -> None:
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    "path", ["web/package.json", "web/server.mjs", "openapi/v1.json"]
+    "path",
+    [
+        "web/package.json",
+        "web/server.mjs",
+        "openapi/v1.json",
+        "scripts/container/build-frontend.sh",
+        "scripts/container/pull-base-images.sh",
+    ],
 )
 def test_frontend_inputs_select_rootless_frontend_smoke(path: str) -> None:
     registry = load_registry(Path(".github/ci/domains.json"))
@@ -388,6 +395,10 @@ def test_t21_e2e_domains_are_active_and_profile_specific() -> None:
         "container/entrypoint.sh",
         "scripts/container/build.sh",
         "scripts/e2e/run.sh",
+        "scripts/e2e/harness.sh",
+        "scripts/e2e/runtime-settings.sh",
+        "scripts/e2e/reverse_broker.py",
+        "scripts/e2e/s3_backup.py",
         "toolchain/document-engines/package-lock.json",
         "tests/e2e/rootless.spec.mjs",
         "tests/corpus/mermaid/diagram.md",
@@ -399,6 +410,27 @@ def test_final_image_inputs_select_both_t21_profiles(path: str) -> None:
     selected = select_domains([path])
     assert "e2e-standalone" in selected
     assert "e2e-distributed" in selected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "path",
+    [
+        "scripts/e2e/run-compose.sh",
+        "scripts/e2e/run-compose-all.sh",
+        "scripts/e2e/run-compose-simple.sh",
+        "scripts/e2e/run-compose-podman-insecure.sh",
+    ],
+)
+def test_compose_runner_changes_select_only_the_compose_domain(path: str) -> None:
+    """Self-contained Compose runners never execute in the final-image profiles."""
+    assert select_domains([path]) == ["compose"]
+
+
+@pytest.mark.unit
+def test_compose_runner_exclusion_does_not_hide_other_final_image_inputs() -> None:
+    selected = select_domains(["scripts/e2e/run-compose.sh", "scripts/e2e/run.sh"])
+    assert selected == ["compose", "e2e-distributed", "e2e-standalone"]
 
 
 @pytest.mark.unit

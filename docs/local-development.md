@@ -175,14 +175,16 @@ container, and E2E domains by `scripts/ci/select_domains.py`. Domain lifecycle m
 as executed. Activate a domain only in the ticket that delivers its real suite by changing its
 status to `active` and adding the reviewed command as an argument array; the matrix runner invokes
 that array without a shell. Scheduled, release, and manual runs select every domain, including both
-storage profiles.
+storage profiles. The self-contained `scripts/e2e/run-compose*.sh` runners select only the
+`compose` domain; every other `scripts/e2e/` change still selects both final-image E2E profiles.
 
 The `ci-infrastructure` domain is active now. Changes to the detector, runner, registry, workflow,
 or its integration tests must run the real subprocess and quality-policy success and failure cases
 in `tests/test_ci_runner.py` and `tests/integration/ci`; `CI / gate` rejects a skipped or failed
-heavy matrix whenever any active domain was selected. Caches are restore-only outside trusted
-pushes to `main`, including pull requests, forks, merge groups, releases, schedules, and manual
-runs.
+heavy matrix whenever any active domain was selected. The heavy matrix runs at most eight domains
+in parallel and its domains share one `py314-heavy` `uv` cache entry. Caches are restore-only
+outside trusted pushes to `main`, including pull requests, forks, merge groups, releases,
+schedules, and manual runs.
 
 Active domains run their registered functional, document-engine, storage, container, and final-image
 suites as selected. The stable gate fails when a selected active domain is skipped or fails.

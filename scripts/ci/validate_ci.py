@@ -78,6 +78,8 @@ RELEASE_FORBIDDEN_TRIGGERS = frozenset(
 RELEASE_TRIGGER_CANDIDATES = frozenset({"push", "release"})
 MAX_RELEASE_TIMEOUT_MINUTES = 60
 LIGHT_SHARD_TIMEOUT_MINUTES = 40
+HEAVY_MAX_PARALLEL = 8
+HEAVY_UV_CACHE_SUFFIX = "py314-heavy"
 PUBLISH_STEP_COUNT = 3
 PARTIAL_TAG_CHECK_COUNT = 2
 RELEASE_CONCURRENCY_GROUP = "release-${{ github.ref }}"
@@ -308,7 +310,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
             ): TRUSTED_LIBREOFFICE_RPM_CACHE_WRITE,
             (
                 "heavy",
-                "Install rootless Podman for container validation",
+                "Verify preinstalled rootless Podman for container validation",
             ): (
                 "${{ matrix.domain == 'compose' || matrix.domain == 'container' || "
                 "matrix.domain == 'frontend' || startsWith(matrix.domain, 'e2e-') }}"
@@ -369,7 +371,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
             ): "${{ always() && matrix.domain == 'container' }}",
             ("mutation", "Retain mutation evidence"): "${{ always() }}",
         },
-        canonical_digest="9cfc2e9294c7ab1f3de38711394982b06131ae9818c66cf10a018df1cba46be1",
+        canonical_digest="437e1b98184267b5638ef4d98701219f5f2d0d82657355f3357add341920d162",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -962,6 +964,33 @@ def _validate_light_sharding(workflow: Mapping[str, Any]) -> list[str]:
     return errors
 
 
+def _validate_heavy_matrix(workflow: Mapping[str, Any]) -> list[str]:
+    """Bound heavy-domain parallelism and share one dependency cache entry."""
+    jobs = _mapping(workflow.get("jobs")) or {}
+    heavy = _mapping(jobs.get("heavy")) or {}
+    errors = []
+    if heavy.get("strategy") != {
+        "fail-fast": False,
+        "max-parallel": HEAVY_MAX_PARALLEL,
+        "matrix": {"domain": "${{ fromJSON(needs.detect.outputs.runnable-domains) }}"},
+    }:
+        errors.append(
+            "heavy domains must run the reviewed matrix with max-parallel "
+            f"{HEAVY_MAX_PARALLEL}"
+        )
+    setups = [
+        step
+        for step in _job_steps(workflow, "heavy")
+        if step.get("name") == "Set up uv with a lock-keyed cache"
+    ]
+    options = _mapping(setups[0].get("with")) if len(setups) == 1 else None
+    if options is None or options.get("cache-suffix") != HEAVY_UV_CACHE_SUFFIX:
+        errors.append(
+            f"heavy domains must share the {HEAVY_UV_CACHE_SUFFIX!r} uv cache suffix"
+        )
+    return errors
+
+
 def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
     errors: list[str] = []
     jobs = _mapping(workflow.get("jobs")) or {}
@@ -1029,6 +1058,14 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             "pnpm --filter @markweave/web run build\n"
             "pnpm --filter @markweave/web run test:production\n"
         ),
+        ("heavy", "Verify preinstalled rootless Podman for container validation"): (
+            "set -euo pipefail\n"
+            "podman_version=\"$(podman version --format '{{.Client.Version}}')\"\n"
+            '[[ "$podman_version" =~ ^([0-9]+)\\.[0-9]+\\.[0-9]+ ]]\n'
+            "(( BASH_REMATCH[1] >= 4 ))\n"
+            'echo "Using preinstalled Podman $podman_version"\n'
+            "podman info --format '{{.Host.Security.Rootless}}' | grep -Fx true\n"
+        ),
         ("heavy", "Install the locked E2E browser driver"): (
             "pnpm install --frozen-lockfile --ignore-scripts "
             "--filter md-converter-web-tests"
@@ -1063,6 +1100,7 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
         if len(matches) != 1 or matches[0].get("run") != expected_command:
             errors.append(f"missing required workflow command: {expected_command!r}")
 
+    errors.extend(_validate_heavy_matrix(workflow))
     errors.extend(_validate_no_legacy_browser_command(workflow))
     errors.extend(_validate_chrome_downgrade_install(workflow))
     errors.extend(_validate_public_alignment_credentials(workflow))
@@ -1073,7 +1111,7 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             "${{ github.event_name == 'pull_request' || "
             "github.event_name == 'merge_group' }}"
         ),
-        ("heavy", "Install rootless Podman for container validation"): (
+        ("heavy", "Verify preinstalled rootless Podman for container validation"): (
             "${{ matrix.domain == 'compose' || matrix.domain == 'container' || "
             "matrix.domain == 'frontend' || startsWith(matrix.domain, 'e2e-') }}"
         ),
