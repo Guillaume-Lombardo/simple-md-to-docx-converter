@@ -218,3 +218,54 @@ def test_runtime_guard_enforces_markers_in_every_xdist_worker(
     for index in range(4):
         assert f"FAILED test_sample.py::test_unmarked_{index}" in output
     assert "FAILED test_sample.py::test_unmarked_spawn" in output
+
+
+def _collected_node_ids() -> list[str]:
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if not name.startswith(("PYTEST_XDIST", "COV_CORE"))
+    }
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "--collect-only",
+            "-q",
+            "--no-cov",
+            "-p",
+            "no:cacheprovider",
+            "-p",
+            "no:xdist",
+            "tests",
+        ],
+        cwd=ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=600,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return [line for line in result.stdout.splitlines() if "::" in line]
+
+
+@pytest.mark.integration
+@pytest.mark.light_coverage
+@pytest.mark.slow
+def test_collected_node_ids_are_identical_in_separate_processes() -> None:
+    """xdist workers and ``--lf`` need every process to collect the same IDs.
+
+    Parametrized values built from random identifiers or from the current time,
+    such as ZIP entry timestamps, leak into node IDs unless the test gives
+    explicit ``ids``. The second collection starts after the first finishes, so
+    it also observes a different ZIP timestamp.
+    """
+    first = _collected_node_ids()
+    second = _collected_node_ids()
+    assert len(first) > 1000
+    assert len(set(first)) == len(first)
+    unstable = sorted(set(first) ^ set(second))
+    assert not unstable, "\n".join(unstable[:20])
+    assert first == second

@@ -195,6 +195,7 @@ def test_benign_secondary_magic_inside_valid_image_is_not_a_polyglot(
         (_with_comment_payload("GIF", _zip_payload()), "image/gif"),
         (_webp_with_metadata(_zip_payload()), "image/webp"),
     ],
+    ids=["png", "jpeg", "gif", "webp"],
 )
 def test_parseable_zip_inside_valid_image_is_rejected(
     source: bytes, media_type: str

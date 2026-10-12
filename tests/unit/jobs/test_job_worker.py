@@ -44,6 +44,8 @@ pytestmark = pytest.mark.unit
 NOW = datetime(2026, 8, 24, tzinfo=UTC)
 TRACEABILITY_TEMPLATE_ID = UUID("00000000-0000-4000-8000-000000000029")
 TRACEABILITY_TEMPLATE_VERSION = "3"
+# A fixed foreign template identifier keeps parametrized node IDs stable.
+FOREIGN_TEMPLATE_ID = "00000000-0000-4000-8000-00000000002a"
 TRACEABILITY_TEMPLATE_SHA256 = "2" * 64
 
 
@@ -318,7 +320,7 @@ def test_worker_rejects_versioned_manifest_for_pandoc_default_job(
         (JobOutput.PDF, invalid_traceability_manifest(schema_version=True)),
         (JobOutput.PDF, invalid_traceability_manifest(template_id="")),
         (JobOutput.PDF, invalid_traceability_manifest(template_version="")),
-        (JobOutput.PDF, invalid_traceability_manifest(template_id=str(uuid4()))),
+        (JobOutput.PDF, invalid_traceability_manifest(template_id=FOREIGN_TEMPLATE_ID)),
         (JobOutput.PDF, invalid_traceability_manifest(schema_version=2)),
         (
             JobOutput.PDF,

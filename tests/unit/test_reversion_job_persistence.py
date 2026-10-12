@@ -62,6 +62,17 @@ from tests.reversion_job_repository_contracts import (
     trace,
 )
 
+# Fixed mutated identifiers keep parametrized node IDs identical in every
+# process, which pytest-xdist workers and ``--lf`` require.
+MUTATED_IDENTIFIERS = {
+    "attempt_unit_id": "00000000-0000-4000-8000-000000000001",
+    "attempt_proof_unit_id": "00000000-0000-4000-8000-000000000002",
+    "attempt_proof_id": "00000000-0000-4000-8000-000000000003",
+    "attempt_proof_principal_id": "00000000-0000-4000-8000-000000000004",
+    "orphan_attempt_id": "00000000-0000-4000-8000-000000000005",
+    "orphan_unit_id": "00000000-0000-4000-8000-000000000006",
+    "orphan_proof_id": "00000000-0000-4000-8000-000000000007",
+}
 LOCAL_NOW = NOW.astimezone(timezone(timedelta(hours=2)))
 LOCAL_RETENTION_END = RETENTION_END.astimezone(timezone(timedelta(hours=-3)))
 
@@ -443,10 +454,10 @@ def test_reconciliation_drains_preexisting_unacknowledged_attempt_proof(
 @pytest.mark.parametrize(
     ("column", "value"),
     [
-        ("unit_id", str(uuid4())),
-        ("proof_unit_id", str(uuid4())),
-        ("proof_id", str(uuid4())),
-        ("proof_principal_id", str(uuid4())),
+        ("unit_id", MUTATED_IDENTIFIERS["attempt_unit_id"]),
+        ("proof_unit_id", MUTATED_IDENTIFIERS["attempt_proof_unit_id"]),
+        ("proof_id", MUTATED_IDENTIFIERS["attempt_proof_id"]),
+        ("proof_principal_id", MUTATED_IDENTIFIERS["attempt_proof_principal_id"]),
         ("policy_revision", "mutated-policy"),
         ("policy_specification", "sha256:" + "9" * 64),
         ("proof_policy_revision", "mutated-proof-policy"),
@@ -522,9 +533,9 @@ def test_reconciliation_ack_rejects_mutated_attempt_proof_identity(
 @pytest.mark.parametrize(
     ("column", "value"),
     [
-        ("attempt_id", str(uuid4())),
-        ("unit_id", str(uuid4())),
-        ("proof_id", str(uuid4())),
+        ("attempt_id", MUTATED_IDENTIFIERS["orphan_attempt_id"]),
+        ("unit_id", MUTATED_IDENTIFIERS["orphan_unit_id"]),
+        ("proof_id", MUTATED_IDENTIFIERS["orphan_proof_id"]),
         ("policy_revision", "mutated-policy"),
         ("policy_specification", "sha256:" + "9" * 64),
         ("exit_evidence", "sha256:" + "8" * 64),
