@@ -119,18 +119,32 @@ session holds an exclusive lock on the labelled file (under `$XDG_RUNTIME_DIR`, 
 directory, in `markweave-test-services-<uid>/`) for the stack's whole life. Teardown runs after
 test failures, `Ctrl-C`, `SIGTERM` and interpreter exit, and `SIGINT`/`SIGTERM` wait until
 `docker compose down` has finished. Every Docker command is recorded from the moment it starts
-until its whole process group, including the Compose plugin, is proven gone. An interrupted or
-timed-out command is stopped with `SIGTERM`, then `SIGKILL` after a bounded grace period, and
-further interrupts wait until that stop and its record are complete. Teardown stops any
-recorded survivor again before removal, and a stack whose startup did not finish is released only
-once the engine lists no resource of that project.
+until its whole process group, including the Compose plugin, is proven gone; a command that
+exits, successfully or not, while a descendant with redirected streams still runs has that
+descendant stopped. An interrupted or timed-out command is stopped with `SIGTERM`, then `SIGKILL`
+after a bounded grace period, and further interrupts wait until that stop and its record are
+complete. Teardown stops any recorded survivor again before removal, and a stack whose startup
+did not finish is released only once the engine lists no resource of that project.
+
+One invariant governs the owner lock: the session releases its `flock` and unlinks the lock file
+only when no Docker command group it started is alive and the stack's resources were removed.
+Otherwise the lock stays held until the interpreter-exit fallback stops the groups, removes the
+stack and proves both conditions; the kernel releases it at process exit at the latest, and the
+lock file then stays for the next session. The owner also writes every command group it starts
+into the lock file, and the next session waits for any of those groups that is still alive, up to
+the stale bound below. Residual limitation: after a hard kill of the owner (`SIGKILL`, a crashed
+xdist worker or a host crash) nothing can stop its detached descendants, so a descendant that
+outlives the owner, or one whose process group number is reused, delays removal until the stale
+bound; a Compose plugin that keeps running past that bound can still recreate resources after
+the stack is removed.
 Interruptions that no process can handle, such as `SIGKILL`, a pytest-xdist worker crash or a
 host crash, release the lock with the process. The next session
 that acquires services then removes every labelled stack on the same host whose lock nobody
 holds; the pytest-xdist controller does the same as soon as a worker crashes. A stack whose
 owner still holds its lock is never touched, and unlabelled projects are never removed. When a
-lock file has disappeared, so the owner cannot be proven gone, a stack is removed only after
-`MARKWEAVE_TEST_SERVICES_STALE_AFTER_SECONDS` (default 3600). Run the same removal on demand with
+lock file has disappeared, so the owner cannot be proven gone, or a command group recorded in it
+is still alive, a stack is removed only after `MARKWEAVE_TEST_SERVICES_STALE_AFTER_SECONDS`
+(default 3600). Run the same removal on demand with
 `uv run python -c "from scripts.testing.services import reap_stale_stacks; print(reap_stale_stacks())"`.
 To clean up by hand, inspect
 projects with `docker compose ls --all` and remove only the exact abandoned

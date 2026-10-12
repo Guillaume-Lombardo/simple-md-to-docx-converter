@@ -1,19 +1,30 @@
-"""Interrupted service startup stops the whole Compose process group.
+"""Every exit path of a local service stack keeps the ownership invariant.
 
-A fake ``docker`` executable stands in for the CLI. Its ``compose up`` starts a
-child in the same process group, like the real Compose plugin, which creates a
-"resource" one second later. Killing only the direct CLI process would let that
-child create the resource after teardown had already removed the stack.
+INVARIANT: the owner ``flock`` is released and the lock file unlinked only when
+no Docker command group the session started is alive and the stack's resources
+were removed.
+
+A fake ``docker`` executable stands in for the CLI and Compose plugin. Its
+``compose up`` can start a "startup child" that writes a resource after a delay,
+either sharing the command's output pipes or with its streams redirected, and
+that optionally ignores SIGTERM so only SIGKILL stops it. Every fake process
+records its pid, ``down`` logs whether the startup child was still alive, and
+``ls`` reports the simulated resources. The single release point is wrapped so
+that every release asserts the invariant at the moment it happens.
 """
 
+import contextlib
+import fcntl
 import os
 import signal
 import threading
 import time
 from collections.abc import Iterator
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
+from pytest_mock import MockerFixture
 
 from scripts.testing import services
 
@@ -27,48 +38,114 @@ pytestmark = [
 
 FAKE_DOCKER = """\
 #!/bin/sh
+echo $$ >> "$FAKE_DOCKER_PIDS"
+child() {
+  sh -c '
+    if [ "$FAKE_CHILD_IGNORES_TERM" = 1 ]; then trap "" TERM; fi
+    echo $$ >> "$FAKE_DOCKER_PIDS"
+    echo $$ > "$FAKE_DOCKER_CHILD"
+    sleep "$FAKE_CHILD_DELAY"
+    echo resource >> "$FAKE_DOCKER_STATE"
+  ' &
+}
 case " $* " in
   *" compose "*" up "*)
     echo up >> "$FAKE_DOCKER_LOG"
-    sh -c '
-      if [ "$FAKE_CHILD_IGNORES_TERM" = 1 ]; then trap "" TERM; fi
-      echo $$ > "$FAKE_DOCKER_CHILD"
-      sleep "$FAKE_CHILD_DELAY"
-      echo resource >> "$FAKE_DOCKER_STATE"
-    ' &
-    sleep 30
+    case "$FAKE_UP_MODE" in
+      ok) ;;
+      ok-detached) child </dev/null >/dev/null 2>&1 ;;
+      fail-detached) child </dev/null >/dev/null 2>&1; exit 1 ;;
+      block) child; sleep 30 ;;
+    esac
+    ;;
+  *" compose "*" port "*)
+    echo 127.0.0.1:15432
     ;;
   *" compose "*" down "*)
-    if kill -0 "$(cat "$FAKE_DOCKER_CHILD" 2>/dev/null)" 2>/dev/null; then
+    if [ -s "$FAKE_DOCKER_CHILD" ] && kill -0 "$(cat "$FAKE_DOCKER_CHILD")" 2>/dev/null
+    then
       echo down-while-startup-alive >> "$FAKE_DOCKER_LOG"
     else
       echo down >> "$FAKE_DOCKER_LOG"
     fi
+    if [ -e "$FAKE_DOCKER_DOWN_FAILS" ]; then rm -f "$FAKE_DOCKER_DOWN_FAILS"; exit 1; fi
     : > "$FAKE_DOCKER_STATE"
     ;;
   *" ls "*)
-    cat "$FAKE_DOCKER_STATE"
+    case "$FAKE_LS_MODE" in
+      always) echo resource ;;
+      block) child; sleep 30 ;;
+      *) cat "$FAKE_DOCKER_STATE" ;;
+    esac
     ;;
 esac
 """
 
 
+def _running(pid: int) -> bool:
+    """Return whether a process exists and is not a zombie awaiting reaping."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except FileNotFoundError:
+        return False
+    return stat.rsplit(")", 1)[1].split()[0] != "Z"
+
+
+def _lock_held(path: Path) -> bool:
+    descriptor = os.open(path, os.O_RDWR)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return True
+    finally:
+        os.close(descriptor)
+    return False
+
+
+@dataclass
+class Fake:
+    """Files of the fake engine and the releases observed during a scenario."""
+
+    root: Path
+    releases: list[str] = field(default_factory=list)
+
+    def path(self, name: str) -> Path:
+        return self.root / name
+
+    def log(self) -> list[str]:
+        return self.path("docker.log").read_text().split()
+
+    def resources(self) -> str:
+        return self.path("state").read_text()
+
+    def live_pids(self) -> list[int]:
+        pids = map(int, self.path("pids").read_text().split())
+        return [pid for pid in pids if _running(pid)]
+
+
 @pytest.fixture
-def fake_docker(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[tuple[Path, Path, Path]]:
+def fake(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mocker: MockerFixture
+) -> Iterator[Fake]:
     binary = tmp_path / "bin"
     binary.mkdir()
     executable = binary / "docker"
     executable.write_text(FAKE_DOCKER)
     executable.chmod(0o700)
-    log, state, child = tmp_path / "docker.log", tmp_path / "state", tmp_path / "pid"
-    log.touch()
-    state.touch()
+    result = Fake(tmp_path)
+    for name in ("docker.log", "state", "pids"):
+        result.path(name).touch()
     monkeypatch.setenv("PATH", f"{binary}{os.pathsep}{os.environ['PATH']}")
-    monkeypatch.setenv("FAKE_DOCKER_LOG", str(log))
-    monkeypatch.setenv("FAKE_DOCKER_STATE", str(state))
-    monkeypatch.setenv("FAKE_DOCKER_CHILD", str(child))
+    for variable, name in (
+        ("FAKE_DOCKER_LOG", "docker.log"),
+        ("FAKE_DOCKER_STATE", "state"),
+        ("FAKE_DOCKER_PIDS", "pids"),
+        ("FAKE_DOCKER_CHILD", "child"),
+        ("FAKE_DOCKER_DOWN_FAILS", "down-fails"),
+    ):
+        monkeypatch.setenv(variable, str(result.path(name)))
+    monkeypatch.setenv("FAKE_UP_MODE", "ok")
+    monkeypatch.setenv("FAKE_LS_MODE", "state")
     monkeypatch.setenv("FAKE_CHILD_IGNORES_TERM", "0")
     monkeypatch.setenv("FAKE_CHILD_DELAY", "1")
     runtime = tmp_path / "runtime"
@@ -76,83 +153,169 @@ def fake_docker(
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
     for name in services.VARIABLES:
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(services, "STOP_GRACE_SECONDS", 1.0)
+    mocker.patch.object(services, "prepare_bucket")
+    close_lock = services._close_lock
+
+    def checked_close(descriptor: int, path: Path, *, remove: bool) -> None:
+        assert not result.live_pids(), "lock released while a command group lives"
+        assert result.resources() == "", "lock released before resources removed"
+        result.releases.append(path.name)
+        close_lock(descriptor, path, remove=remove)
+
+    mocker.patch.object(services, "_close_lock", side_effect=checked_close)
     previous = signal.signal(signal.SIGINT, signal.default_int_handler)
-    yield log, state, child
+    yield result
     signal.signal(signal.SIGINT, previous)
+    for process in services._UNSETTLED.values():
+        services.stop_process_group(process)
+    for held in services._HELD.values():
+        os.close(held.descriptor)
+    services._HELD.clear()
     services._OWNED.clear()
     services._UNSETTLED.clear()
 
 
-def _interrupt_after_startup(child: Path, *delays: float) -> threading.Thread:
+def _interrupt_after_child_start(fake: Fake, delays: tuple[float, ...]) -> None:
     """Send SIGINT after each delay, counted from the startup child's launch."""
 
     def interrupt() -> None:
         deadline = time.monotonic() + 30
-        while not child.exists() and time.monotonic() < deadline:
+        while not fake.path("child").exists() and time.monotonic() < deadline:
             time.sleep(0.01)
         for delay in delays:
             time.sleep(delay)
             os.kill(os.getpid(), signal.SIGINT)
 
-    thread = threading.Thread(target=interrupt, daemon=True)
-    thread.start()
-    return thread
+    threading.Thread(target=interrupt, daemon=True).start()
 
 
-def _assert_settled(log: Path, state: Path) -> None:
-    # Removal ran only after the startup child was gone.
-    assert log.read_text().split() == ["up", "down"]
-    # The startup child would have written its resource by now.
-    time.sleep(2.5)
-    assert state.read_text() == ""
-    assert not services._OWNED
-    assert not services._UNSETTLED
-    assert not list(services.lock_directory().iterdir())
+@dataclass(frozen=True)
+class Scenario:
+    environment: dict[str, str]
+    expected: type[BaseException] | None
+    released: bool
+    released_after_exit_fallback: bool
+    timeout: float | None = None
+    interrupts: tuple[float, ...] = ()
+    interrupt_before_teardown: bool = False
+    down_fails_once: bool = False
+    unkillable_until_exit: bool = False
 
 
-@pytest.mark.parametrize("interruption", ["sigint", "timeout"])
-def test_interrupted_startup_leaves_no_late_resource(
-    fake_docker: tuple[Path, Path, Path],
+BLOCK = {"FAKE_UP_MODE": "block"}
+BLOCK_IGNORING_TERM = {"FAKE_UP_MODE": "block", "FAKE_CHILD_IGNORES_TERM": "1"}
+SCENARIOS = {
+    "normal": Scenario({}, None, True, True),
+    "normal-with-detached-descendant": Scenario(
+        {"FAKE_UP_MODE": "ok-detached"}, None, True, True
+    ),
+    "nonzero-with-detached-descendant": Scenario(
+        {"FAKE_UP_MODE": "fail-detached"}, RuntimeError, True, True
+    ),
+    "interrupt-during-up": Scenario(
+        BLOCK, KeyboardInterrupt, True, True, interrupts=(0.2,)
+    ),
+    "second-interrupt": Scenario(
+        BLOCK_IGNORING_TERM, KeyboardInterrupt, True, True, interrupts=(0.2, 0.3)
+    ),
+    "timeout": Scenario(BLOCK, RuntimeError, True, True, timeout=0.3),
+    "interrupt-during-timeout-stop": Scenario(
+        BLOCK_IGNORING_TERM,
+        KeyboardInterrupt,
+        True,
+        True,
+        timeout=0.3,
+        interrupts=(0.6,),
+    ),
+    "interrupt-before-teardown": Scenario(
+        BLOCK_IGNORING_TERM,
+        KeyboardInterrupt,
+        False,
+        True,
+        interrupts=(0.2,),
+        interrupt_before_teardown=True,
+    ),
+    "settle-failure": Scenario(
+        {**BLOCK, "FAKE_LS_MODE": "always"},
+        RuntimeError,
+        False,
+        False,
+        interrupts=(0.2,),
+    ),
+    "removal-failure-then-exit-fallback": Scenario(
+        {}, RuntimeError, False, True, down_fails_once=True
+    ),
+    # A command group that survives every stop attempt before any stack
+    # resource exists: only the live-group half of the invariant holds it.
+    "surviving-group-before-startup": Scenario(
+        {
+            "FAKE_LS_MODE": "block",
+            "FAKE_CHILD_IGNORES_TERM": "1",
+            "FAKE_CHILD_DELAY": "30",
+        },
+        services.UnsettledCommandError,
+        False,
+        True,
+        interrupts=(0.2,),
+        unkillable_until_exit=True,
+    ),
+}
+
+
+@pytest.mark.parametrize("name", SCENARIOS)
+def test_every_exit_path_keeps_the_ownership_invariant(
+    fake: Fake,
     monkeypatch: pytest.MonkeyPatch,
-    interruption: str,
+    mocker: MockerFixture,
+    name: str,
 ) -> None:
-    log, state, child = fake_docker
-    if interruption == "sigint":
-        thread = _interrupt_after_startup(child, 0.2)
-        with pytest.raises(KeyboardInterrupt), services.distributed_services():
-            pytest.fail("startup must not complete")
-        thread.join(timeout=5)
+    scenario = SCENARIOS[name]
+    for variable, value in scenario.environment.items():
+        monkeypatch.setenv(variable, value)
+    if scenario.timeout is not None:
+        monkeypatch.setattr(services, "COMMAND_TIMEOUT_SECONDS", scenario.timeout)
+    if scenario.down_fails_once:
+        fake.path("down-fails").touch()
+    restop = services.stop_unsettled_commands
+    if scenario.interrupt_before_teardown:
+        # A signal landing between ``finally:`` and the teardown's deferred
+        # block skips the whole teardown; raising at its first step is the
+        # same observable outcome.
+        mocker.patch.object(
+            services, "stop_unsettled_commands", side_effect=KeyboardInterrupt
+        )
+    stop = services.stop_process_group
+    if scenario.unkillable_until_exit:
+        mocker.patch.object(services, "stop_process_group", return_value=False)
+    _interrupt_after_child_start(fake, scenario.interrupts)
+
+    expectation = (
+        pytest.raises(scenario.expected)
+        if scenario.expected is not None
+        else contextlib.nullcontext()
+    )
+    with expectation, services.distributed_services():
+        pass
+    mocker.patch.object(services, "stop_unsettled_commands", side_effect=restop)
+    if scenario.unkillable_until_exit:
+        mocker.patch.object(services, "stop_process_group", side_effect=stop)
+        monkeypatch.setenv("FAKE_LS_MODE", "state")
+
+    locks = list(services.lock_directory().iterdir())
+    assert bool(fake.releases) is scenario.released
+    if not scenario.released:
+        (lock,) = locks
+        assert _lock_held(lock), "ownership released early"
+        services.remove_owned_stacks()
+    assert bool(fake.releases) is scenario.released_after_exit_fallback
+    if scenario.released_after_exit_fallback:
+        assert not list(services.lock_directory().iterdir())
+        assert "down-while-startup-alive" not in fake.log()
+        # A surviving startup child would have written its resource by now.
+        time.sleep(1.5)
+        assert fake.resources() == ""
+        assert not fake.live_pids()
     else:
-        monkeypatch.setattr(services, "COMMAND_TIMEOUT_SECONDS", 0.3)
-        with (
-            pytest.raises(RuntimeError, match="Docker Compose"),
-            services.distributed_services(),
-        ):
-            pytest.fail("startup must not complete")
-    _assert_settled(log, state)
-
-
-@pytest.mark.parametrize("trigger", ["second-interrupt", "interrupt-after-timeout"])
-def test_interrupt_during_group_termination_waits_for_proven_death(
-    fake_docker: tuple[Path, Path, Path],
-    monkeypatch: pytest.MonkeyPatch,
-    trigger: str,
-) -> None:
-    """A startup child that ignores SIGTERM needs SIGKILL after the grace period.
-
-    An interrupt that arrives while the group is being stopped must neither
-    abort the stop nor let teardown release ownership while the child lives.
-    """
-    log, state, child = fake_docker
-    monkeypatch.setenv("FAKE_CHILD_IGNORES_TERM", "1")
-    monkeypatch.setenv("FAKE_CHILD_DELAY", "1.5")
-    monkeypatch.setattr(services, "STOP_GRACE_SECONDS", 1.0)
-    if trigger == "second-interrupt":
-        thread = _interrupt_after_startup(child, 0.2, 0.3)
-    else:
-        monkeypatch.setattr(services, "COMMAND_TIMEOUT_SECONDS", 0.3)
-        thread = _interrupt_after_startup(child, 0.6)
-    with pytest.raises(KeyboardInterrupt), services.distributed_services():
-        pytest.fail("startup must not complete")
-    thread.join(timeout=5)
-    _assert_settled(log, state)
+        (lock,) = locks
+        assert _lock_held(lock)

@@ -10,8 +10,12 @@ or timed-out Docker command is stopped with its whole process group, including
 the Compose plugin, before teardown starts, and a stack whose startup did not
 finish is released only once the engine reports no resource left. A session that
 cannot clean up at all, such as after ``SIGKILL`` or a pytest-xdist worker
-crash, leaves a stack whose lock nobody holds; the next acquisition reaps it.
-A stack whose owner still holds its lock is never touched.
+crash, leaves a stack whose lock nobody holds; the next acquisition reaps it
+once the command groups recorded in the lock file are gone or the stale bound
+has passed. A stack whose owner still holds its lock is never touched.
+
+The owner lock is released only through ``release_if_settled``, which enforces
+the ownership invariant documented there.
 """
 
 from __future__ import annotations
@@ -150,31 +154,44 @@ def _docker(
         except OSError as error:
             raise RuntimeError(UNAVAILABLE) from error
         _UNSETTLED[process.pid] = process
+        _record_group(process.pid)
     try:
         stdout, _ = process.communicate(timeout=COMMAND_TIMEOUT_SECONDS)
     except BaseException as error:
         # The group stays recorded as unsettled until its death is proven, and
         # further interrupts wait until termination and bookkeeping are done.
         with _deferred_interrupts():
-            settled = stop_process_group(process)
+            _settle_group(process)
             _close_streams(process)
-            if settled:
-                _UNSETTLED.pop(process.pid, None)
-        if not settled:
+        if process.pid in _UNSETTLED:
             raise UnsettledCommandError(
                 f"Local test services: {action} did not stop."
             ) from error
         if isinstance(error, subprocess.TimeoutExpired):
             raise RuntimeError(UNAVAILABLE) from error
         raise
-    # A command that exited and closed its output has no live descendant
-    # holding the pipes; an interrupt before this line keeps it recorded, and
-    # ``unsettled_commands`` then prunes it once the group is gone.
-    _UNSETTLED.pop(process.pid, None)
+    # communicate() proves only that the leader exited and the pipes closed.
+    # A descendant that redirected or closed its streams can still run, so a
+    # completed command, successful or not, is settled the same way.
+    with _deferred_interrupts():
+        _settle_group(process)
+    if process.pid in _UNSETTLED:
+        raise UnsettledCommandError(f"Local test services: {action} did not stop.")
     if process.returncode:
         # Engine diagnostics can contain environment values. Do not echo them.
         raise RuntimeError(f"Local test services: {action} failed.")
     return stdout.strip()
+
+
+def _settle_group(process: subprocess.Popen[str]) -> None:
+    """Forget a command group only once its leader is reaped and it is gone.
+
+    Callers defer interrupts around this step.
+    """
+    running = process.poll() is None or _group_alive(process.pid)
+    if running and not stop_process_group(process):
+        return
+    _UNSETTLED.pop(process.pid, None)
 
 
 def unsettled_commands() -> bool:
@@ -197,6 +214,54 @@ def stop_unsettled_commands() -> None:
         if stop_process_group(process):
             _close_streams(process)
             _UNSETTLED.pop(group, None)
+
+
+@dataclass(frozen=True)
+class _HeldLock:
+    """An owner lock this process holds, with its exclusive ``flock``."""
+
+    path: Path
+    descriptor: int
+
+
+# Owner locks this process holds, by project. A lock leaves this table only
+# through ``release_if_settled``.
+_HELD: dict[str, _HeldLock] = {}
+
+
+def _record_group(group: int) -> None:
+    """Write a started command group into every held lock for the reaper."""
+    for held in _HELD.values():
+        with contextlib.suppress(OSError):
+            os.lseek(held.descriptor, 0, os.SEEK_END)
+            os.write(held.descriptor, f"{group}\n".encode())
+
+
+def _recorded_groups(descriptor: int) -> list[int]:
+    content = os.pread(descriptor, 1 << 16, 0).decode(errors="replace")
+    return [int(line) for line in content.split() if line.isdecimal()]
+
+
+def release_if_settled(project: str) -> bool:
+    """Release a stack's owner lock only when the ownership invariant holds.
+
+    INVARIANT: the ``flock`` is released and the lock file unlinked only when
+    (a) no Docker command group this process started is still alive, which
+    ``unsettled_commands`` proves for every recorded group, and (b) the stack's
+    resources were removed, which ``_OWNED`` no longer listing the project
+    records. Otherwise the descriptor stays open, so no other session can
+    claim the stack, until the exit fallback proves both conditions; the
+    kernel releases it at process exit at the latest. This is the only place
+    that releases an owner lock. Callers defer interrupts around it.
+    """
+    held = _HELD.get(project)
+    if held is None:
+        return True
+    if project in _OWNED or unsettled_commands():
+        return False
+    del _HELD[project]
+    _close_lock(held.descriptor, held.path, remove=True)
+    return True
 
 
 def _compose(project: str, environment: Mapping[str, str], *arguments: str) -> str:
@@ -304,13 +369,22 @@ def _sigterm_as_interrupt() -> Generator[None]:
 
 
 def remove_owned_stacks() -> None:
-    """Remove stacks whose session ended without running its finalizer."""
+    """Remove stacks whose session ended without running its finalizer.
+
+    Recorded command groups are stopped first. A stack is forgotten only once
+    the engine lists none of its resources, and its lock is released only
+    through ``release_if_settled``; an unresolved lock stays held until the
+    process exits, and its file stays for the next reaper.
+    """
     with _deferred_interrupts():
         stop_unsettled_commands()
-    for project, environment in list(_OWNED.items()):
-        with contextlib.suppress(RuntimeError), _deferred_interrupts():
-            _compose(project, environment, *DOWN_ARGUMENTS)
-        _OWNED.pop(project, None)
+        for project, environment in list(_OWNED.items()):
+            with contextlib.suppress(RuntimeError):
+                _compose(project, environment, *DOWN_ARGUMENTS)
+                if not project_resources(project):
+                    _OWNED.pop(project, None)
+        for project in list(_HELD):
+            release_if_settled(project)
 
 
 atexit.register(remove_owned_stacks)
@@ -399,6 +473,12 @@ def _claim(
     except OSError:
         os.close(descriptor)
         return None
+    old = labels.created.isdecimal() and now - int(labels.created) >= stale_after
+    if not old and any(_group_alive(group) for group in _recorded_groups(descriptor)):
+        # A detached command of the dead owner may still be creating the
+        # stack; wait for it, up to the stale bound.
+        os.close(descriptor)
+        return None
     return _Claim(lock, descriptor)
 
 
@@ -421,7 +501,7 @@ def reap_stale_stacks(*, now: float | None = None) -> tuple[str, ...]:
     stale_after = _stale_after()
     reaped: list[str] = []
     for project, labels in sorted(labelled_stacks().items()):
-        if project in _OWNED:
+        if project in _OWNED or project in _HELD:
             continue
         claim = _claim(project, labels, now=moment, stale_after=stale_after)
         if claim is None:
@@ -485,8 +565,9 @@ def distributed_services() -> Generator[None]:
         return
     project = f"{PROJECT_PREFIX}{uuid4().hex}"
     lock = lock_directory() / f"{project}.lock"
-    descriptor = _open_lock(lock, create=True)
-    leaked = False
+    with _deferred_interrupts():
+        descriptor = _open_lock(lock, create=True)
+        _HELD[project] = _HeldLock(lock, descriptor)
     try:
         fcntl.flock(descriptor, fcntl.LOCK_EX)
         reap_stale_stacks()
@@ -503,7 +584,6 @@ def distributed_services() -> Generator[None]:
         previous = {name: os.environ.get(name) for name in VARIABLES}
         with _sigterm_as_interrupt():
             _OWNED[project] = environment
-            leaked = True
             started = False
             try:
                 _compose(
@@ -541,8 +621,8 @@ def distributed_services() -> Generator[None]:
             finally:
                 # Removal, settling and bookkeeping share one deferred block,
                 # so an interrupt cannot separate a proven removal from its
-                # record or release ownership before every command group is
-                # gone. An interrupt before this block keeps ownership.
+                # record. An interrupt before this block keeps the project in
+                # ``_OWNED`` and so keeps the lock held for the exit fallback.
                 with _deferred_interrupts():
                     for name, value in previous.items():
                         if value is None:
@@ -555,8 +635,6 @@ def distributed_services() -> Generator[None]:
                     if not started or unsettled_commands():
                         _settle_interrupted_startup(project, environment)
                     _OWNED.pop(project, None)
-                    leaked = False
     finally:
-        # After a failed removal the lock file stays, so the next session can
-        # prove this stack abandoned and reap it at once.
-        _close_lock(descriptor, lock, remove=not leaked)
+        with _deferred_interrupts():
+            release_if_settled(project)

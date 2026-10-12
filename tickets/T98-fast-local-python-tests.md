@@ -120,6 +120,22 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
   and needs SIGKILL: a second interrupt during interrupt-driven termination and an interrupt
   during timeout-driven termination both remove the stack only after the child is gone and leave
   no late resource. The previous head fails them with removal while the child was alive.
+- 2026-10-12: Review round 4 (review of `e5543f7`, two major findings). A completed command
+  was forgotten although a descendant with redirected streams could still run, and the owner
+  lock was always closed, which released the `flock` while a startup group could be alive or the
+  stack still existed. One invariant now governs the owner lock and is enforced only in
+  `release_if_settled`: the `flock` is released and the file unlinked only when no Docker command
+  group the session started is alive and the stack's resources were removed; otherwise the lock
+  stays held until the exit fallback proves both, or until process exit. Completed commands,
+  successful or not, are forgotten only after the leader is reaped and the group is gone, and
+  survivors are stopped. The exit fallback forgets a stack only once the engine lists none of
+  its resources. Owners write every started group into the lock file, and the reaper waits for a
+  live recorded group up to the stale bound; the residual limitation after a hard kill is
+  documented. A table test drives eleven exit paths (normal, detached descendant with success
+  and failure, interrupt during up, second interrupt, timeout, interrupt during the timeout stop,
+  interrupt before the teardown, settle failure, removal failure then exit fallback, and a group
+  that survives every stop) and asserts the invariant at the single release point; mutants for
+  each half of the invariant, the completed-command rule and the exit fallback all fail it.
 - 2026-10-12: Remaining work. Adopt `-n auto --dist loadgroup` in the CI Python shard commands
   and lower the shard `timeout-minutes` from 40 to about 15 in `.github/workflows/ci.yml`,
   `scripts/ci/validate_ci.py` and `tests/test_ci_validation.py` after PR #297 (T130) merges.

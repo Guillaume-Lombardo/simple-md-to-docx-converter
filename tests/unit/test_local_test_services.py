@@ -1,5 +1,6 @@
 """Lifecycle and isolation regressions for automatic distributed test services."""
 
+import contextlib
 import fcntl
 import os
 import signal
@@ -32,6 +33,9 @@ def clear_service_environment(
     runtime.mkdir()
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
     yield
+    for held in services._HELD.values():
+        os.close(held.descriptor)
+    services._HELD.clear()
     services._OWNED.clear()
     services._UNSETTLED.clear()
 
@@ -166,7 +170,7 @@ def test_owned_stack_is_labelled_and_locked_for_its_whole_life(
     assert not list(services.lock_directory().iterdir())
 
 
-def test_failed_removal_keeps_an_unlocked_lock_for_the_next_reaper(
+def test_failed_removal_keeps_the_lock_held_until_the_exit_fallback(
     mocker: MockerFixture,
     reaper: MockType,
 ) -> None:
@@ -183,7 +187,7 @@ def test_failed_removal_keeps_an_unlocked_lock_for_the_next_reaper(
     with pytest.raises(RuntimeError, match="down"), services.distributed_services():
         pass
     (lock,) = services.lock_directory().iterdir()
-    assert not _locked_elsewhere(lock)
+    assert _locked_elsewhere(lock)
     (project,) = services._OWNED
 
     compose_mock.side_effect = None
@@ -192,16 +196,21 @@ def test_failed_removal_keeps_an_unlocked_lock_for_the_next_reaper(
     assert compose_mock.call_args.args[0] == project
     assert compose_mock.call_args.args[2:] == services.DOWN_ARGUMENTS
     assert not services._OWNED
+    assert not services._HELD
+    assert not lock.exists()
 
 
-def test_interpreter_exit_net_ignores_removal_failures(mocker: MockerFixture) -> None:
+def test_interpreter_exit_net_keeps_ownership_it_cannot_prove_removed(
+    mocker: MockerFixture,
+) -> None:
     services._OWNED.update({PROJECT: {}, OTHER: {}})
     compose = mocker.patch.object(
         services, "_compose", side_effect=[RuntimeError("down"), ""]
     )
+    mocker.patch.object(services, "project_resources", return_value=False)
     services.remove_owned_stacks()
     assert [call.args[0] for call in compose.call_args_list] == [PROJECT, OTHER]
-    assert not services._OWNED
+    assert list(services._OWNED) == [PROJECT]
 
 
 def test_sigterm_while_owning_a_stack_still_removes_it(
@@ -343,6 +352,10 @@ def _popen(
     mocker: MockerFixture, *, returncode: int = 0, error: BaseException | None = None
 ) -> MockType:
     process = mocker.Mock(pid=4242, returncode=returncode)
+    # An interrupted leader is still running; a completed one has exited.
+    process.poll.return_value = returncode if error is None else None
+    # A mocked leader must never make the code probe or signal a real group.
+    mocker.patch.object(services, "_group_alive", return_value=False)
     if error is None:
         process.communicate.return_value = ("out\n", "private-diagnostic")
     else:
@@ -399,14 +412,42 @@ def test_interrupted_command_stops_its_whole_process_group(
 def test_surviving_process_group_is_recorded_as_unsettled(
     mocker: MockerFixture,
 ) -> None:
-    _popen(mocker, error=KeyboardInterrupt())
+    popen = _popen(mocker, error=KeyboardInterrupt())
     mocker.patch.object(services, "stop_process_group", return_value=False)
     alive = mocker.patch.object(services, "_group_alive", return_value=True)
     with pytest.raises(services.UnsettledCommandError, match="did not stop"):
         services._compose("markweave-tests-example", {}, "up")
     assert services.unsettled_commands()
+    popen.return_value.poll.return_value = -9
+    assert services.unsettled_commands()
     alive.return_value = False
     assert not services.unsettled_commands()
+
+
+@pytest.mark.parametrize("returncode", [0, 1], ids=["success", "failure"])
+def test_completed_command_with_a_live_descendant_is_stopped(
+    mocker: MockerFixture, returncode: int
+) -> None:
+    """A finished leader proves nothing about descendants with other streams."""
+    _popen(mocker, returncode=returncode)
+    alive = mocker.patch.object(services, "_group_alive", return_value=True)
+    stop = mocker.patch.object(services, "stop_process_group", return_value=False)
+    with pytest.raises(services.UnsettledCommandError, match="did not stop"):
+        services._compose("markweave-tests-example", {}, "up")
+    stop.assert_called_once()
+    assert 4242 in services._UNSETTLED
+    stop.return_value = True
+    alive.return_value = False
+    services._UNSETTLED.clear()
+    expectation = (
+        pytest.raises(RuntimeError, match="failed")
+        if returncode
+        else contextlib.nullcontext()
+    )
+    alive.return_value = True
+    with expectation:
+        services._compose("markweave-tests-example", {}, "up")
+    assert not services._UNSETTLED
 
 
 def test_stop_process_group_escalates_and_reports_survivors(
@@ -483,8 +524,9 @@ def test_unsettled_startup_keeps_ownership_and_lock(
     ):
         pass
     (lock,) = services.lock_directory().iterdir()
-    assert not _locked_elsewhere(lock)
+    assert _locked_elsewhere(lock)
     assert len(services._OWNED) == 1
+    assert len(services._HELD) == 1
 
 
 def test_project_resource_listing_filters_by_compose_project(
@@ -747,3 +789,59 @@ def test_survivors_are_stopped_before_removal_and_at_exit(
     order.clear()
     services.remove_owned_stacks()
     assert order == ["stop", "down"]
+
+
+RECORDED_GROUP_CASES = {
+    "live-group-young": (True, 10, False),
+    "live-group-stale": (True, 3600, True),
+    "dead-group": (False, 10, True),
+}
+
+
+@pytest.mark.parametrize("case", RECORDED_GROUP_CASES)
+def test_reaper_waits_for_live_recorded_groups_up_to_the_stale_bound(
+    listing: dict[str, list[str]],
+    removals: MockType,
+    mocker: MockerFixture,
+    case: str,
+) -> None:
+    """A dead owner's detached command may still be creating its stack."""
+    alive, age, reaped = RECORDED_GROUP_CASES[case]
+    lock = services.lock_directory() / f"{PROJECT}.lock"
+    lock.write_text("4242\n")
+    probe = mocker.patch.object(services, "_group_alive", return_value=alive)
+    listing["container"].append(_labels(created=NOW - age))
+    assert services.reap_stale_stacks(now=NOW) == ((PROJECT,) if reaped else ())
+    assert _removed(removals) == ([PROJECT] if reaped else [])
+    if age < 3600:
+        probe.assert_called_once_with(4242)
+    assert lock.exists() is not reaped
+
+
+def test_started_groups_are_written_to_every_held_lock(mocker: MockerFixture) -> None:
+    lock = services.lock_directory() / f"{PROJECT}.lock"
+    descriptor = os.open(lock, os.O_RDWR | os.O_CREAT, 0o600)
+    services._HELD[PROJECT] = services._HeldLock(lock, descriptor)
+    _popen(mocker)
+    services._compose(PROJECT, {}, "port")
+    services._compose(PROJECT, {}, "port")
+    assert services._recorded_groups(descriptor) == [4242, 4242]
+
+
+def test_release_refuses_while_the_stack_or_a_group_remains(
+    mocker: MockerFixture,
+) -> None:
+    lock = services.lock_directory() / f"{PROJECT}.lock"
+    descriptor = os.open(lock, os.O_RDWR | os.O_CREAT, 0o600)
+    fcntl.flock(descriptor, fcntl.LOCK_EX)
+    services._HELD[PROJECT] = services._HeldLock(lock, descriptor)
+    services._OWNED[PROJECT] = {}
+    assert services.release_if_settled(PROJECT) is False
+    del services._OWNED[PROJECT]
+    survivor = mocker.patch.object(services, "unsettled_commands", return_value=True)
+    assert services.release_if_settled(PROJECT) is False
+    assert _locked_elsewhere(lock)
+    survivor.return_value = False
+    assert services.release_if_settled(PROJECT) is True
+    assert not lock.exists()
+    assert services.release_if_settled(PROJECT) is True
