@@ -553,3 +553,25 @@ The existing Dependabot head and current main are ancestors of each local branch
   preserve historical golden artifacts and provenance.
 - Native engine, golden and final-image qualification remain required.
 - No project version or published image-pin change is included.
+
+### Mermaid engine and security qualification
+
+- Keep CLI 12.0.0, resolving its compatible Mermaid dependency to the official
+  integrity-bound 12.1.0 build, which embeds Lodash ES 4.18.1. No local vendor
+  patch or misleading standalone dependency override is used.
+- Refresh the CI lock checksum, its assertions and canonical workflow fingerprint
+  only after frozen installation, source review and native engine qualification.
+- npm audit has no High/Critical alert but reports the Low KaTeX advisory
+  GHSA-238p-pmpm-9mq7 through four dependency nodes. Mermaid 12.1.0 still embeds
+  KaTeX 0.16.47; a standalone override does not replace that compiled copy.
+  This is a documented mitigation, not a claim that bundled KaTeX is patched.
+- The advisory requires existing prototype pollution or attacker-controlled
+  options and unsanitized HTML insertion. The adapter rejects configuration
+  directives/frontmatter, fixes options, starts a fresh sandboxed browser with
+  no runtime network, and emits normalized bounded PNG only. Upstream Mermaid
+  sanitizes the KaTeX HTML before rendering. Native math cases include untrusted
+  hyperlink and external-image expressions; no HTML output reaches the application.
+- Upstream reference: https://github.com/KaTeX/KaTeX/security/advisories/GHSA-238p-pmpm-9mq7
+- The initial 48 native tests and 642 conversion/workflow tests pass; the final
+  graph is requalified after its security and checksum corrections. Canonical
+  Python suite and hosted final-image E2E remain pending.
