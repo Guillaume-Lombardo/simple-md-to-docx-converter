@@ -641,3 +641,17 @@ Changed files relative to main:
 - `toolchain/document-engines/THIRD_PARTY_NOTICES.md`
 - `toolchain/document-engines/package-lock.json`
 - `toolchain/document-engines/package.json`
+
+
+## October 14, 2026 authorized Mermaid refresh
+
+- User requests rebasing onto main and finishing remaining Dependabot PRs.
+  Unpublished commits rebased onto 7a28b70; remote bot ancestry retained for
+  normal publication, preserving current CI partitions, caches and gates.
+- uv sync, Ruff formatting/lint, ty, module CI validator and 299 focused
+  workflow/workspace/renderer checks pass. Final npm graph SHA7c482 remains
+  identical to the earlier native/image qualification; historical October12
+  results do not substitute for fresh hosted exact-head CI.
+- Rebase conflicts preserve current validator logic and recompute its fingerprint.
+  A fresh bytecode cache avoids stale imports after Git timestamp restoration.
+- T22 remains In Progress; version0.7.5 and published receipts unchanged.
