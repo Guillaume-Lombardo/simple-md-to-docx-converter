@@ -1006,6 +1006,14 @@ run_reverse_lifecycle() {
   local receipt="$browser_session_directory/$stem-result.json"
   local barrier="$broker_directory/$stem-paused.json"
   local runtime="$application_name"
+  local metrics_url="$lifecycle_url/metrics"
+  if [[ "$profile" == distributed ]]; then
+    metrics_url="http://127.0.0.1:$(podman port "$worker_one_name" 9464/tcp | sed 's/.*://')/metrics"
+  fi
+  # T142: start the bounded fault window only after the worker proves the
+  # container-to-host broker path, which can stall after container restarts.
+  uv run python -m scripts.e2e.reverse_broker wait-worker-broker --root "$broker_directory" \
+    --metrics-url "$metrics_url"
   # Hold execution before admission, then prearm exact-unit observers.
   if [[ "$profile" == standalone ]]; then
     uv run python -m scripts.e2e.reverse_broker signal --root "$broker_directory" \

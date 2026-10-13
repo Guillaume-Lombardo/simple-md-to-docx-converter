@@ -1561,6 +1561,23 @@ def test_reverse_fault_injection_waits_for_bound_pause_and_joins_observers() -> 
 
 
 @pytest.mark.unit
+def test_reverse_fault_window_starts_after_the_worker_broker_path_is_proven() -> None:
+    runner = RUNNER.read_text()
+    lifecycle = _function(runner, "run_reverse_lifecycle")
+    gate = lifecycle.index("scripts.e2e.reverse_broker wait-worker-broker")
+    assert '--metrics-url "$metrics_url"' in lifecycle[gate:]
+    # Both profiles prove the path before the broker TERM or the worker pause.
+    assert gate < lifecycle.index('--parent-pid "$broker_pid" --signal TERM')
+    assert gate < lifecycle.index('podman pause "$runtime"')
+    assert gate < lifecycle.index("reverse_lifecycle_workflow prepare")
+    assert (
+        lifecycle.index('metrics_url="$lifecycle_url/metrics"')
+        < lifecycle.index('podman port "$worker_one_name" 9464/tcp')
+        < gate
+    )
+
+
+@pytest.mark.unit
 def test_reverse_frontend_outage_reuses_bound_broker_recovery() -> None:
     runner = RUNNER.read_text()
     lifecycle = runner[

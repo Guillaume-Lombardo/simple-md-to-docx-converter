@@ -77,6 +77,18 @@ _MEMBER_PRE_EXIT_STATES = frozenset(
 )
 _MEMBER_BROKER_FAULT_CODES = ("termination_unproven", "transport_failure")
 _MAX_METRICS_BYTES = 1_048_576
+# T142: rootless Podman 4.9 on the hosted runner can stall the container-to-host
+# broker path for about 70 seconds after a container stop or restart. The gate
+# bound covers that observed stall with margin; it is a harness bound, not a
+# product default.
+_BROKER_PATH_TIMEOUT_SECONDS = 180.0
+_BROKER_PATH_POLL_SECONDS = 0.25
+_BROKER_PATH_RECONCILIATIONS = 3
+_RECONCILIATION_COUNT = (
+    "md_converter_reversion_operation_duration_seconds_count"
+    '{operation="reversion_reconciliation"}'
+)
+_RUNTIME_FAULTS_PREFIX = "md_converter_reversion_runtime_faults_total{"
 
 
 def _openssl(root: Path, *arguments: str) -> None:
@@ -636,6 +648,63 @@ def _fault_delta(
     return (metrics[key] or 0.0) - (baseline[key] or 0.0)
 
 
+def _broker_path_metrics(url: str) -> dict[str, float]:
+    samples = _read_metrics(url)
+    ready = samples.get("md_converter_reversion_broker_ready")
+    fault = samples.get("md_converter_reversion_broker_fault")
+    if ready is None or fault is None:
+        raise RuntimeError("T142 worker reverse runtime gauges are unavailable")
+    return {
+        "broker_ready": ready,
+        "broker_fault": fault,
+        "reconciliations": samples.get(_RECONCILIATION_COUNT, 0.0),
+        "faults": sum(
+            value
+            for series, value in samples.items()
+            if series.startswith(_RUNTIME_FAULTS_PREFIX)
+        ),
+    }
+
+
+def wait_worker_broker(
+    metrics_url: str,
+    *,
+    timeout_seconds: float = _BROKER_PATH_TIMEOUT_SECONDS,
+) -> dict[str, float]:
+    """Wait until the reverse worker completes consecutive fault-free reconciliations.
+
+    Each worker reconciliation makes at least one authenticated broker exchange
+    over the container-to-host path. A fault restarts the count, so success
+    proves the path carries several consecutive exchanges before a bounded
+    fault window starts. Return the evidence: the elapsed seconds and the faults observed.
+    """
+    started = time.monotonic()
+    deadline = started + timeout_seconds
+    first = _broker_path_metrics(metrics_url)
+    baseline = first
+    latest = first
+    while True:
+        if latest["faults"] != baseline["faults"]:
+            baseline = latest
+        elif (
+            latest["broker_ready"] == 1
+            and latest["broker_fault"] == 0
+            and latest["reconciliations"] - baseline["reconciliations"]
+            >= _BROKER_PATH_RECONCILIATIONS
+        ):
+            return {
+                "elapsed_seconds": round(time.monotonic() - started, 3),
+                "faults_observed": latest["faults"] - first["faults"],
+            }
+        if time.monotonic() >= deadline:
+            raise RuntimeError(
+                "T142 worker broker path readiness timed out: "
+                + json.dumps(latest, sort_keys=True)
+            )
+        time.sleep(_BROKER_PATH_POLL_SECONDS)
+        latest = _broker_path_metrics(metrics_url)
+
+
 def watch_member(  # noqa: PLR0912, PLR0915 - linear fail-closed test observer
     root: Path,
     mode: str,
@@ -915,7 +984,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "operation",
-        choices=("prepare", "ready", "sweep", "watch-pause", "watch-member", "signal"),
+        choices=(
+            "prepare",
+            "ready",
+            "sweep",
+            "watch-pause",
+            "watch-member",
+            "signal",
+            "wait-worker-broker",
+        ),
     )
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--image-repository")
@@ -957,6 +1034,13 @@ def main() -> None:
         ):
             parser.error("watch-member requires mode, metrics URL, ready and report")
         watch_member(args.root, args.mode, args.metrics_url, args.ready, args.report)
+    elif args.operation == "wait-worker-broker":
+        if args.metrics_url is None:
+            parser.error("wait-worker-broker requires metrics URL")
+        evidence = wait_worker_broker(args.metrics_url)
+        print(
+            "Reverse worker broker path ready: " + json.dumps(evidence, sort_keys=True)
+        )
     elif args.operation == "signal":
         if args.parent_pid is None or args.signal is None:
             parser.error("signal requires parent PID and signal")
