@@ -156,3 +156,18 @@ refused whenever every handler slot is busy only because of this ordering.
     with `-n auto` passed with 6,274 tests and 94.44% coverage.
   - Not run locally: shard 1 of either profile, which this change does not touch, and the full
     `uv run pytest` run with the engine markers.
+- 2026-10-13: Review round 2 approved the change with one minor finding. The admission-window
+  launcher ran from the checkout instead of the harness-owned temporary directory, so files
+  written relative to the working directory, such as conmon OOM markers, could land in the
+  worktree.
+  - Fix: the launcher now runs with
+    `uv run --directory "$temporary_directory" --project "$repository"`, like every other
+    broker launch. The repository is on `PYTHONPATH` because the harness module is not
+    installed.
+  - A unit test requires every broker launch in `scripts/e2e/run.sh` to run from the harness
+    directory.
+- 2026-10-13: Decision: the owner approved an exception for the final-image E2E of the Unix
+  transport path. The exception is recorded on PR #304 and on G1L-694. The reason is the
+  `SO_PEERCRED` UID mismatch in the rootless arbitrary-UID topology described above. The Unix
+  fix stays covered by its unit and real-socket integration regressions. The mTLS path keeps
+  its final-image admission-window scenario.

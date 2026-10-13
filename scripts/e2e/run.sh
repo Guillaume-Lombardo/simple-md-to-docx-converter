@@ -1147,7 +1147,12 @@ run_reverse_admission_window() {
     --parent-pid "$broker_pid" --signal TERM
   wait "$broker_pid"
   broker_pid=""
-  uv run python -m scripts.e2e.admission_window_broker --root "$broker_directory" \
+  # Run from the harness-owned directory like every broker launch, so files
+  # written relative to the working directory, such as conmon OOM markers,
+  # never land in the worktree. The harness module is not installed, so the
+  # repository is on PYTHONPATH.
+  PYTHONPATH="$repository" uv run --directory "$temporary_directory" --project "$repository" \
+    python -m scripts.e2e.admission_window_broker --root "$broker_directory" \
     --report "$report" >>"$broker_directory/process.log" 2>&1 &
   broker_pid=$!
   uv run python -m tests.e2e.reverse_admission_workflow prepare \

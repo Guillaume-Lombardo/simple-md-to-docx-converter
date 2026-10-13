@@ -212,3 +212,28 @@ def test_signal_arguments_select_the_owned_launcher(tmp_path: Path) -> None:
     ]
     with pytest.raises(ValueError, match="absolute"):
         reverse_broker._broker_arguments(tmp_path, Path("report.json"))
+
+
+def test_every_broker_launch_runs_from_the_harness_directory() -> None:
+    lines = Path("scripts/e2e/run.sh").read_text().splitlines()
+    launches = [
+        index
+        for index, line in enumerate(lines)
+        if "python -m markweave.broker.process" in line
+        or "python -m scripts.e2e.admission_window_broker" in line
+    ]
+    assert len(launches) == 3
+    for index in launches:
+        assert (
+            lines[index - 1]
+            .rstrip()
+            .endswith(
+                'uv run --directory "$temporary_directory" --project "$repository" \\'
+            )
+        )
+    window = next(
+        index
+        for index in launches
+        if "scripts.e2e.admission_window_broker" in lines[index]
+    )
+    assert lines[window - 1].lstrip().startswith('PYTHONPATH="$repository" uv run')
