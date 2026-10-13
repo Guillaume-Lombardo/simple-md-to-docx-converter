@@ -137,7 +137,6 @@ DOMAIN_PATTERNS: Mapping[str, tuple[str, ...]] = {
         "tests/unit/test_golden_*.py",
     ),
     **dict.fromkeys(E2E_DOMAINS, FINAL_IMAGE_E2E_PATTERNS),
-    "functional": ("src/**", "tests/functional/**", "tests/integration/auth/**"),
     "frontend": (
         "web/**",
         "openapi/v1.json",
@@ -145,21 +144,6 @@ DOMAIN_PATTERNS: Mapping[str, tuple[str, ...]] = {
         "scripts/container/ci_images.py",
         "scripts/container/integrity.py",
         "scripts/container/pull-base-images.sh",
-    ),
-    "storage-distributed": (
-        "tests/integration/test_local_test_services_lifecycle.py",
-        "compose.test.yaml",
-        "scripts/testing/**",
-        "tests/conftest.py",
-        "src/**",
-        "tests/integration/storage/**",
-        "tests/integration/postgres/**",
-        "tests/integration/s3/**",
-    ),
-    "storage-standalone": (
-        "src/**",
-        "tests/integration/storage/**",
-        "tests/integration/sqlite/**",
     ),
     # The supply-chain scan inspects the same backend and reverse-attempt
     # archives as the container smokes, so it follows the same inputs.
@@ -182,6 +166,10 @@ IMAGE_DOMAIN_ROLES: Mapping[str, tuple[str, ...]] = {
     "frontend": ("frontend",),
     "supply-chain": ("backend", "reverse-attempt"),
 }
+
+# Functional, SQLite, PostgreSQL and S3 suites have no domain: the light shards
+# (`unit or light_coverage`) and the distributed coverage job run them on every
+# pull request, whatever the changed paths, so path selection cannot omit them.
 
 GLOBAL_PATTERNS = (
     ".github/ci/**",

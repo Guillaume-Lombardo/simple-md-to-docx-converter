@@ -7,7 +7,7 @@ import json
 import os
 import subprocess
 from pathlib import Path, PurePosixPath
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from PIL import Image
@@ -26,6 +26,9 @@ from markweave.conversion.mermaid import (
 )
 from markweave.conversion.validation import ApprovedMarkdown
 from markweave.jobs.policy import DiagramResourceBudget
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 pytestmark = pytest.mark.unit
 
@@ -621,36 +624,34 @@ def test_worker_deadline_caps_mermaid_engine_timeout(tmp_path: Path, mocker) -> 
     process.wait.assert_called_once_with(timeout=1.5)
 
 
-def test_cli_missing_output_is_invalid(tmp_path: Path, mocker) -> None:
+def _produce_no_output(_working_directory: Path) -> None:
+    return None
+
+
+def _produce_symlink_output(working_directory: Path) -> None:
+    (working_directory / "diagram.png").symlink_to("/dev/null")
+
+
+@pytest.mark.parametrize(
+    ("pid", "produce_output"),
+    [(3456, _produce_no_output), (4567, _produce_symlink_output)],
+    ids=["missing", "symlink"],
+)
+def test_cli_missing_or_symlink_output_is_invalid(
+    tmp_path: Path, mocker, pid: int, produce_output: Callable[[Path], None]
+) -> None:
     process = mocker.Mock()
-    process.pid = 3456
+    process.pid = pid
     process.wait.return_value = 0
     mocker.patch(
         "markweave.conversion.mermaid.os.killpg", side_effect=ProcessLookupError
     )
 
-    def missing(_arguments, **_options):
+    def launch(_arguments, **options):
+        produce_output(options["cwd"])
         return process
 
-    mocker.patch("markweave.conversion.mermaid.subprocess.Popen", side_effect=missing)
-    with pytest.raises(ConversionError) as captured:
-        MermaidCliRenderer(_config(tmp_path), {}).render("secret", 100_000)
-    assert captured.value.code is ConversionErrorCode.INVALID_MERMAID_OUTPUT
-
-
-def test_cli_symlink_output_is_invalid(tmp_path: Path, mocker) -> None:
-    process = mocker.Mock()
-    process.pid = 4567
-    process.wait.return_value = 0
-    mocker.patch(
-        "markweave.conversion.mermaid.os.killpg", side_effect=ProcessLookupError
-    )
-
-    def symlink(_arguments, **options):
-        (options["cwd"] / "diagram.png").symlink_to("/dev/null")
-        return process
-
-    mocker.patch("markweave.conversion.mermaid.subprocess.Popen", side_effect=symlink)
+    mocker.patch("markweave.conversion.mermaid.subprocess.Popen", side_effect=launch)
     with pytest.raises(ConversionError) as captured:
         MermaidCliRenderer(_config(tmp_path), {}).render("secret", 100_000)
     assert captured.value.code is ConversionErrorCode.INVALID_MERMAID_OUTPUT

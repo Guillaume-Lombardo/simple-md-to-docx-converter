@@ -137,48 +137,6 @@
     ],
     "status": "active"
   },
-  "functional": {
-    "activation_ticket": "T06",
-    "command": [
-      "uv",
-      "run",
-      "pytest",
-      "tests/functional",
-      "tests/integration/auth",
-      "-m",
-      "functional or integration",
-      "--no-cov"
-    ],
-    "status": "active"
-  },
-  "storage-distributed": {
-    "activation_ticket": "T12",
-    "command": [
-      "uv",
-      "run",
-      "pytest",
-      "tests/integration/postgres",
-      "tests/integration/s3",
-      "tests/integration/test_local_test_services_lifecycle.py",
-      "-m",
-      "requires_postgres or requires_s3",
-      "--no-cov"
-    ],
-    "status": "active"
-  },
-  "storage-standalone": {
-    "activation_ticket": "T12",
-    "command": [
-      "uv",
-      "run",
-      "pytest",
-      "tests/integration/sqlite",
-      "-m",
-      "integration",
-      "--no-cov"
-    ],
-    "status": "active"
-  },
   "supply-chain": {
     "activation_ticket": "T20",
     "command": [

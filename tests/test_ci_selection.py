@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 
 from scripts.ci.select_domains import (
     COMPOSE_DOMAINS,
@@ -102,7 +103,7 @@ def test_compose_sub_suites_are_active_independent_domains() -> None:
 
 @pytest.mark.unit
 def test_source_change_selects_all_application_domains_except_container() -> None:
-    """Shared Python behavior affects functional, storage, engine, and E2E suites."""
+    """Shared Python behavior affects engine and E2E suites."""
     selected = select_domains(["src/markweave/service.py"])
     assert selected == sorted(
         set(DOMAIN_PATTERNS)
@@ -289,23 +290,44 @@ def test_committed_ci_infrastructure_domain_is_active_and_runnable() -> None:
 
 
 @pytest.mark.unit
-def test_t06_functional_domain_is_active_and_runnable() -> None:
-    """Hosted CI executes the T06 ASGI and real Argon2 integration suite."""
+def test_functional_and_storage_suites_run_in_always_run_python_jobs() -> None:
+    """The light shards and distributed coverage own these suites on every run.
+
+    They need no path-selected domain, so no changed path can omit them.
+    """
     registry = load_registry(Path(".github/ci/domains.json"))
-    selected = select_domains(["src/markweave/app.py"])
-    planned, runnable = classify_domains(selected, registry)
-    assert "functional" not in planned
-    assert "functional" in runnable
-    assert registry["functional"]["command"] == [
-        "uv",
-        "run",
-        "pytest",
-        "tests/functional",
-        "tests/integration/auth",
-        "-m",
-        "functional or integration",
-        "--no-cov",
+    removed = {"functional", "storage-distributed", "storage-standalone"}
+    assert not removed & set(DOMAIN_PATTERNS)
+    assert not removed & set(registry)
+    workflow = yaml.safe_load(
+        Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    )
+    jobs = workflow["jobs"]
+    for job in ("python-tests", "python-distributed-coverage"):
+        assert "if" not in jobs[job]
+        assert "needs" not in jobs[job]
+    assert "if" not in jobs["python-coverage"]
+    assert jobs["python-coverage"]["needs"] == [
+        "python-tests",
+        "python-distributed-coverage",
     ]
+    assert {"python-tests", "python-coverage"} <= set(jobs["gate"]["needs"])
+    light = next(
+        step["run"]
+        for step in jobs["python-tests"]["steps"]
+        if step["name"] == "Run a complementary light test shard"
+    )
+    distributed = next(
+        step["run"]
+        for step in jobs["python-distributed-coverage"]["steps"]
+        if step["name"] == "Run distributed storage coverage"
+    )
+    assert 'uv run pytest -m "unit or light_coverage"' in light
+    assert (
+        "uv run pytest tests/integration/postgres tests/integration/s3 "
+        "tests/integration/test_local_test_services_lifecycle.py "
+        '-m "requires_postgres or requires_s3"'
+    ) in distributed
 
 
 @pytest.mark.unit
@@ -339,11 +361,20 @@ def test_frontend_inputs_select_rootless_frontend_smoke(path: str) -> None:
 
 
 @pytest.mark.unit
-def test_auth_integration_change_selects_functional_domain() -> None:
-    """Real authentication boundary tests cannot bypass their hosted domain."""
-    assert "functional" in select_domains(
-        ["tests/integration/auth/test_http_session.py"]
-    )
+@pytest.mark.parametrize(
+    "path",
+    [
+        "tests/functional/test_auth_api.py",
+        "tests/integration/auth/test_http_session.py",
+        "tests/integration/sqlite/test_sqlite_jobs.py",
+        "tests/integration/postgres/test_postgresql_jobs.py",
+        "tests/integration/s3/test_rustfs_profile.py",
+        "tests/integration/test_local_test_services_lifecycle.py",
+    ],
+)
+def test_always_run_suite_changes_need_no_path_selected_domain(path: str) -> None:
+    """Functional, SQLite, PostgreSQL and S3 tests run in every pull request."""
+    assert select_domains([path]) == []
 
 
 @pytest.mark.unit
@@ -551,7 +582,7 @@ def test_registry_rejects_invalid_domain_entry(
         domain: {"status": "planned", "activation_ticket": "T99"}
         for domain in DOMAIN_PATTERNS
     }
-    data["functional"] = entry
+    data["document-engines"] = entry
     registry = tmp_path / "domains.json"
     registry.write_text(json.dumps(data), encoding="utf-8")
     with pytest.raises(error_type, match=message):
@@ -645,8 +676,8 @@ def test_partition_covers_every_domain_exactly_once_with_known_roles() -> None:
     assert image == sorted(IMAGE_DOMAIN_ROLES)
     assert roles == sorted(IMAGE_ROLES)
     assert set(IMAGE_DOMAIN_ROLES) <= set(DOMAIN_PATTERNS)
-    assert partition_domains(["supply-chain", "functional"]) == (
-        ["functional"],
+    assert partition_domains(["supply-chain", "document-engines"]) == (
+        ["document-engines"],
         ["supply-chain"],
         ["backend", "reverse-attempt"],
     )
@@ -655,7 +686,5 @@ def test_partition_covers_every_domain_exactly_once_with_known_roles() -> None:
 
 @pytest.mark.unit
 @pytest.mark.parametrize("path", ["compose.test.yaml", "scripts/testing/services.py"])
-def test_local_services_select_infrastructure_and_distributed_storage(
-    path: str,
-) -> None:
-    assert select_domains([path]) == ["ci-infrastructure", "storage-distributed"]
+def test_local_services_select_ci_infrastructure(path: str) -> None:
+    assert select_domains([path]) == ["ci-infrastructure"]

@@ -613,6 +613,7 @@ def test_composer_scenario_replays_real_browser_with_canonical_runtime() -> None
     assert scenario < service < canonical
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("scenario_mode", "smoke_mode", "message"),
     [
@@ -1091,6 +1092,7 @@ def test_failure_artifacts_retain_bounded_frontend_admission_evidence(
     assert not (artifacts / "frontend-saturated").exists()
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("backend", "frontend", "message"),
     [

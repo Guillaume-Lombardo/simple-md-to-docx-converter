@@ -308,8 +308,6 @@ def test_workflow_gates_native_python_shards_and_engine_domains() -> None:
         if step.get("name") == "Run selected domain suite without a shell"
     )
     assert "scripts.ci.engine_userns_gate --" in light_shard["run"]
-    assert (
-        'if [[ "$CI_DOMAIN" == "document-engines" || "$CI_DOMAIN" == "functional" ]]'
-    ) in heavy["run"]
+    assert ('if [[ "$CI_DOMAIN" == "document-engines" ]]') in heavy["run"]
     assert "scripts.ci.engine_userns_gate --" in heavy["run"]
     assert 'scripts.ci.run_domain "$CI_DOMAIN"' in heavy["run"]

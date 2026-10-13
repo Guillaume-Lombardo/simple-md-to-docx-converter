@@ -88,6 +88,26 @@ MAX_RELEASE_TIMEOUT_MINUTES = 60
 LIGHT_SHARD_TIMEOUT_MINUTES = 15
 HEAVY_MAX_PARALLEL = 8
 HEAVY_UV_CACHE_SUFFIX = "py314-heavy"
+DISTRIBUTED_SERVICE_IMAGES = {
+    "postgres": (
+        "docker.io/library/postgres:18-alpine@sha256:"
+        "63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8"
+    ),
+    "rustfs": (
+        "ghcr.io/rustfs/rustfs:1.0.0-beta.12-glibc@sha256:"
+        "6d693c8d0c09a1c5770f1780303a5d58b9e864c313fd2644ecd561e92b79ae04"
+    ),
+}
+DISTRIBUTED_TEST_VARIABLES = frozenset(
+    {
+        "MARKWEAVE_TEST_POSTGRES_URL",
+        "MARKWEAVE_TEST_S3_ACCESS_KEY_ID",
+        "MARKWEAVE_TEST_S3_BUCKET",
+        "MARKWEAVE_TEST_S3_ENDPOINT_URL",
+        "MARKWEAVE_TEST_S3_REGION",
+        "MARKWEAVE_TEST_S3_SECRET_ACCESS_KEY",
+    }
+)
 FINAL_IMAGE_TIMEOUT_MINUTES = 30
 PODMAN_ASSERTION = (
     "set -euo pipefail\n"
@@ -270,13 +290,11 @@ READ_ONLY_WORKFLOW_POLICIES = {
             ),
             "heavy": frozenset(
                 {
-                    "env",
                     "if",
                     "name",
                     "needs",
                     "permissions",
                     "runs-on",
-                    "services",
                     "steps",
                     "strategy",
                     "timeout-minutes",
@@ -417,10 +435,6 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Install verified Mermaid and Chrome for document-engine tests",
             ): "${{ matrix.domain == 'document-engines' }}",
             (
-                "heavy",
-                "Prepare the RustFS test bucket",
-            ): "${{ matrix.domain == 'storage-distributed' }}",
-            (
                 "final-image",
                 "Install the locked E2E browser driver",
             ): "${{ startsWith(matrix.domain, 'e2e-') }}",
@@ -443,7 +457,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
             ),
             ("mutation", "Retain mutation evidence"): "${{ always() }}",
         },
-        canonical_digest="edf0501162b813342903c38db451a25fd2f909153cdba735f03764d742145c8f",
+        canonical_digest="adf6591406fd1c671436c7527cc6667a0c90c4e945b9a24c8650eff3a059e748",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -933,26 +947,22 @@ def _validate_light_sharding(workflow: Mapping[str, Any]) -> list[str]:
         errors.append(
             "Python coverage must require both shards and distributed storage"
         )
-    heavy = _mapping(jobs.get("heavy")) or {}
-    heavy_services = _mapping(heavy.get("services")) or {}
+    # The always-run distributed coverage job is the only CI owner of the
+    # PostgreSQL and S3 suites; the canonical digest pins every other value.
     distributed_services = _mapping(distributed.get("services")) or {}
-    if distributed.get("env") != heavy.get("env") or set(distributed_services) != {
-        "postgres",
-        "rustfs",
-    }:
-        errors.append("distributed coverage must reuse the pinned storage services")
-    for name in ("postgres", "rustfs"):
-        reference = _mapping(heavy_services.get(name)) or {}
-        candidate = _mapping(distributed_services.get(name)) or {}
-        reference_image = reference.get("image")
-        candidate_image = candidate.get("image")
+    distributed_env = _mapping(distributed.get("env")) or {}
+    if (
+        set(distributed_services) != set(DISTRIBUTED_SERVICE_IMAGES)
+        or set(distributed_env) != DISTRIBUTED_TEST_VARIABLES
+    ):
+        errors.append("distributed coverage must use the pinned storage services")
+    for name, image in DISTRIBUTED_SERVICE_IMAGES.items():
+        service = _mapping(distributed_services.get(name)) or {}
+        options = service.get("options")
         if (
-            not isinstance(reference_image, str)
-            or not isinstance(candidate_image, str)
-            or "@sha256:" not in candidate_image
-            or candidate_image not in reference_image
-            or {key: value for key, value in candidate.items() if key != "image"}
-            != {key: value for key, value in reference.items() if key != "image"}
+            service.get("image") != image
+            or not isinstance(options, str)
+            or "--health-cmd" not in options
         ):
             errors.append(f"distributed coverage {name} must match the pinned service")
     if [
@@ -1311,8 +1321,7 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             "--filter md-converter-web-tests"
         ),
         ("heavy", "Run selected domain suite without a shell"): (
-            'if [[ "$CI_DOMAIN" == "document-engines" || '
-            '"$CI_DOMAIN" == "functional" ]]; then\n'
+            'if [[ "$CI_DOMAIN" == "document-engines" ]]; then\n'
             "  uv run python -m scripts.ci.engine_userns_gate -- \\\n"
             '    uv run python -m scripts.ci.run_domain "$CI_DOMAIN"\n'
             "else\n"

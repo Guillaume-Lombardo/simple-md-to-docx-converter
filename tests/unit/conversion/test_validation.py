@@ -46,6 +46,22 @@ def test_reader_expression_is_the_approved_fixed_dialect() -> None:
         "<?processing instruction?>",
         "<!DOCTYPE html>",
         "<![CDATA[content]]>",
+        "---\ntitle: |\n  <span>bad</span>\n---\n# Safe",
+        "---\ntitle: '<!ENTITY bad>'\n---\n# Safe",
+        '---\ntitle: "\\u003cspan\\u003ebad\\u003c/span\\u003e"\n---\n# Safe',
+        "Safe.[^1]\n\n[^1]: note\n\n    <span>bad</span>",
+    ],
+    ids=[
+        "block-element",
+        "multiline-inline-element",
+        "comment",
+        "processing-instruction",
+        "doctype",
+        "cdata",
+        "extension-context-metadata-block-scalar",
+        "extension-context-metadata-declaration",
+        "extension-context-metadata-unicode-escape",
+        "extension-context-footnote-continuation",
     ],
 )
 def test_raw_html_is_rejected_before_converter_call(mocker, raw_html: str) -> None:
@@ -105,26 +121,6 @@ def test_service_uses_simple_and_cancellable_document_engine_paths(mocker) -> No
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    "raw_html",
-    [
-        "---\ntitle: |\n  <span>bad</span>\n---\n# Safe",
-        "---\ntitle: '<!ENTITY bad>'\n---\n# Safe",
-        '---\ntitle: "\\u003cspan\\u003ebad\\u003c/span\\u003e"\n---\n# Safe',
-        "Safe.[^1]\n\n[^1]: note\n\n    <span>bad</span>",
-    ],
-)
-def test_extension_context_cannot_hide_raw_html(mocker, raw_html: str) -> None:
-    converter = mocker.Mock()
-    service = DocxConversionService(converter)
-    with pytest.raises(ConversionError) as captured:
-        service.convert(raw_html, b"reference")
-    assert captured.value.code is ConversionErrorCode.VALIDATION
-    assert str(captured.value) == "Markdown input contains raw HTML."
-    converter.convert.assert_not_called()
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize(
     "remote",
     [
         "![image](https://example.test/image.png)",
@@ -145,6 +141,34 @@ def test_extension_context_cannot_hide_raw_html(mocker, raw_html: str) -> None:
         "[link](https://user:secret@example.test/path)",
         "[link](https://example.test/%0Aheader)",
         "[link](https://example.test:invalid/path)",
+        "---\nsource: '[local](file:///etc/passwd)'\n---\n# Safe",
+        "---\nsource: '![data](data:text/plain,secret)'\n---\n# Safe",
+        '---\nsource: "[local](file\\u003a///etc/passwd)"\n---\n# Safe',
+        "Safe.[^1]\n\n[^1]: note\n\n    [hidden](file:///etc/passwd)",
+    ],
+    ids=[
+        "https-image",
+        "ftp-image",
+        "scheme-relative-image",
+        "data-image",
+        "file-image",
+        "file-link",
+        "data-link",
+        "javascript-link",
+        "mailto-link",
+        "https-without-authority",
+        "encoded-file-scheme",
+        "encoded-scheme-relative",
+        "encoded-https-scheme",
+        "double-encoded-https-scheme",
+        "userinfo",
+        "userinfo-with-secret",
+        "encoded-header-injection",
+        "invalid-port",
+        "extension-context-metadata-link",
+        "extension-context-metadata-data-image",
+        "extension-context-metadata-unicode-escape",
+        "extension-context-footnote-continuation",
     ],
 )
 def test_remote_resources_are_rejected_before_converter_call(
@@ -182,35 +206,41 @@ def test_safe_http_links_and_local_links_are_accepted(mocker, link: str) -> None
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    "remote",
+    "markdown",
     [
-        "---\nsource: '[local](file:///etc/passwd)'\n---\n# Safe",
-        "---\nsource: '![data](data:text/plain,secret)'\n---\n# Safe",
-        '---\nsource: "[local](file\\u003a///etc/passwd)"\n---\n# Safe',
-        "Safe.[^1]\n\n[^1]: note\n\n    [hidden](file:///etc/passwd)",
-    ],
-)
-def test_extension_context_cannot_hide_resource_destination(
-    mocker, remote: str
-) -> None:
-    converter = mocker.Mock()
-    service = DocxConversionService(converter)
-    with pytest.raises(ConversionError) as captured:
-        service.convert(remote, b"reference")
-    assert captured.value.code is ConversionErrorCode.VALIDATION
-    assert str(captured.value) == "Markdown input contains a remote resource."
-    converter.convert.assert_not_called()
-
-
-@pytest.mark.unit
-def test_safe_external_link_is_accepted_in_metadata_and_footnotes() -> None:
-    markdown = """---
+        """---
 source: '[documentation](https://example.test/metadata)'
 ---
 Safe.[^1]
 
 [^1]: [reference](http://example.test/footnote)
-"""
+""",
+        """Inline `<span>
+https://example.test</span>`.
+
+```html
+<div>https://example.test/image.png</div>
+```
+
+    <aside>https://example.test/indented</aside>
+""",
+        """```html
+literal
+```not-a-closing-fence
+<section>still literal code</section>
+""",
+        "Documentation example: https://example.test/resource",
+        '---\ntitle: "x <foo y"\n---\n# Safe',
+    ],
+    ids=[
+        "safe-links-in-metadata-and-footnotes",
+        "html-and-urls-as-code-examples",
+        "nonclosing-fence-keeps-content-literal",
+        "plain-url-text-is-not-a-resource",
+        "incomplete-tag-text-in-metadata-is-not-html",
+    ],
+)
+def test_safe_or_literal_markdown_is_accepted_unchanged(markdown: str) -> None:
     assert validate_markdown(markdown).text == markdown
 
 
@@ -400,30 +430,6 @@ def test_raw_attribute_text_remains_allowed_inside_real_code(literal: str) -> No
 
 
 @pytest.mark.unit
-def test_code_can_show_html_and_urls_as_literal_examples() -> None:
-    markdown = """Inline `<span>
-https://example.test</span>`.
-
-```html
-<div>https://example.test/image.png</div>
-```
-
-    <aside>https://example.test/indented</aside>
-"""
-    assert validate_markdown(markdown).text == markdown
-
-
-@pytest.mark.unit
-def test_nonclosing_fence_with_trailing_text_keeps_content_literal() -> None:
-    markdown = """```html
-literal
-```not-a-closing-fence
-<section>still literal code</section>
-"""
-    assert validate_markdown(markdown).text == markdown
-
-
-@pytest.mark.unit
 @pytest.mark.parametrize(
     "literal",
     [r"\<span>escaped\</span>", "<https://example.test/resource>"],
@@ -433,36 +439,19 @@ def test_escaped_html_and_safe_http_autolinks_are_accepted(literal: str) -> None
 
 
 @pytest.mark.unit
-def test_plain_url_text_is_not_a_loaded_resource() -> None:
-    markdown = "Documentation example: https://example.test/resource"
-    assert validate_markdown(markdown).text == markdown
-
-
-@pytest.mark.unit
-def test_incomplete_tag_text_in_metadata_is_not_raw_html() -> None:
-    markdown = '---\ntitle: "x <foo y"\n---\n# Safe'
-    assert validate_markdown(markdown).text == markdown
-
-
-@pytest.mark.unit
-def test_invalid_yaml_metadata_has_stable_validation_error(mocker) -> None:
+@pytest.mark.parametrize(
+    "markdown",
+    [
+        "---\ntitle: [invalid\n---\n# Safe",
+        "---\nvalue: " + "[" * 500 + "safe" + "]" * 500 + "\n---\n# Safe",
+    ],
+    ids=["malformed", "excessively-nested"],
+)
+def test_invalid_yaml_metadata_has_stable_validation_error(
+    mocker, markdown: str
+) -> None:
     converter = mocker.Mock()
     service = DocxConversionService(converter)
-    markdown = "---\ntitle: [invalid\n---\n# Safe"
-    with pytest.raises(ConversionError) as captured:
-        service.convert(markdown, b"reference")
-    assert captured.value.code is ConversionErrorCode.VALIDATION
-    assert str(captured.value) == "Markdown input contains invalid YAML metadata."
-    converter.convert.assert_not_called()
-
-
-@pytest.mark.unit
-def test_excessively_nested_yaml_has_stable_validation_error(mocker) -> None:
-    converter = mocker.Mock()
-    service = DocxConversionService(converter)
-    depth = 500
-    nested_value = "[" * depth + "safe" + "]" * depth
-    markdown = f"---\nvalue: {nested_value}\n---\n# Safe"
     with pytest.raises(ConversionError) as captured:
         service.convert(markdown, b"reference")
     assert captured.value.code is ConversionErrorCode.VALIDATION

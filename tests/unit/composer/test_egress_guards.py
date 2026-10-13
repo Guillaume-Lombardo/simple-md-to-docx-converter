@@ -77,9 +77,31 @@ def test_policy_requires_typed_positive_budgets(policy: ConnectionPolicy) -> Non
         " https://models.example/v1",
         "https://models.example:abc/v1",
         "https://models.example/v1\n",
+        "http://models.example/v1",
+        "https://models.example.evil/v1",
+        "https://models.example@evil.test/v1",
+        "https://models.example/v1?next=evil",
+        "https://models.example/v1/../private",
+        "https://models.example:0/v1",
+        "https://models.example:/v1",
+    ],
+    ids=[
+        "empty",
+        "leading-space",
+        "non-numeric-port",
+        "trailing-newline",
+        "plain-http",
+        "unapproved-host-suffix",
+        "userinfo-host-confusion",
+        "query-string",
+        "dot-segment-path",
+        "port-zero",
+        "empty-port",
     ],
 )
-def test_endpoint_rejects_malformed_url(url: str, policy: ConnectionPolicy) -> None:
+def test_endpoint_rejects_malformed_or_unapproved_url(
+    url: str, policy: ConnectionPolicy
+) -> None:
     with pytest.raises(EgressPolicyError):
         validate_endpoint(url, policy)
 
