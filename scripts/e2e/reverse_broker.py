@@ -84,10 +84,12 @@ _MAX_METRICS_BYTES = 1_048_576
 _BROKER_PATH_TIMEOUT_SECONDS = 180.0
 _BROKER_PATH_POLL_SECONDS = 0.25
 _BROKER_PATH_RECONCILIATIONS = 3
-_RECONCILIATION_COUNT = (
+_RECONCILIATION_ATTEMPTS = (
     "md_converter_reversion_operation_duration_seconds_count"
     '{operation="reversion_reconciliation"}'
 )
+_RECONCILIATION_SUCCESSES = "md_converter_reversion_reconciliation_successes_total"
+_BROKER_PATH_COUNTERS = ("attempts", "successes", "faults")
 _RUNTIME_FAULTS_PREFIX = "md_converter_reversion_runtime_faults_total{"
 
 
@@ -657,7 +659,8 @@ def _broker_path_metrics(url: str) -> dict[str, float]:
     return {
         "broker_ready": ready,
         "broker_fault": fault,
-        "reconciliations": samples.get(_RECONCILIATION_COUNT, 0.0),
+        "attempts": samples.get(_RECONCILIATION_ATTEMPTS, 0.0),
+        "successes": samples.get(_RECONCILIATION_SUCCESSES, 0.0),
         "faults": sum(
             value
             for series, value in samples.items()
@@ -666,35 +669,63 @@ def _broker_path_metrics(url: str) -> dict[str, float]:
     }
 
 
+def _broker_path_window_broken(
+    latest: Mapping[str, float], baseline: Mapping[str, float]
+) -> bool:
+    """Return whether the scrape breaks the run of successes since the baseline.
+
+    Every counter comes from one atomic counter snapshot. A decrease is a
+    process restart, so the evidence restarts from the new values. A new fault
+    breaks the run. A reconciliation whose duration is published without a
+    matching success is a failed step whose fault may not be published yet, so
+    it breaks the run before fault handling settles. A scrape that lands inside
+    a successful step can only restart the run, never extend it.
+    """
+    if any(latest[name] < baseline[name] for name in _BROKER_PATH_COUNTERS):
+        return True
+    if latest["faults"] != baseline["faults"]:
+        return True
+    attempts = latest["attempts"] - baseline["attempts"]
+    return attempts > latest["successes"] - baseline["successes"]
+
+
 def wait_worker_broker(
     metrics_url: str,
     *,
     timeout_seconds: float = _BROKER_PATH_TIMEOUT_SECONDS,
 ) -> dict[str, float]:
-    """Wait until the reverse worker completes consecutive fault-free reconciliations.
+    """Wait until the reverse worker completes consecutive successful reconciliations.
 
     Each worker reconciliation makes at least one authenticated broker exchange
-    over the container-to-host path. A fault restarts the count, so success
-    proves the path carries several consecutive exchanges before a bounded
-    fault window starts. Return the evidence: the elapsed seconds and the faults observed.
+    over the container-to-host path. The worker counts a reconciliation as a
+    success only after that exchange returns without error, so a failed step can
+    never be counted. Any fault, failed step or counter reset restarts the run,
+    so success proves the path carries several consecutive exchanges before a
+    bounded fault window starts. Return the evidence: the elapsed seconds and
+    the faults observed.
     """
     started = time.monotonic()
     deadline = started + timeout_seconds
-    first = _broker_path_metrics(metrics_url)
-    baseline = first
-    latest = first
+    latest = _broker_path_metrics(metrics_url)
+    baseline = latest
+    previous = latest
+    faults_observed = 0.0
     while True:
-        if latest["faults"] != baseline["faults"]:
+        if latest["faults"] >= previous["faults"]:
+            faults_observed += latest["faults"] - previous["faults"]
+        else:
+            faults_observed += latest["faults"]
+        if _broker_path_window_broken(latest, baseline):
             baseline = latest
         elif (
             latest["broker_ready"] == 1
             and latest["broker_fault"] == 0
-            and latest["reconciliations"] - baseline["reconciliations"]
+            and latest["successes"] - baseline["successes"]
             >= _BROKER_PATH_RECONCILIATIONS
         ):
             return {
                 "elapsed_seconds": round(time.monotonic() - started, 3),
-                "faults_observed": latest["faults"] - first["faults"],
+                "faults_observed": faults_observed,
             }
         if time.monotonic() >= deadline:
             raise RuntimeError(
@@ -702,6 +733,7 @@ def wait_worker_broker(
                 + json.dumps(latest, sort_keys=True)
             )
         time.sleep(_BROKER_PATH_POLL_SECONDS)
+        previous = latest
         latest = _broker_path_metrics(metrics_url)
 
 

@@ -183,6 +183,8 @@ class FairWorkerLoop:
         try:
             if phase == "reconcile":
                 ready = self._reverse.reconcile_step()
+                if self._metrics is not None:
+                    self._metrics.record_reversion_reconciliation_success()
                 self._set_reverse_state("ready" if ready else "reconciling")
                 return False, "recover" if ready else phase
             if phase in {"recover", "recover_proof"}:

@@ -210,6 +210,8 @@ def test_metrics_are_low_cardinality_and_cover_required_operational_signals() ->
     metrics.record_reversion_recovery(2)
     metrics.record_reversion_expiration(1)
     metrics.record_reversion_duration("reversion_claim", 0.25)
+    metrics.record_reversion_reconciliation_success()
+    metrics.record_reversion_reconciliation_success()
 
     rendered = metrics.render(
         QueueSnapshot(
@@ -256,6 +258,7 @@ def test_metrics_are_low_cardinality_and_cover_required_operational_signals() ->
     )
     assert "md_converter_reversion_recoveries_total 2" in rendered
     assert "md_converter_reversion_expirations_total 1" in rendered
+    assert "md_converter_reversion_reconciliation_successes_total 2" in rendered
     assert (
         'md_converter_reversion_operation_duration_seconds_sum{operation="reversion_claim"} 0.25'
         in rendered
