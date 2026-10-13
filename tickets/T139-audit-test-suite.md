@@ -75,3 +75,50 @@ scripts they test), and C1 to C3. Not approved in this scope: K3 and K5.
 
 - 2026-10-13: Mirrored from Linear and started on branch `chore/T139-test-suite-cleanup` from
   `origin/main` `0e0f7f3`.
+- 2026-10-13: Implemented the approved scope, one commit per category.
+  - **K2.** The four unmarked functions (8 cases) are now `unit` tests. The new
+    `tests/category_marker_guard.py`, registered through `addopts`, reports every test under
+    `tests/` without a category marker as a collection error before any marker or shard
+    deselection, in serial and xdist runs. No other unmarked test exists on `main`.
+  - **K4.** With every validator rule except the canonical digest disabled, 34 cases in five
+    tests still passed: inert or indirect commands, neutralizing fields, the light shard and
+    distributed coverage contracts, and trusted cache writes. Each case now asserts its rule
+    error. Disabling each of the 16 targeted rules makes its cases fail. Only the two tests that
+    target the digest rule itself still pass on the digest alone.
+  - **P1 to P5, P6.** Duplicates are parametrized with every input kept and intent-revealing
+    ids; collected cases per file and parameter values are unchanged. The protocol pair in
+    `tests/unit/broker/test_protocol.py` is left to T137, which owns that directory. In
+    `tests/test_ci_validation.py` only same-rule variants (repository guard, mutable action)
+    and the identical light/distributed coverage bodies were merged; `tests/test_ci_selection.py`
+    groups test different domains and stay separate.
+  - **D1.** Every assertion of the deleted test is rejected by the `mutation.yml` policy; the
+    exact 30-minute timeout and the absence of `github.token` are enforced by its canonical
+    digest only.
+  - **D2.** No workflow, package script, specification section or live document runs the T67
+    scripts. They are removed with their tests, and the evidence record points to Git history.
+    `tests/integration/test_benchmark_timeout.py` called the bounded runner in-process, which
+    made the pytest process a child subreaper. That is why the eight
+    `test_local_test_services_interruption.py` cases (K1, T138) failed in the canonical run on
+    `main` and why the run took about 16 minutes: on `main`, running the two modules together
+    fails the eight cases, and the interruption module alone passes.
+  - **C1 to C3.** Collected node ids on `main` `0e0f7f3`: the 38 `functional` and 202
+    `storage-standalone` cases are all in the light shards (5,843 cases, whose two shards are
+    exactly complementary), and the 78 `storage-distributed` cases equal the always-run
+    distributed coverage selection. Neither domain had a service, variable or marker that those
+    jobs lack. The domains are removed from the registry, selector, heavy matrix (which drops its
+    storage services) and validator, whose canonical digest is updated. The marker guard now
+    requires `unit` or `light_coverage` under `tests/functional`, `tests/integration/auth` and
+    `tests/integration/sqlite`.
+  - **Measurements** (canonical default command, same machine, low load):
+
+    | | `main` `0e0f7f3` | branch |
+    | --- | --- | --- |
+    | Collected tests | 6,231 | 6,232 |
+    | Selected by the canonical command | 6,116 | 6,117 |
+    | Result | 8 failed (K1), 6,108 passed | 6,117 passed |
+    | Wall time | 976 s | 478 s |
+    | Application branch coverage | 90.47% (8,591/9,496) | 90.46% (8,590/9,496) |
+
+    No `src/markweave` arc covered in every `main` run is missing from the branch runs. Five
+    arcs vary between runs of unchanged tests in both trees (job submission, source activation
+    and model-step expiry races).
