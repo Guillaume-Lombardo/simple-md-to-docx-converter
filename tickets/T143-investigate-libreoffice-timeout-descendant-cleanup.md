@@ -2,7 +2,7 @@
 ticket: T143
 linear_id: G1L-696
 linear_url: https://linear.app/g1lom/issue/G1L-696/t143-investigate-the-intermittent-libreoffice-timeout-descendant
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -77,6 +77,7 @@ This is a security-relevant subprocess area. If the LibreOffice timeout path can
   - attempt 1: job 115442704111;
   - attempt 2: job 115444345531;
   - attempt 3: job 115445679165.
+- 2026-10-13: Done. Merged as `2df5640` (PR #308) after independent review; main CI run 38443008178 passed. Follow-up: T144 synchronizes the descendant pid publication in the timeout case and reviews the Z-only predicate in `test_template_activation.py`.
 
 ## Synchronization
 

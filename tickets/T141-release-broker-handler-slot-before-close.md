@@ -2,7 +2,7 @@
 ticket: T141
 linear_id: G1L-694
 linear_url: https://linear.app/g1lom/issue/G1L-694/t141-release-the-broker-handler-slot-before-closing-the-connection
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -171,3 +171,4 @@ refused whenever every handler slot is busy only because of this ordering.
   `SO_PEERCRED` UID mismatch in the rootless arbitrary-UID topology described above. The Unix
   fix stays covered by its unit and real-socket integration regressions. The mTLS path keeps
   its final-image admission-window scenario.
+- 2026-10-13: Done. Merged as `cd98c07` (PR #304) after three independent review rounds and the owner-approved Unix-path final-image E2E exception; main CI run 38439716364 passed. Follow-up: T145 audits the same release-after-close slot pattern in the metrics server and the Kubernetes attester transport.
