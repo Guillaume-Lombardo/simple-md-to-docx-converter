@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import socket
 import ssl
 import struct
@@ -61,6 +62,8 @@ from markweave.broker.workspace_protocol import (
 from markweave.reversions.errors import ReverseErrorCategory
 from markweave.reversions.models import ReverseContentLimits, ReverseOutputMode
 from markweave.reversions.options import ReverseExtraction, ReversionOptions
+from scripts.e2e import admission_window_broker
+from tests.integration.broker.slot_release import delay_slot_releases
 from tests.integration.broker.slow_reaping import (
     budget_exhausting_runner,
     install_slow_reaping,
@@ -1154,3 +1157,78 @@ def test_real_internal_dispatch_failure_sets_content_free_fatal_signal(
 
     assert "private dispatcher detail" not in str(captured.value)
     assert "private dispatcher detail" not in str(stopped.value)
+
+
+@pytest.mark.parametrize(
+    ("slot", "releases_per_exchange"),
+    [("_connections", 2), ("_exchanges", 1), ("_handlers", 1)],
+)
+def test_real_mtls_reconnect_at_each_slot_limit_is_admitted(
+    certificates: CertificateSet,
+    mocker: MockerFixture,
+    slot: str,
+    releases_per_exchange: int,
+) -> None:
+    # A client may start its next exchange as soon as the previous one completes.
+    # Every slot that exchange held must already be free then, however late the
+    # old channel threads run.
+    dispatcher = mocker.Mock(spec=BrokerDispatcher)
+    dispatcher.dispatch.return_value = ReadyResponse(REQUEST_ID, True)
+    server_local, client_peer, client_local, server_peer = _identities(certificates)
+    server = MtlsBrokerServer(
+        MtlsEndpoint("127.0.0.1", 0),
+        local_identity=server_local,
+        client_identity=client_peer,
+        dispatcher=dispatcher,
+        limits=MtlsTransportLimits(3, 3, 1, 1, 1, 1),
+    )
+    release = delay_slot_releases(mocker, getattr(server, slot))
+    request = ReadyRequest(REQUEST_ID, 1)
+
+    with server:
+        client = _client(server, client_local, server_peer, timeout=3)
+        responses = [client.request(request) for _ in range(3)]
+
+    assert responses == [ReadyResponse(REQUEST_ID, True)] * 3
+    assert dispatcher.dispatch.call_count == 3
+    assert release.call_count == 3 * releases_per_exchange
+
+
+def test_e2e_admission_window_launcher_admits_reconnections_at_limit_one(
+    certificates: CertificateSet, mocker: MockerFixture, tmp_path: Path
+) -> None:
+    # The final-image scenario's broker launcher must count real reconnections
+    # inside its window and, with release-before-completion, no refusal.
+    dispatcher = mocker.Mock(spec=BrokerDispatcher)
+    dispatcher.dispatch.return_value = ReadyResponse(REQUEST_ID, True)
+    server_local, client_peer, client_local, server_peer = _identities(certificates)
+    report = tmp_path / "admission.json"
+    uninstall = admission_window_broker.install_release_window(
+        admission_window_broker.AdmissionRecorder(
+            report, admission_window_broker.RELEASE_WINDOW_SECONDS
+        )
+    )
+    try:
+        server = MtlsBrokerServer(
+            MtlsEndpoint("127.0.0.1", 0),
+            local_identity=server_local,
+            client_identity=client_peer,
+            dispatcher=dispatcher,
+            limits=MtlsTransportLimits(5, 5, 1, 1, 1, 1),
+        )
+    finally:
+        uninstall()
+    request = ReadyRequest(REQUEST_ID, 1)
+
+    with server:
+        client = _client(server, client_local, server_peer, timeout=5)
+        responses = [client.request(request) for _ in range(3)]
+
+    assert responses == [ReadyResponse(REQUEST_ID, True)] * 3
+    slots = json.loads(report.read_text("utf-8"))["slots"]
+    assert {slot: counts["refused"] for slot, counts in slots.items()} == dict.fromkeys(
+        admission_window_broker.WINDOWED_SLOTS, 0
+    )
+    assert slots["_exchanges"]["acquired"] == 3
+    assert slots["_connections"]["released"] == 6
+    assert any(counts["immediate"] for counts in slots.values())

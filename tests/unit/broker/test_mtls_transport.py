@@ -87,6 +87,11 @@ def _mock_server(mocker: MockerFixture) -> mtls_transport.MtlsBrokerServer:
     )
 
 
+def _admission(server: mtls_transport.MtlsBrokerServer) -> mtls_transport._SlotLease:
+    assert server._connections.acquire(blocking=False)
+    return mtls_transport._SlotLease(server._connections)
+
+
 def test_mtls_control_protocol_has_an_independent_exact_golden() -> None:
     assert mtls_transport._control_frame(
         mtls_transport._reservation_mapping(REQUEST_ID)
@@ -626,15 +631,30 @@ def test_server_channel_handlers_reject_wrong_roles_and_digest(
             PRINCIPAL,
             PIN,
             float("inf"),
+            admission=_admission(server),
         )
     submit = mtls_transport._submit_mapping("a" * 64, REQUEST_ID, b"x")
     submit["channel"] = "response"
     with pytest.raises(BrokerError):
-        server._handle_request_channel(connection, submit, PRINCIPAL, PIN, float("inf"))
+        server._handle_request_channel(
+            connection,
+            submit,
+            PRINCIPAL,
+            PIN,
+            float("inf"),
+            admission=_admission(server),
+        )
     submit["channel"] = "request"
     submit["frame_sha256"] = "invalid"
     with pytest.raises(BrokerError):
-        server._handle_request_channel(connection, submit, PRINCIPAL, PIN, float("inf"))
+        server._handle_request_channel(
+            connection,
+            submit,
+            PRINCIPAL,
+            PIN,
+            float("inf"),
+            admission=_admission(server),
+        )
 
 
 def test_duplicate_server_exchange_is_rejected_without_replacing_reservation(
@@ -654,6 +674,7 @@ def test_duplicate_server_exchange_is_rejected_without_replacing_reservation(
         PRINCIPAL,
         PIN,
         float("inf"),
+        admission=_admission(server),
     )
 
     assert server._reservations == {exchange: existing}
@@ -682,7 +703,14 @@ def test_request_payload_binding_is_checked_before_dispatch(
     connection.unwrap.return_value = mocker.Mock()
 
     with pytest.raises(BrokerError):
-        server._handle_request_channel(connection, submit, PRINCIPAL, PIN, float("inf"))
+        server._handle_request_channel(
+            connection,
+            submit,
+            PRINCIPAL,
+            PIN,
+            float("inf"),
+            admission=_admission(server),
+        )
     cast(Any, server._dispatcher.dispatch).assert_not_called()
 
 
@@ -756,3 +784,110 @@ def test_transport_constructors_reject_wrong_typed_configuration(
                 server_identity=PEER,
                 operation_timeout_seconds=cast(Any, True),
             )
+
+
+def test_slot_lease_releases_its_slot_exactly_once(mocker: MockerFixture) -> None:
+    server = _mock_server(mocker)
+    lease = _admission(server)
+    release = mocker.spy(server._connections, "release")
+
+    lease.release()
+    lease.release()
+
+    release.assert_called_once_with()
+    assert server._connections.acquire(blocking=False)
+
+
+def test_delivered_channel_frees_its_slots_before_its_close_notify(
+    mocker: MockerFixture,
+) -> None:
+    order = mocker.Mock()
+    connection = mocker.Mock(spec=ssl.SSLSocket)
+
+    def receive_close_notify(_size: int) -> bytes:
+        order.peer_close_notify()
+        return b""
+
+    connection.recv.side_effect = receive_close_notify
+    connection.unwrap.side_effect = order.unwrap
+
+    mtls_transport._release_before_close_notify(connection, float("inf"), order.release)
+
+    assert [call[0] for call in order.mock_calls] == [
+        "peer_close_notify",
+        "release",
+        "unwrap",
+        "unwrap().close",
+    ]
+
+
+def test_delivered_channel_keeps_its_slots_when_the_peer_sends_more(
+    mocker: MockerFixture,
+) -> None:
+    connection = mocker.Mock(spec=ssl.SSLSocket)
+    connection.recv.return_value = b"x"
+    release = mocker.Mock()
+
+    with pytest.raises(BrokerError):
+        mtls_transport._release_before_close_notify(connection, float("inf"), release)
+
+    release.assert_not_called()
+    connection.unwrap.assert_not_called()
+
+
+def _record_admission_and_close(
+    server: mtls_transport.MtlsBrokerServer, raw: Any, mocker: MockerFixture
+) -> list[str]:
+    events: list[str] = []
+    original_release = server._connections.release
+
+    def release(n: int = 1) -> None:
+        events.append("release")
+        original_release(n)
+
+    mocker.patch.object(server._connections, "release", side_effect=release)
+    raw.close.side_effect = lambda: events.append("close")
+    return events
+
+
+@pytest.mark.parametrize("outcome", ["no-handshake-slot", "refused", "failed"])
+def test_handler_frees_its_admission_before_closing_an_undelivered_channel(
+    mocker: MockerFixture, outcome: str
+) -> None:
+    server = _mock_server(mocker)
+    raw = mocker.Mock(spec=socket.socket)
+    admission = _admission(server)
+    events = _record_admission_and_close(server, raw, mocker)
+    wrap_socket = cast(Any, server._context).wrap_socket
+    if outcome == "no-handshake-slot":
+        assert server._handshakes.acquire(blocking=False)
+    elif outcome == "refused":
+        wrap_socket.side_effect = ssl.SSLError("handshake refused")
+    else:
+        wrap_socket.side_effect = RuntimeError("handshake failed")
+
+    server._handle_and_release(raw, admission)
+
+    assert events == ["release", "close"]
+    assert server.failed is (outcome == "failed")
+
+
+def test_mtls_handler_thread_start_failure_frees_admission_before_closing(
+    mocker: MockerFixture,
+) -> None:
+    server = _mock_server(mocker)
+    raw = mocker.Mock(spec=socket.socket)
+    listener = mocker.Mock(spec=socket.socket)
+    listener.accept.return_value = (raw, None)
+    server._listener = listener
+    events = _record_admission_and_close(server, raw, mocker)
+    failure = RuntimeError("thread unavailable")
+    thread_type = mocker.patch.object(mtls_transport, "Thread")
+    thread_type.return_value.start.side_effect = failure
+
+    server._accept_loop()
+
+    assert events == ["release", "close"]
+    assert server._fatal_error is failure
+    assert not server._threads
+    assert not server._sockets

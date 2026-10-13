@@ -1124,6 +1124,53 @@ run_reverse_member_fault() {
   echo "Reverse slice-member $mode fault passed for $profile with exact-unit proof evidence."
 }
 
+# Replace the fixture broker with the same source-tree broker at admission
+# limit one whose connection, pending-exchange and handler slots release only
+# after a fixed window. The final-image worker's back-to-back exchanges must
+# all be admitted: a broker that frees a slot after completing the exchange
+# refuses the immediate reconnection inside that window. Restore the fixture
+# broker afterwards.
+run_reverse_admission_window() {
+  local lifecycle_url
+  lifecycle_url="http://127.0.0.1:$(podman port "$application_name" 8080/tcp | sed 's/.*://')"
+  local metrics_url="$lifecycle_url/metrics"
+  local worker="$application_name"
+  if [[ "$profile" == distributed ]]; then
+    worker="$worker_one_name"
+    metrics_url="http://127.0.0.1:$(podman port "$worker_one_name" 9464/tcp | sed 's/.*://')/metrics"
+  fi
+  local stem="reverse-admission-window"
+  local state="$browser_session_directory/$stem.json"
+  local report="$temporary_directory/browser-artifacts/$stem-broker.json"
+  local broker_exit=0
+  uv run python -m scripts.e2e.reverse_broker signal --root "$broker_directory" \
+    --parent-pid "$broker_pid" --signal TERM
+  wait "$broker_pid"
+  broker_pid=""
+  # Run from the harness-owned directory like every broker launch, so files
+  # written relative to the working directory, such as conmon OOM markers,
+  # never land in the worktree. The harness module is not installed, so the
+  # repository is on PYTHONPATH.
+  PYTHONPATH="$repository" uv run --directory "$temporary_directory" --project "$repository" \
+    python -m scripts.e2e.admission_window_broker --root "$broker_directory" \
+    --report "$report" >>"$broker_directory/process.log" 2>&1 &
+  broker_pid=$!
+  uv run python -m tests.e2e.reverse_admission_workflow prepare \
+    --base-url "$lifecycle_url" --profile "$profile" --state-file "$state" \
+    --metrics-url "$metrics_url" --admission-report "$report"
+  uv run python -m tests.e2e.reverse_admission_workflow verify \
+    --base-url "$lifecycle_url" --profile "$profile" --state-file "$state" \
+    --metrics-url "$metrics_url" --admission-report "$report"
+  uv run python -m scripts.e2e.reverse_broker signal --root "$broker_directory" \
+    --parent-pid "$broker_pid" --signal TERM --admission-report "$report"
+  wait "$broker_pid" || broker_exit=$?
+  broker_pid=""
+  test "$broker_exit" = 0
+  start_reverse_broker
+  wait_for_url "$metrics_url" "$worker" 'md_converter_reversion_broker_ready 1'
+  echo "Reverse admission-limit reconnection passed for $profile on the final image."
+}
+
 start_application() {
   created=("$application_name" "${created[@]}")
   e2e_run_in_harness_directory \
@@ -2133,12 +2180,14 @@ e2e_phase_browser_session() {
 }
 
 # Reverse worker-restart fencing and broker emptiness proof with a foreign
-# unit-slice member on the initial runtime.
+# unit-slice member, then immediate reconnection at broker admission limit one,
+# on the initial runtime.
 e2e_phase_reverse_lifecycle() {
   use_api_runtime
   run_reverse_lifecycle worker-restart
   run_reverse_member_fault transient
   run_reverse_member_fault persistent
+  run_reverse_admission_window
 }
 
 # Conversion, reversion, presentation, local-image, and workspace journeys, then
