@@ -2,7 +2,7 @@
 ticket: T142
 linear_id: G1L-695
 linear_url: https://linear.app/g1lom/issue/G1L-695/t142-investigate-the-intermittent-t73-diagnostic-binding-readiness
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -75,6 +75,7 @@ The `reverse-lifecycle` and `browser-workspaces` phases passed in the same job, 
     - No faults were observed in either job.
   - In the same run, the `light` job failed in `scripts.release.public_alignment`, because the public GitHub releases endpoint returned an invalid response for `v0.7.5`. That endpoint is unrelated to this change, and it answered normally afterwards.
   - Not run: local final-image E2E at `8b02d4d`.
+- 2026-10-13: Done. Merged as `88db3db` (PR #309) after two independent review rounds; the round 1 major finding (the gate could open on a failed step's duration count) was fixed with the success-only counter `md_converter_reversion_reconciliation_successes_total`. Main CI run 38469454186 passed. The 180 s gate bound has not yet met a full hosted Podman stall.
 
 ## Synchronization
 
