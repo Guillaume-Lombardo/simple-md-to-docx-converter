@@ -104,3 +104,32 @@ refused whenever every handler slot is busy only because of this ordering.
   - Every changed line of both transport modules is covered.
   - Not run: the full `uv run pytest` suite including the Pandoc, Mermaid, LibreOffice and
     Podman markers. The change touches no engine path.
+- 2026-10-13: Review round 1 required final-rootless-image coverage of immediate reconnection
+  at the admission limit. Merged `origin/main` `961d174` (T139) into the branch.
+- 2026-10-13: Final-image scenario design.
+  - The final-image E2E broker is the trusted external component. It is host-native, launched
+    from the source tree with `markweave.broker.process`, and is not part of any final image.
+    The final backend image runs only the worker and its mTLS client.
+  - `scripts/e2e/admission_window_broker.py` is a harness-side launcher. It derives the fixture
+    broker configuration with `max_handlers`, `max_handshakes` and `max_pending_exchanges` set
+    to 1, and delegates the server's connection, pending-exchange and handler slots to wrappers
+    that sleep 150 ms before every release. It records every admission decision in a
+    content-free report, then runs the unmodified `markweave.broker.process` entry point. No
+    production code changes.
+  - `run_reverse_admission_window` in `scripts/e2e/run.sh` runs last in the
+    `reverse-lifecycle` phase (shard 2), in both profiles. It stops the fixture broker, starts
+    the launcher, and runs `tests/e2e/reverse_admission_workflow.py`. `prepare` waits until the
+    worker reconnects and submits one real reverse job. `verify` requires a first-attempt
+    success with an intact result, zero refused admissions, at least six job exchanges, at
+    least one reconnection inside the window, no new worker `transport_failure` fault, and a
+    ready, unfaulted worker. The harness then restores the fixture broker.
+  - `reverse_broker.py signal` accepts `--admission-report` to signal the exact launcher child.
+  - The worker drives every broker exchange from one runner thread, so admission limit one
+    never refuses a legitimate exchange with release-before-completion.
+- 2026-10-13: The Unix transport has no final-image path today. The worker's Unix client
+  requires the broker to run under its own effective UID, and the broker requires the
+  client's UID to equal its own. In the rootless arbitrary-UID final-image runtime, the
+  container UID maps to a host subordinate UID, so `SO_PEERCRED` cannot match on either side.
+  No existing final-image E2E uses the Unix transport. Covering it needs a different
+  container user-namespace topology (for example a keep-id mapping) that the harness does not
+  have. The Unix fix keeps its source-level regression tests.

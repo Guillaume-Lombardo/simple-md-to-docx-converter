@@ -856,16 +856,41 @@ def _process_children(parent_pid: int) -> set[int]:
     return children
 
 
-def signal_broker(root: Path, parent_pid: int, signal_name: str) -> None:
-    """Signal the exact owned broker child, never its uv supervisor wrapper."""
+def _broker_arguments(root: Path, admission_report: Path | None) -> list[str]:
+    """Return the exact module arguments of the owned broker launcher."""
+    if admission_report is None:
+        return ["-m", "markweave.broker.process", str(root / "broker.json")]
+    if not admission_report.is_absolute():
+        raise ValueError("T141 admission report path must be absolute")
+    return [
+        "-m",
+        "scripts.e2e.admission_window_broker",
+        "--root",
+        str(root),
+        "--report",
+        str(admission_report),
+    ]
+
+
+def signal_broker(
+    root: Path,
+    parent_pid: int,
+    signal_name: str,
+    admission_report: Path | None = None,
+) -> None:
+    """Signal the exact owned broker child, never its uv supervisor wrapper.
+
+    With an admission report, the child is the T141 admission-window launcher
+    that runs the same broker entry point at admission limit one.
+    """
     if not root.is_absolute() or parent_pid <= 0 or signal_name not in {"TERM", "KILL"}:
         raise ValueError("T73 broker signal request is invalid")
-    expected = ["-m", "markweave.broker.process", str(root / "broker.json")]
+    expected = _broker_arguments(root, admission_report)
     parent_argv = _process_argv(parent_pid)
     if (
         not parent_argv
         or Path(parent_argv[0]).name != "uv"
-        or parent_argv[-4:] != ["python", *expected]
+        or parent_argv[-len(expected) - 1 :] != ["python", *expected]
     ):
         raise RuntimeError("T73 broker supervisor arguments differ")
     children = _process_children(parent_pid)
@@ -906,6 +931,7 @@ def main() -> None:
     parser.add_argument("--metrics-url")
     parser.add_argument("--ready", type=Path)
     parser.add_argument("--report", type=Path)
+    parser.add_argument("--admission-report", type=Path)
     args = parser.parse_args()
     if args.operation == "prepare":
         if not all((args.image_repository, args.image_digest, args.worker_host)):
@@ -934,7 +960,7 @@ def main() -> None:
     elif args.operation == "signal":
         if args.parent_pid is None or args.signal is None:
             parser.error("signal requires parent PID and signal")
-        signal_broker(args.root, args.parent_pid, args.signal)
+        signal_broker(args.root, args.parent_pid, args.signal, args.admission_report)
     elif args.operation == "ready":
         wait_ready(args.root)
     else:
