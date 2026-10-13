@@ -73,13 +73,16 @@ Each took about 55 seconds and failed with "removal of the stack could not be pr
   `test_proc_root_inspection_failure_fails_closed` followed by
   `test_every_exit_path_keeps_the_ownership_invariant[normal-with-detached-descendant]` fails the
   second test in 55 seconds with "removal of the stack could not be proven".
-- 2026-10-13: Second isolation defect found in the same fixture. Under the default command, the
-  PostgreSQL and S3 suites run earlier and the session-scoped local service stack stays owned in
-  the same process. The scenario fixture's teardown closed and forgot every held lock, including
-  that live stack's. This released its `flock` mid-session and left its lock file behind after the
-  session teardown. While a scenario ran, the fake command groups were also recorded in the real
-  lock file. Reproduced on `origin/main` with one PostgreSQL test followed by the `normal`
-  scenario: the session's lock file remained in the lock directory after the run.
+- 2026-10-13: Second isolation defect found in the same fixture and in the lifecycle unit
+  fixture of `tests/unit/test_local_test_services.py`. Under the default command, the PostgreSQL
+  and S3 suites run earlier and the session-scoped local service stack stays owned in the same
+  process. Both fixtures' teardowns closed and cleared every held lock, including that live
+  stack's. This released its `flock` mid-session and recorded fake command groups in its lock
+  file. The file then stayed in the lock directory after the session removed the stack.
+  Reproduced on `origin/main` with one PostgreSQL test followed by the `normal` scenario: the
+  session's lock file remained after the run. After fixing only the scenario fixture, a full
+  serial run with a private `XDG_RUNTIME_DIR` still left one lock file, which led to the unit
+  fixture.
 - 2026-10-13: Fixes.
   - `scripts/javascript/run_bounded_benchmark_command.py` scopes the subreaper attribute to the
     supervision: it reads the previous value with `PR_GET_CHILD_SUBREAPER` and restores it when
@@ -87,18 +90,45 @@ Each took about 55 seconds and failed with "removal of the stack could not be pr
   - `tests/conftest.py` adds the autouse guard `keep_child_subreaper_state`. A test that leaves
     the process a subreaper fails at its own teardown, and the previous value is restored, so a
     later leak cannot move to an unrelated test again.
-  - The interruption fixture sets aside the ownership tables of an already owned session stack
-    and restores them untouched, and stops and closes only the scenario's own entries.
+  - The new helper `tests/local_service_bookkeeping.py` sets aside the ownership tables of an
+    already owned session stack, closes only the test's own locks, and restores the outer entries
+    untouched. Both service test fixtures use it.
   - No timing bound and no release condition changed.
 - 2026-10-13: Regression tests.
-  - `test_an_earlier_in_process_supervisor_run_leaves_no_subreaper` runs the supervisor in
-    process, then the `normal-with-detached-descendant` scenario. Without the supervisor fix it
-    fails at once on the subreaper state, and the guard then fails it at teardown.
-  - `test_a_session_stack_keeps_its_ownership_across_a_scenario` fails with the former fixture
-    teardown.
   - `tests/test_test_harness.py::test_child_subreaper_leak_fails_its_own_test_and_is_undone`
-    proves the guard serially and under xdist.
-- 2026-10-13: `test_unix_broker_transport` does not share this cause. It starts no subprocess and
-  checks no process group; its tests use threads and Unix sockets with deadlines. In serial order
-  it also runs before `test_benchmark_timeout.py`. Its single failure under concurrent image
-  builds remains a load-timing question for the broker area (T137 owns those files).
+    runs a test that leaks the subreaper attribute, followed by one that stops a command group
+    whose descendant outlived its leader. It runs serially and under xdist. Without the guard, the
+    second test fails as the interruption scenarios did. With the guard, only the leaking test
+    fails, at its teardown. The existing
+    `test_benchmark_timeout.py::test_proc_root_inspection_failure_fails_closed` now proves the
+    supervisor fix, because the guard fails it without that fix.
+  - `test_a_session_stack_keeps_its_ownership_across_a_scenario` and
+    `test_isolated_bookkeeping_closes_only_its_own_locks` fail when the outer bookkeeping is not
+    restored.
+- 2026-10-13: Two unrelated `/proc` races surfaced in the repeated runs. Reading
+  `/proc/<pid>/stat` of a process that is reaped during the read raises `ProcessLookupError`
+  (ESRCH), not `FileNotFoundError`. This failed
+  `test_engine_version_probe.py::test_cancellation_kills_a_sigterm_resistant_descendant` in 2 of
+  5 serial runs. Its liveness helper and the interruption module's now treat that error as
+  "gone".
+- 2026-10-13: `test_unix_broker_transport` does not share the subreaper cause. It starts no
+  subprocess and checks no process group; its tests use threads and Unix sockets with deadlines,
+  and in serial order it runs before `test_benchmark_timeout.py`.
+  `test_real_workspace_stage_collect_pending_and_success_exchange` (1-second operation timeout)
+  failed once in an `-n auto` run with a connection reset. That is a load-timing question for the
+  broker area, which T137 owns.
+- 2026-10-13: Coordination. T139 removes `scripts/javascript/run_bounded_benchmark_command.py` and
+  `tests/integration/test_benchmark_timeout.py`. If T139 merges first, this branch resolves the
+  conflict by accepting the deletion. The guard and its harness test do not depend on the
+  supervisor.
+- 2026-10-13: Verification at `cecf2a7` on a 4-CPU, 13 GB machine, with other worktrees running
+  their own suites in parallel during the earlier rounds.
+  - Default canonical command, serial: 3 consecutive runs, each with 6,122 passed and 0 failed,
+    in about 470 to 490 seconds. Coverage was 94.3%.
+  - With `-n auto`: 1 run with 6,122 passed and 0 failed, in 191 seconds.
+  - One more serial run with a private `XDG_RUNTIME_DIR` passed (6,122) and left no lock file.
+  - Before that head, at `e4be940`/`e462a9a`, the interruption module passed in all six full runs.
+    The other failures in those runs were unrelated: two at a system load average near 97
+    (a recovery timeout and an SQLite migration lock), one broker transport reset, one fake Pandoc
+    timeout, and the ESRCH race above.
+  - `ruff format --check`, `ruff check` and `ty check` pass.
