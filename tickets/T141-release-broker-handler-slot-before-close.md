@@ -133,3 +133,26 @@ refused whenever every handler slot is busy only because of this ordering.
   No existing final-image E2E uses the Unix transport. Covering it needs a different
   container user-namespace topology (for example a keep-id mapping) that the harness does not
   have. The Unix fix keeps its source-level regression tests.
+- 2026-10-13: Final-image verification at `9c6020c`. The images were built the CI way with
+  `uv run python -m scripts.container.ci_images build` from `6032a86`; no image input changed
+  after that commit. Image IDs: backend `5795300856…`, frontend `dd55f179a1…`, reverse-attempt
+  `c8985add68…`. Each shard ran through `scripts.ci.run_domain` exactly as in CI.
+
+  | Run | Broker ordering | Result | Time | Admission report |
+  |---|---|---|---|---|
+  | `e2e-standalone-2` | fixed | passed, all three phases | 470 s | 0 refused; 8 exchanges; 12 reconnections inside the window |
+  | `e2e-distributed-2` | fixed | passed, all three phases | 477 s | 0 refused; 8 exchanges; 12 reconnections inside the window |
+  | `e2e-standalone-2` | old (`c5c0a89` transports) | failed in `prepare` | 122 s | refusals at the limit (28 pending-exchange, 2 connection) |
+  | `e2e-distributed-2` | old (`c5c0a89` transports) | failed in `verify`: the job never succeeded | 247 s | 332 pending-exchange and 20 connection refusals |
+
+  - For the old-ordering runs only the host-native broker's two transport modules were reverted.
+    The final images, which carry only the worker client, were unchanged. The worktree was
+    restored afterwards.
+  - The three other reverse-lifecycle scenarios passed in every run before the new one.
+  - The real-transport integration test of the launcher also fails on the old mTLS module and
+    passes with the fix.
+  - Canonical checks at `9c6020c`: `ruff format --check`, `ruff check`, `ty check`,
+    `scripts.ci.e2e_shards` and `scripts.ci.validate_ci` pass. The default canonical command
+    with `-n auto` passed with 6,274 tests and 94.44% coverage.
+  - Not run locally: shard 1 of either profile, which this change does not touch, and the full
+    `uv run pytest` run with the engine markers.
