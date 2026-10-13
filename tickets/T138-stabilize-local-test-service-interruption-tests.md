@@ -132,3 +132,31 @@ Each took about 55 seconds and failed with "removal of the stack could not be pr
     (a recovery timeout and an SQLite migration lock), one broker transport reset, one fake Pandoc
     timeout, and the ESRCH race above.
   - `ruff format --check`, `ruff check` and `ty check` pass.
+- 2026-10-13: Review round 1 approved the change, with one minor finding: record several
+  consecutive `-n auto` runs. Three consecutive runs were made at
+  `83a3d059bf6352716f96f1ce75f7052d1b35486e` with
+  `uv run pytest -n auto -m "not requires_pandoc and not requires_mermaid and not requires_libreoffice and not requires_podman"`.
+  The one-minute load average was sampled every 10 seconds; no other suite was running.
+
+  | Run | Concurrent load | Result | Time | Load average (mean / max) |
+  |---|---|---|---|---|
+  | 1 | none | 6,121 passed, 1 failed | 209 s | 5.9 / 7.5 |
+  | 2 | four `timeout 900 yes > /dev/null` processes, stopped after the run | 6,121 passed, 1 failed | 256 s | 8.1 / 9.9 |
+  | 3 | none | 6,121 passed, 1 failed | 211 s | 5.8 / 7.8 |
+
+  - The interruption module and every T138 regression test passed in all three runs.
+  - The single failure each time was
+    `tests/integration/broker/test_unix_broker_transport.py::test_real_workspace_stage_collect_pending_and_success_exchange`.
+    It failed with `ConnectionResetError` on the second or third exchange, never the first. It also
+    failed in the earlier `-n auto` run at `cecf2a7`'s parent, so it has now failed in 4 of
+    6 parallel runs and in none of 9 serial runs.
+- 2026-10-13: Diagnosis of that broker failure (outside T138's files; reported to the broker
+  owner, T137, and not changed here). The test server allows one handler
+  (`UnixTransportLimits(0.25, 1, 1, 1)`). `UnixBrokerServer._handle_and_release` closes the
+  connection before it releases the handler slot. The close delivers the EOF that completes the
+  client's exchange. The client then connects again at once, and the accept loop can take that
+  connection before the old handler releases its slot. `acquire(blocking=False)` fails, the server
+  closes the unread connection, and the client sees a reset. Parallel CPU contention widens that
+  window. Delaying the slot release by 50 ms after the close reproduces the failure every time,
+  and without the delay the test passes. The cause is unrelated to the subreaper defect and to the
+  local service stack.
