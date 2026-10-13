@@ -22,6 +22,7 @@ from markweave.broker.models import (
     RuntimeRecoveryBinding,
     TerminationProof,
 )
+from markweave.broker.operation_deadline import bounded_seconds
 
 _APPLICATION_ID = 0x4D574249  # MWBI
 
@@ -34,6 +35,7 @@ _MAC_VERSION = 1
 _MINIMUM_HMAC_KEY_BYTES = 32
 
 _SQLITE_FULL_SYNCHRONOUS = 2
+_SQLITE_BUSY_TIMEOUT_SECONDS = 10.0
 
 _PRINCIPAL_COLUMNS = (
     "principal_id",
@@ -251,7 +253,9 @@ class _SQLiteInventoryStorage:
 
     @contextmanager
     def _connect(self) -> Generator[sqlite3.Connection]:
-        connection = sqlite3.connect(self._path, timeout=10, isolation_level=None)
+        # Inside a dispatch, lock waits never outlive its budget.
+        timeout = max(0.0, bounded_seconds(_SQLITE_BUSY_TIMEOUT_SECONDS))
+        connection = sqlite3.connect(self._path, timeout=timeout, isolation_level=None)
         try:
             connection.row_factory = sqlite3.Row
             connection.execute("PRAGMA foreign_keys = ON")

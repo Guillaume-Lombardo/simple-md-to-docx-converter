@@ -13,9 +13,16 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
+from markweave.broker.operation_deadline import remaining_seconds
+
 _INSPECT_MAX_BYTES = 64 * 1024
 _MAX_COMMAND_OUTPUT_BYTES = 128 * 1024
 _MIN_OUTPUT_BYTES = 1024
+# Longest wait to reap a killed command group.
+_REAP_SECONDS = 1.0
+# Inside a dispatch budget, this share of the command's remaining time (at most
+# _REAP_SECONDS) is kept to reap it, so execution plus cleanup end with the budget.
+_REAP_SHARE = 0.1
 
 
 class PodmanRuntimeError(RuntimeError):
@@ -94,7 +101,16 @@ class BoundedCommandRunner:
         )
         if type(ceiling) is not int or ceiling < 0:
             raise PodmanRuntimeError("Podman command contract failed")
-        deadline = self._monotonic() + self._limits.operation_seconds
+        budget = remaining_seconds()
+        started = self._monotonic()
+        reap_deadline: float | None = None
+        deadline = started + self._limits.operation_seconds
+        if budget is not None:
+            if budget <= 0:
+                raise PodmanRuntimeError("Podman command exceeded its bounds")
+            reap_deadline = started + budget
+            reserve = min(_REAP_SECONDS, budget * _REAP_SHARE)
+            deadline = min(deadline, reap_deadline - reserve)
         try:
             process = subprocess.Popen(  # noqa: S603 - argv is broker-authored
                 (str(self._executable), *arguments),
@@ -113,7 +129,7 @@ class BoundedCommandRunner:
             or process.stderr is None
             or (input_bytes is not None and process.stdin is None)
         ):
-            self._terminate(process)
+            self._terminate(process, reap_deadline)
             raise PodmanRuntimeError("Podman command failed")
         output = bytearray()
         selector: selectors.BaseSelector | None = None
@@ -159,7 +175,7 @@ class BoundedCommandRunner:
                 raise TimeoutError
             return_code = process.wait(timeout=remaining)
         except BaseException as error:
-            self._terminate(process)
+            self._terminate(process, reap_deadline)
             if isinstance(
                 error, (OverflowError, subprocess.TimeoutExpired, TimeoutError)
             ):
@@ -180,11 +196,17 @@ class BoundedCommandRunner:
             raise PodmanRuntimeError("Podman command failed")
         return return_code, bytes(output)
 
-    @staticmethod
-    def _terminate(process: subprocess.Popen[bytes]) -> None:
+    def _terminate(
+        self, process: subprocess.Popen[bytes], reap_deadline: float | None
+    ) -> None:
+        """Kill the command group and reap it, never past the dispatch budget."""
+
         with suppress(ProcessLookupError):
             os.killpg(process.pid, signal.SIGKILL)
+        timeout = _REAP_SECONDS
+        if reap_deadline is not None:
+            timeout = max(0.0, min(timeout, reap_deadline - self._monotonic()))
         try:
-            process.wait(timeout=1)
+            process.wait(timeout=timeout)
         except subprocess.TimeoutExpired as error:
             raise PodmanRuntimeError("Podman command cleanup failed") from error

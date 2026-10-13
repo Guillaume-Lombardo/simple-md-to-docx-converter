@@ -22,12 +22,14 @@ from markweave.broker.mtls_transport import (
     MtlsEndpoint,
     MtlsTransportLimits,
 )
+from markweave.broker.podman_runtime import CgroupEmptinessWait
 from markweave.broker.process import (
     BrokerProcess,
     BrokerProcessConfigurationError,
     build_broker_server,
     load_broker_process_config,
     main,
+    podman_emptiness_wait,
 )
 from markweave.broker.unix_transport import UnixBrokerServer, UnixTransportLimits
 
@@ -151,6 +153,113 @@ def test_loads_complete_canonical_owner_only_configuration(tmp_path: Path) -> No
     assert config.policy.channel_limits.max_input_bytes == 101
     assert config.authentication_key == b"\x11" * 32
     assert "11" * 32 not in repr(config)
+
+
+def _section(value: dict[str, object], name: str) -> dict[str, object]:
+    return cast("dict[str, object]", value[name])
+
+
+def _rewrite(path: Path, value: dict[str, object]) -> None:
+    path.write_text(
+        json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="ascii",
+    )
+
+
+@pytest.mark.unit
+def test_emptiness_wait_defaults_inside_the_transport_dispatch_deadline(
+    tmp_path: Path,
+) -> None:
+    path, value = _configuration(tmp_path)
+
+    assert load_broker_process_config(path).podman_emptiness_wait == (
+        CgroupEmptinessWait(0.25, 0.05)
+    )
+    _section(value, "transport")["operation_timeout_seconds"] = 60
+    _rewrite(path, value)
+    assert load_broker_process_config(path).podman_emptiness_wait == (
+        CgroupEmptinessWait(5.0, 0.05)
+    )
+    _section(value, "transport")["operation_timeout_seconds"] = 0.1
+    _rewrite(path, value)
+    assert load_broker_process_config(path).podman_emptiness_wait == (
+        CgroupEmptinessWait(0.025, 0.025)
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("transport", ["unix", "mtls"])
+def test_loads_optional_emptiness_wait_up_to_a_quarter_of_the_deadline(
+    tmp_path: Path, transport: str
+) -> None:
+    path, value = (
+        _configuration(tmp_path)
+        if transport == "unix"
+        else _mtls_configuration(tmp_path)
+    )
+    _section(value, "podman")["cgroup_emptiness_timeout_seconds"] = 0.25
+    _section(value, "podman")["cgroup_emptiness_poll_interval_seconds"] = 0.1
+    _rewrite(path, value)
+
+    assert load_broker_process_config(path).podman_emptiness_wait == (
+        CgroupEmptinessWait(0.25, 0.1)
+    )
+
+
+@pytest.mark.unit
+def test_optional_emptiness_keys_default_independently(tmp_path: Path) -> None:
+    path, value = _configuration(tmp_path)
+    _section(value, "podman")["cgroup_emptiness_timeout_seconds"] = 0.02
+    _rewrite(path, value)
+    assert load_broker_process_config(path).podman_emptiness_wait == (
+        CgroupEmptinessWait(0.02, 0.02)
+    )
+    del _section(value, "podman")["cgroup_emptiness_timeout_seconds"]
+    _section(value, "podman")["cgroup_emptiness_poll_interval_seconds"] = 0.2
+    _rewrite(path, value)
+    assert load_broker_process_config(path).podman_emptiness_wait == (
+        CgroupEmptinessWait(0.25, 0.2)
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "podman",
+    [
+        {"cgroup_emptiness_timeout_seconds": 0.3},
+        {"cgroup_emptiness_timeout_seconds": 0},
+        {"cgroup_emptiness_timeout_seconds": -1},
+        {"cgroup_emptiness_timeout_seconds": 10**400},
+        {"cgroup_emptiness_timeout_seconds": "0.1"},
+        {"cgroup_emptiness_timeout_seconds": True},
+        {"cgroup_emptiness_poll_interval_seconds": 0},
+        {"cgroup_emptiness_poll_interval_seconds": 0.3},
+        {
+            "cgroup_emptiness_timeout_seconds": 0.1,
+            "cgroup_emptiness_poll_interval_seconds": 0.2,
+        },
+        {"cgroup_emptiness_retries": 3},
+    ],
+)
+def test_rejects_unbounded_or_invalid_emptiness_wait(
+    tmp_path: Path, podman: dict[str, object]
+) -> None:
+    path, value = _configuration(tmp_path)
+    _section(value, "podman").update(podman)
+    _rewrite(path, value)
+
+    with pytest.raises(BrokerProcessConfigurationError):
+        load_broker_process_config(path)
+
+
+@pytest.mark.unit
+def test_emptiness_wait_factory_rejects_a_poll_above_the_timeout() -> None:
+    assert podman_emptiness_wait(8.0) == CgroupEmptinessWait(2.0, 0.05)
+    assert podman_emptiness_wait(8.0, 1.5, 0.5) == CgroupEmptinessWait(1.5, 0.5)
+    with pytest.raises(BrokerProcessConfigurationError):
+        podman_emptiness_wait(8.0, 2.5)
+    with pytest.raises(BrokerProcessConfigurationError):
+        podman_emptiness_wait(8.0, 1.0, 1.5)
 
 
 @pytest.mark.unit
@@ -495,6 +604,7 @@ def test_factory_uses_derived_identity_capacity_and_hermetic_commands(
     assert service.call_args.kwargs["max_discovered_units"] == 4
     dispatcher.assert_called_once_with(service.return_value)
     assert runtime.call_args.kwargs["run_as_uid"] == os.geteuid()
+    assert runtime.call_args.kwargs["emptiness_wait"] == CgroupEmptinessWait(0.25, 0.05)
     assert runtime.call_args.kwargs["cgroup_root"] == Path(
         f"/sys/fs/cgroup/user.slice/user-{os.geteuid()}.slice/"
         f"user@{os.geteuid()}.service"
@@ -511,6 +621,28 @@ def test_factory_uses_derived_identity_capacity_and_hermetic_commands(
         not any(key.startswith("CONTAINER_") for key in environment)
         for environment in environments
     )
+
+
+@pytest.mark.unit
+def test_factory_derives_the_emptiness_wait_for_a_directly_built_config(
+    tmp_path: Path, mocker: MockerFixture, private_authority_directory: Path
+) -> None:
+    del private_authority_directory
+    path, value = _configuration(tmp_path)
+    _section(value, "transport")["operation_timeout_seconds"] = 2
+    _rewrite(path, value)
+    config = replace(load_broker_process_config(path), podman_emptiness_wait=None)
+    mocker.patch("markweave.broker.process.SQLiteBrokerInventory")
+    runtime = mocker.patch("markweave.broker.process.PodmanIsolationRuntime")
+    mocker.patch("markweave.broker.process.IsolationBrokerService")
+    mocker.patch("markweave.broker.process.BrokerDispatcher")
+    server = mocker.patch("markweave.broker.process.UnixBrokerServer")
+    server.return_value._adopt_authority_lock.side_effect = os.close
+    mocker.patch("markweave.broker.process.BoundedCommandRunner")
+
+    build_broker_server(config)
+
+    assert runtime.call_args.kwargs["emptiness_wait"] == CgroupEmptinessWait(0.5, 0.05)
 
 
 @pytest.mark.unit
