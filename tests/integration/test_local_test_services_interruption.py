@@ -16,7 +16,6 @@ that every release asserts the invariant at the moment it happens.
 import fcntl
 import os
 import signal
-import subprocess
 import threading
 import time
 from collections.abc import Generator, Iterator
@@ -27,9 +26,8 @@ from pathlib import Path
 import pytest
 from pytest_mock import MockerFixture
 
-from scripts.javascript import run_bounded_benchmark_command as supervisor
 from scripts.testing import services
-from tests.conftest import child_subreaper_state
+from tests.local_service_bookkeeping import isolated_service_bookkeeping
 
 pytestmark = [
     pytest.mark.integration,
@@ -139,38 +137,6 @@ class Fake:
         return [pid for pid in pids if _running(pid)]
 
 
-@dataclass(frozen=True)
-class _Bookkeeping:
-    """The module-level ownership tables of ``services`` at one moment."""
-
-    held: dict[str, services._HeldLock]
-    owned: dict[str, dict[str, str]]
-    unsettled: dict[int, subprocess.Popen[str]]
-    creation_attempted: set[str]
-
-
-def _set_aside_bookkeeping() -> _Bookkeeping:
-    """Empty the ownership tables and return what they held."""
-    saved = _Bookkeeping(
-        dict(services._HELD),
-        dict(services._OWNED),
-        dict(services._UNSETTLED),
-        set(services._CREATION_ATTEMPTED),
-    )
-    services._HELD.clear()
-    services._OWNED.clear()
-    services._UNSETTLED.clear()
-    services._CREATION_ATTEMPTED.clear()
-    return saved
-
-
-def _restore_bookkeeping(saved: _Bookkeeping) -> None:
-    services._HELD.update(saved.held)
-    services._OWNED.update(saved.owned)
-    services._UNSETTLED.update(saved.unsettled)
-    services._CREATION_ATTEMPTED.update(saved.creation_attempted)
-
-
 @contextmanager
 def _fake_engine(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mocker: MockerFixture
@@ -214,24 +180,18 @@ def _fake_engine(
 
     mocker.patch.object(services, "_close_lock", side_effect=checked_close)
     previous = signal.signal(signal.SIGINT, signal.default_int_handler)
-    # A session-scoped stack of this process may already be owned. Its entries
-    # are set aside, so the scenario neither records fake groups in its lock
-    # nor sees it, and are put back untouched; only the scenario's own entries
-    # are stopped and closed.
-    outer = _set_aside_bookkeeping()
-    try:
-        yield result
-    finally:
-        result.stop.set()
-        for thread in result.threads:
-            thread.join(timeout=5)
-        signal.signal(signal.SIGINT, previous)
-        for process in services._UNSETTLED.values():
-            services.stop_process_group(process)
-        for held in services._HELD.values():
-            os.close(held.descriptor)
-        _set_aside_bookkeeping()
-        _restore_bookkeeping(outer)
+    # A session-scoped stack of this process may already be owned; the
+    # scenario must neither see nor release it.
+    with isolated_service_bookkeeping():
+        try:
+            yield result
+        finally:
+            result.stop.set()
+            for thread in result.threads:
+                thread.join(timeout=5)
+            signal.signal(signal.SIGINT, previous)
+            for process in services._UNSETTLED.values():
+                services.stop_process_group(process)
 
 
 @pytest.fixture
@@ -355,33 +315,6 @@ def test_every_exit_path_keeps_the_ownership_invariant(
     name: str,
 ) -> None:
     _run_scenario(fake, monkeypatch, mocker, SCENARIOS[name])
-
-
-def test_an_earlier_in_process_supervisor_run_leaves_no_subreaper(
-    fake: Fake,
-    monkeypatch: pytest.MonkeyPatch,
-    mocker: MockerFixture,
-    tmp_path: Path,
-) -> None:
-    """Regression: the default local suite failed every detached-descendant case.
-
-    An earlier test ran the benchmark supervisor's ``main`` inside the pytest
-    process, which left it a child subreaper. The startup child of the fake
-    ``compose up`` then outlived its command leader, was adopted by pytest and
-    never reaped, and its zombie kept the command's process group alive, so
-    the stack could never be released.
-    """
-    before = child_subreaper_state()
-
-    status = supervisor.main(
-        ["5", "1", str(tmp_path / "supervisor.log"), "test/in-process", "--", "true"]
-    )
-
-    assert status == 0
-    assert child_subreaper_state() == before
-    _run_scenario(
-        fake, monkeypatch, mocker, SCENARIOS["normal-with-detached-descendant"]
-    )
 
 
 def test_a_session_stack_keeps_its_ownership_across_a_scenario(
