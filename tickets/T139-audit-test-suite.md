@@ -132,3 +132,11 @@ scripts they test), and C1 to C3. Not approved in this scope: K3 and K5.
     sessions with status 1. A subprocess regression test runs `-n 2` with and without `-m unit`
     and checks the node-id diagnostic, the exit status and that no test body ran. It fails when
     the abort is removed.
+- 2026-10-13: Merged `origin/main` after T137 (`016bbe7`) and T138 (`c5c0a89`).
+  - T138 had changed `scripts/javascript/run_bounded_benchmark_command.py` to restore the
+    subreaper attribute. The merge keeps the T139 deletion. The T138 autouse guard
+    `keep_child_subreaper_state` in `tests/conftest.py` and its harness test do not depend on the
+    deleted supervisor and keep working.
+  - The marker guard rejected two new T137 tests in `tests/unit/broker/test_cgroup_events_polling.py`
+    that had no category marker. They use a fake clock and are now marked `unit`. Every other new
+    T137 and T138 test already had a marker.

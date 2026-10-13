@@ -96,6 +96,7 @@ def test_returns_the_persistent_mismatch_once_the_bound_expires() -> None:
     assert clock.now == 1.0
 
 
+@pytest.mark.unit
 def test_an_emptiness_read_after_an_overslept_pause_does_not_count() -> None:
     clock = FakeClock()
     reads: list[float] = []
@@ -116,6 +117,7 @@ def test_an_emptiness_read_after_an_overslept_pause_does_not_count() -> None:
     assert reads == [0.0]
 
 
+@pytest.mark.unit
 def test_an_emptiness_read_that_finishes_after_the_bound_does_not_count() -> None:
     clock = FakeClock()
     reads: list[float] = []
