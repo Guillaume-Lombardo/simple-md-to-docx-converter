@@ -59,6 +59,23 @@ The `reverse-lifecycle` and `browser-workspaces` phases passed in the same job, 
   - In three hosted browser-runtime phases, the gate held while worker faults occurred after the restart. It then started the 30-second window only once the path was proven. Before this change, the window would have started during those faults.
   - Not verified: the full 70-second stall did not recur during these runs, so the 180-second gate bound has not been exercised on hosted CI.
 
+- 2026-10-13: Review fix for PR #309, at head `8b02d4d`.
+  - The gate counted the reconciliation duration series. The worker publishes that series in a `finally` block, before a failed step's fault and degraded state. A scrape in that interval could open the gate on a failed step.
+  - The worker now publishes `md_converter_reversion_reconciliation_successes_total`, only after a reconciliation's broker exchange returns without error.
+  - The gate counts only that success signal. It restarts its run on:
+    - any new fault;
+    - any reconciliation attempt without a matching success;
+    - any counter decrease, which is a new baseline.
+  - It needs three consecutive successes with ready, fault-free gauges.
+  - A regression test runs the real `FairWorkerLoop` and `OperationalMetrics` and scrapes between the failed step's duration publication and its fault handling. The gate stays closed until the third later success. Against the `dcbb804` gate, the same test opens on the scrape inside the failed step.
+  - Local checks: `uv sync --all-groups`, `uv run ruff format --check .`, `uv run ruff check .` and `uv run ty check` pass. The default pytest selection with `-n auto` passes: 6290 tests, 94.44% coverage.
+  - Hosted CI run 38458939823 at `8b02d4d`:
+    - `e2e-distributed-2` (job 115513042090) passed, with gates of 1.073 s and 0.811 s.
+    - `e2e-standalone-2` (job 115513041916) passed, with gates of 1.056 s and 1.305 s.
+    - No faults were observed in either job.
+  - In the same run, the `light` job failed in `scripts.release.public_alignment`, because the public GitHub releases endpoint returned an invalid response for `v0.7.5`. That endpoint is unrelated to this change, and it answered normally afterwards.
+  - Not run: local final-image E2E at `8b02d4d`.
+
 ## Synchronization
 
 Keep status, scope, acceptance criteria, dependencies, and progress aligned with G1L-695.
