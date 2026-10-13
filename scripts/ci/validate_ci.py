@@ -457,7 +457,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
             ),
             ("mutation", "Retain mutation evidence"): "${{ always() }}",
         },
-        canonical_digest="adf6591406fd1c671436c7527cc6667a0c90c4e945b9a24c8650eff3a059e748",
+        canonical_digest="9c4ca392c6bcfc2daabf691b79c4f735c0dd4623c241e9e4922969e183e91b40",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
