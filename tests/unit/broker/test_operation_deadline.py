@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import sqlite3
 import stat
+import subprocess
 import time
 from pathlib import Path
 
@@ -10,6 +12,8 @@ import pytest
 from pytest_mock import MockerFixture
 
 from markweave.broker import operation_deadline, podman_cgroups
+from markweave.broker.errors import BrokerError
+from markweave.broker.inventory import SQLiteBrokerInventory
 from markweave.broker.operation_deadline import (
     bounded_seconds,
     dispatch_budget,
@@ -21,6 +25,10 @@ from markweave.broker.podman_runtime import (
     CgroupEmptinessWait,
     PodmanCommandLimits,
     PodmanRuntimeError,
+)
+from tests.integration.broker.slow_reaping import (
+    budget_exhausting_runner,
+    install_slow_reaping,
 )
 
 pytestmark = pytest.mark.unit
@@ -99,3 +107,65 @@ def test_emptiness_wait_with_a_spent_budget_never_pauses() -> None:
         pauses.append,
         -0.1,
     ) == {"frozen": 0, "populated": 0}
+
+
+def test_runner_reaps_within_the_budget_and_fails_closed_when_it_cannot(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    runner = budget_exhausting_runner(tmp_path)
+    reap_all = install_slow_reaping(mocker, 0.6)
+    started = time.monotonic()
+    try:
+        with (
+            operation_budget(started + 0.5),
+            pytest.raises(PodmanRuntimeError, match="cleanup failed"),
+        ):
+            runner(("fixed",))
+        assert time.monotonic() - started < 0.6
+    finally:
+        reap_all()
+
+
+def test_runner_reap_window_is_the_smaller_of_its_limit_and_the_budget(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    clock = iter((10.0, 10.0, 10.0))
+    runner = BoundedCommandRunner(
+        tmp_path / "unused",
+        PodmanCommandLimits(20),
+        environment={},
+        monotonic=lambda: next(clock),
+    )
+    mocker.patch("markweave.broker.command_runner.os.killpg")
+    process = mocker.Mock()
+
+    runner._terminate(process, None)
+    runner._terminate(process, 10.25)
+    process.wait.side_effect = subprocess.TimeoutExpired("fixed", 0)
+    with pytest.raises(PodmanRuntimeError, match="cleanup failed"):
+        runner._terminate(process, 9.0)
+
+    assert [call.kwargs["timeout"] for call in process.wait.call_args_list] == [
+        1.0,
+        0.25,
+        0.0,
+    ]
+
+
+def test_inventory_lock_waits_never_outlive_the_dispatch_budget(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    connect = mocker.patch(
+        "markweave.broker.inventory_storage.sqlite3.connect",
+        side_effect=sqlite3.OperationalError("locked"),
+    )
+
+    with pytest.raises(BrokerError):
+        SQLiteBrokerInventory(tmp_path / "inventory.sqlite3", b"i" * 32, max_records=1)
+    with (
+        operation_budget(time.monotonic() - 1),
+        pytest.raises(BrokerError),
+    ):
+        SQLiteBrokerInventory(tmp_path / "inventory.sqlite3", b"i" * 32, max_records=1)
+
+    assert [call.kwargs["timeout"] for call in connect.call_args_list] == [10.0, 0.0]

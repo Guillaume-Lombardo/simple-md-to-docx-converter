@@ -138,7 +138,10 @@ canonical key order if you set them.
 
 Each dispatch also keeps a tenth of `transport.operation_timeout_seconds` in reserve for its
 response. Every Podman and `systemctl` command, and the emptiness wait, is clamped to the time
-remaining in that budget. A slow kill, inspection, removal or wait is refused through the ordinary
+remaining in that budget. A command stops executing early enough to leave a tenth of its remaining
+time, at most one second, to reap its killed process group, and reaping never outlives the budget.
+If reaping cannot be confirmed in time, the step fails closed and no termination evidence is
+recorded. A slow kill, inspection, removal or wait is refused through the ordinary
 error, for example `termination_unproven`, and the broker keeps serving instead of tripping its
 fatal dispatch deadline. The next reconciliation completes the durable termination sequence.
 

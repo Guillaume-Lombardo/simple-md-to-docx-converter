@@ -12,6 +12,7 @@ from uuid import UUID
 import pytest
 from pytest_mock import MockerFixture
 
+from markweave.broker.command_runner import PodmanRuntimeError
 from markweave.broker.dispatch import BrokerDispatcher
 from markweave.broker.errors import BrokerError, BrokerErrorCategory
 from markweave.broker.models import AuthenticatedPrincipal, RuntimeChannelLimits
@@ -40,6 +41,10 @@ from markweave.broker.workspace_protocol import (
     encode_workspace_request,
 )
 from markweave.reversions.models import ReverseContentLimits, ReverseOutputMode
+from tests.integration.broker.slow_reaping import (
+    budget_exhausting_runner,
+    install_slow_reaping,
+)
 
 pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
 
@@ -163,6 +168,46 @@ def test_real_unix_dispatch_publishes_a_budget_before_its_deadline(
     assert observed[0] is not None
     assert 0 < observed[0] <= 2 * (1 - RESPONSE_RESERVE_FRACTION)
     assert remaining_seconds() is None
+
+
+def test_real_unix_dispatch_refuses_before_its_deadline_when_reaping_is_slow(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    runner = budget_exhausting_runner(tmp_path)
+    path, server, dispatcher = _server(
+        tmp_path, mocker, limits=UnixTransportLimits(2, 1, 1, 1)
+    )
+    refusals: list[str] = []
+
+    def dispatch(*_args: object) -> ReadyResponse:
+        try:
+            runner(("fixed",))
+        except PodmanRuntimeError as error:
+            refusals.append(str(error))
+        return ReadyResponse(REQUEST_ID, False)
+
+    dispatcher.dispatch.side_effect = dispatch
+    reap_all = install_slow_reaping(mocker, 0.6)
+    server.start()
+    try:
+        client = UnixBrokerClient(
+            path,
+            expected_server_uid=os.geteuid(),
+            expected_principal=PRINCIPAL,
+            operation_timeout_seconds=3,
+        )
+        started = monotonic()
+        response = client.request(ReadyRequest(REQUEST_ID, 1))
+        elapsed = monotonic() - started
+
+        assert response == ReadyResponse(REQUEST_ID, False)
+        assert refusals == ["Podman command cleanup failed"]
+        assert elapsed < 2
+        assert server.failed is False
+        assert server.stopping is False
+    finally:
+        server.stop()
+        reap_all()
 
 
 def test_real_unix_reconciliation_exchange_binds_authenticated_principal(

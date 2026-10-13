@@ -65,6 +65,7 @@ from markweave.reversions.models import (
     ReverseContentLimits,
 )
 from tests.integration.broker.cgroup_events import await_cgroup_events
+from tests.integration.broker.slow_reaping import install_slow_reaping
 from tests.integration.broker.test_mtls_transport_integration import (
     CLIENT_URI,
     SERVER_URI,
@@ -110,6 +111,8 @@ UNIT_IDS = (
     UUID("44444444-4444-4444-8444-44444444444e"),
     UUID("44444444-4444-4444-8444-44444444444f"),
     UUID("44444444-4444-4444-8444-444444444450"),
+    UUID("44444444-4444-4444-8444-444444444451"),
+    UUID("44444444-4444-4444-8444-444444444452"),
 )
 
 
@@ -1100,6 +1103,8 @@ DEADLINE_SCENARIOS = {
     "slow-kill": {"kill": "3.4"},
     "slow-inspect": {"inspect": "1.3"},
     "slow-removal": {"rm": "10"},
+    # The kill exhausts its execution budget and its killed group is reaped late.
+    "unreaped-kill": {"kill": "10"},
 }
 
 
@@ -1115,12 +1120,13 @@ def _slow_podman(directory: Path) -> tuple[Path, Path]:
 @pytest.mark.integration
 @pytest.mark.parametrize("transport", ["unix", "mtls"])
 @pytest.mark.parametrize("scenario", list(DEADLINE_SCENARIOS))
-def test_termination_refusal_returns_within_the_transport_deadline(  # noqa: PLR0915 - one linear refusal and recovery scenario
+def test_termination_refusal_returns_within_the_transport_deadline(  # noqa: PLR0913, PLR0915, PLR0917 - one linear refusal and recovery scenario
     tmp_path: Path,
     controlled_image: tuple[str, str],
     transport_certificates: dict[str, Path],
     transport: str,
     scenario: str,
+    mocker: MockerFixture,
 ) -> None:
     repository, digest = controlled_image
     unit_id = UNIT_IDS[
@@ -1149,6 +1155,7 @@ def test_termination_refusal_returns_within_the_transport_deadline(  # noqa: PLR
     release = tmp_path / "release-member"
     attempt_id = uuid4()
     member: str | None = None
+    reapers: list[Callable[[], None]] = []
     server.start()
     try:
         client = client_factory()
@@ -1159,6 +1166,8 @@ def test_termination_refusal_returns_within_the_transport_deadline(  # noqa: PLR
             member = _start_slice_member(unit_id, tmp_path, release)
         for subcommand, seconds in DEADLINE_SCENARIOS[scenario].items():
             (delays / subcommand).write_text(seconds, encoding="ascii")
+        if scenario == "unreaped-kill":
+            reapers.append(install_slow_reaping(mocker, 0.6))
         terminate = TerminateRequest(uuid4(), 1, attempt_id, unit_id)
         started = time.monotonic()
         refused = client.request(terminate)
@@ -1184,6 +1193,8 @@ def test_termination_refusal_returns_within_the_transport_deadline(  # noqa: PLR
 
         for delay in delays.iterdir():
             delay.unlink()
+        for reap in reapers:
+            reap()
         if member is not None:
             release.touch()
             _await_member_stopped(member)

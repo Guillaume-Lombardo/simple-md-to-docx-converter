@@ -233,3 +233,52 @@ that stays populated past the bound raises `Podman stable unit cgroup is not emp
       failures are only in the untouched `test_local_test_services_interruption.py`, which passes
       alone.
     - Changed application lines are 100% covered (99/99); branch coverage is 90.49%.
+- 2026-10-13: Review round 3 (one major finding). The 10% response reserve was smaller than the
+  one second `BoundedCommandRunner._terminate` could spend reaping a killed command. A command
+  that exhausted its budget and was reaped 600 ms late tripped the fatal watchdog.
+  - Fix: inside a dispatch budget, a command now stops executing early enough to keep
+    `min(1 s, 10% of its remaining time)` for reaping. Its kill-and-reap wait is bounded by the
+    budget end instead of a fixed second. If reaping is not confirmed in time, the runner raises
+    `Podman command cleanup failed` (fail closed). Outside a dispatch (startup reconciliation),
+    the previous contract is unchanged. The inventory's SQLite busy timeout is also clamped to the
+    remaining budget.
+  - Regression coverage:
+    - Unix and mTLS transport tests (no Podman, run in the default suite): a command exhausts its
+      execution budget and its reaping is delayed by 600 ms. The dispatch returns its response
+      within the 2 s deadline, with `cleanup failed`, and the server keeps serving. With the
+      previous one-second reap window, both fail through the watchdog.
+    - A new `unreaped-kill` case in the real rootless Podman matrix covers both transports.
+    - Unit tests cover the reap window and the fail-closed path.
+  - Why no remaining path can exceed the dispatch deadline `D`:
+    1. The transport sets the budget `B = D - T/10` (where `T` is the operation timeout) in the
+       handler thread before calling the dispatcher. All service and runtime work for that
+       request runs synchronously in that thread under `B`. The watchdog thread does no runtime
+       work.
+    2. Every external process goes through `BoundedCommandRunner`.
+       - It refuses to spawn once `B` has passed.
+       - Its blocking points during execution (`select`, `process.wait`) use an execution deadline
+         at or before `B` minus the reap slice. Writes are non-blocking, and reads happen only on
+         descriptors that `select` reported ready.
+       - Kill and reap are bounded by `B`, and closing the pipes does not block.
+       - Unconfirmed reaping raises instead of waiting.
+    3. `PodmanIsolationRuntime._call` also refuses commands after `B`, which covers injected
+       command doubles. The emptiness wait ends by `min(policy bound, B)`.
+    4. The remaining runtime work does not block beyond bounded local I/O: cgroupfs reads and
+       stats, cgroup `mkdir`/`rmdir`, and bounded in-memory archive and JSON handling.
+       - Inventory writes use WAL with a single writer, which holds the broker's exclusive
+         authority lock, so writers never wait for readers.
+       - The SQLite busy timeout is nevertheless clamped to `B`, and an expiry is an ordinary
+         `INVENTORY_FAILURE`.
+    5. After the runtime returns or raises, the service and dispatcher only map errors and build
+       fixed, bounded responses. The `T/10` reserve covers this and the transport's encoding.
+       Sending the response is bounded by `D` but is not fatal.
+    6. Every expiry is an ordinary error: `TERMINATION_UNPROVEN`, `RUNTIME_FAILURE` or
+       `RECONCILIATION_INCOMPLETE`, which clears readiness. The durable state machine advances
+       only on positive evidence, so a refused step never reports a unit as proven or removed.
+       The next reconciliation resumes from the durable state.
+  - Pre-existing and unchanged limits:
+    - Waiting for the transport's dispatch gate remains fatal by existing design, and this
+      change does not alter it. A queued request can still expire while another dispatch holds
+      the gate. Budgets make every holder release the gate a tenth of `T` earlier than before.
+    - A stall of the whole broker process, such as a host freeze or `SIGSTOP`, is outside any
+      in-process bound.
