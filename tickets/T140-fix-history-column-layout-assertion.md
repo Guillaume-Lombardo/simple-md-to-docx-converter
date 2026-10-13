@@ -2,7 +2,7 @@
 ticket: T140
 linear_id: G1L-693
 linear_url: https://linear.app/g1lom/issue/G1L-693/t140-fix-the-intermittent-history-column-layout-assertion-in-the
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -83,3 +83,4 @@ Evidence, from a local production build of `web/` and the test under Chrome CPU 
   passed final-image E2E shard 2 (`browser-workspaces` included) locally in both profiles. The
   first hosted run of the PR passed every check, including `e2e-distributed-2` and
   `e2e-standalone-2`. Two more consecutive hosted runs in both profiles are still required.
+- 2026-10-13: Done. Merged as `10aa2b0` (PR #307) after independent review; three consecutive hosted runs passed every check, including `e2e-distributed-2` and `e2e-standalone-2` (38373499386, 38376936424, 38431614983), and main CI run 38434187870 passed.
