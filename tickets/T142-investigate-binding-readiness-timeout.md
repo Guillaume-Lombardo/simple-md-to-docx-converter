@@ -43,6 +43,21 @@ The `reverse-lifecycle` and `browser-workspaces` phases passed in the same job, 
   - Ruled out: T137's dispatch budget (every runtime path is clamped to the remaining operation deadline and the broker was idle, so no dispatch overran); the T141 slot race (admission refusals are immediate resets, not 5-second timeouts, and the worker client is sequential); and a watcher race (the watcher was armed and waiting; the worker never reached the broker).
   - Root cause: an environmental container-to-host stall of rootless Podman 4.9.3 on the hosted runner after container lifecycle operations, combined with a harness defect. `run_reverse_lifecycle` started its bounded 30-second fault window without first proving that the worker could reach the broker. The 30-second bound is correct once the path works, so it is unchanged. Local Podman 5.4.2 (pasta networking) does not reproduce the stall.
   - Fix: a new `reverse_broker.py wait-worker-broker` gate. It reads the worker metrics and waits up to 180 seconds (a harness bound covering the observed 70-second stall) until the worker completes three consecutive reverse reconciliations, each making at least one authenticated broker exchange, with no new runtime fault and with ready, fault-free gauges. `run_reverse_lifecycle` runs it first in both profiles, before the broker TERM or worker pause, and prints the wait time and faults seen as evidence. Unit tests cover the gate, its fault reset, timeout and CLI; a harness test proves the ordering and fails without the gate.
+- 2026-10-13: Verification of PR #309 at head `f34efff`.
+  - Local checks: `uv sync --all-groups`, `uv run ruff format --check .`, `uv run ruff check .` and `uv run ty check` pass. The default pytest selection with `-n auto` passes: 6285 tests, 94.44% coverage.
+  - Local final-image E2E (Podman 5.4.2): `e2e-distributed-2` and `e2e-standalone-2` both pass. Gate times: distributed 0.784 s and 1.297 s, standalone 1.281 s and 1.026 s. No faults were observed.
+  - Hosted CI run 38445863310 passed both shards three consecutive times, with each shard rerun only through `gh run rerun --job`. The first gate value is from reverse-lifecycle, the second from browser-runtime:
+
+    | Attempt | `e2e-distributed-2` job | Result | Gate (s), faults | `e2e-standalone-2` job | Result | Gate (s), faults |
+    | --- | --- | --- | --- | --- | --- | --- |
+    | 1 | 115467113719 | passed | 0.837, 1.078; none | 115467113471 | passed | 1.055 (none); 4.62 (10 faults) |
+    | 2 | 115474468778 | passed | 0.826 (none); 10.301 (1 fault) | not rerun | — | — |
+    | 3 | not rerun | — | — | 115480150537 | passed | 1.037, 1.036; none |
+    | 4 | 115489813975 | passed | 1.087, 1.345; none | not rerun | — | — |
+    | 5 | not rerun | — | — | 115496303273 | passed | 1.058 (none); 4.122 (8 faults) |
+
+  - In three hosted browser-runtime phases, the gate held while worker faults occurred after the restart. It then started the 30-second window only once the path was proven. Before this change, the window would have started during those faults.
+  - Not verified: the full 70-second stall did not recur during these runs, so the 180-second gate bound has not been exercised on hosted CI.
 
 ## Synchronization
 
