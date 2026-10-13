@@ -2,7 +2,7 @@
 ticket: T133
 linear_id: G1L-686
 linear_url: https://linear.app/g1lom/issue/G1L-686/t133-publish-patch-release-074-and-corrective-075
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -160,6 +160,7 @@ a corrective 0.7.5 release:
   secure Docker runner could not run locally because its loop-device setup needs an interactive
   `sudo` password; hosted CI covers that path. Status stays In Progress until the adoption is
   verified on `main`.
+- 2026-10-12: Done. The corrective 0.7.5 release published PyPI, the tag, the GitHub Release and the three GHCR images; the receipt adoption merged as `e37e7b0` (PR #296) and main CI passed. docker-box stays on its previous images until the owner approves an update.
 
 ## Synchronization
 

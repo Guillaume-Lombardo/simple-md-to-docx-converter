@@ -8,6 +8,7 @@ import os
 import secrets
 import socket
 import ssl
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -151,6 +152,24 @@ class _Reservation:
     claimed: bool = False
 
 
+class _SlotLease:
+    """Release one acquired admission slot exactly once, from any path."""
+
+    __slots__ = ("_held", "_lock", "_semaphore")
+
+    def __init__(self, semaphore: BoundedSemaphore) -> None:
+        self._semaphore = semaphore
+        self._lock = Lock()
+        self._held = True
+
+    def release(self) -> None:
+        with self._lock:
+            if not self._held:
+                return
+            self._held = False
+        self._semaphore.release()
+
+
 def _remaining(deadline: float) -> float:
     remaining = deadline - monotonic()
     if remaining <= 0:
@@ -192,6 +211,25 @@ def _authenticated_eof(connection: ssl.SSLSocket, deadline: float) -> None:
     if connection.recv(1) != b"":
         raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
     connection.settimeout(_remaining(deadline))
+    underlying = connection.unwrap()
+    underlying.close()
+
+
+def _release_before_close_notify(
+    connection: ssl.SSLSocket, deadline: float, release: Callable[[], None]
+) -> None:
+    """Free a delivered channel's slots before its close completes the exchange.
+
+    The peer's close_notify is awaited first, so the local one is the last step
+    and no longer waits on the peer. The client completes its exchange when it
+    receives that close_notify and may reconnect at once; the slots are free then.
+    """
+
+    connection.settimeout(_remaining(deadline))
+    if connection.recv(1) != b"":
+        raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+    connection.settimeout(_remaining(deadline))
+    release()
     underlying = connection.unwrap()
     underlying.close()
 
@@ -589,9 +627,10 @@ class MtlsBrokerServer:
             if not self._connections.acquire(blocking=False):
                 connection.close()
                 continue
+            admission = _SlotLease(self._connections)
             thread = Thread(
                 target=self._handle_and_release,
-                args=(connection,),
+                args=(connection, admission),
                 name="broker-mtls-handler",
             )
             with self._state_lock:
@@ -603,12 +642,12 @@ class MtlsBrokerServer:
                 with self._state_lock:
                     self._threads.discard(thread)
                     self._sockets.discard(connection)
+                admission.release()
                 connection.close()
-                self._connections.release()
                 self._record_fatal(error)
                 return
 
-    def _handle_and_release(self, raw: socket.socket) -> None:
+    def _handle_and_release(self, raw: socket.socket, admission: _SlotLease) -> None:
         current = current_thread()
         connection: ssl.SSLSocket | None = None
         try:
@@ -632,11 +671,11 @@ class MtlsBrokerServer:
             value = _decode_control(control, (_RESERVATION_KEYS, _SUBMIT_KEYS))
             if value.get("operation") == "RESERVE":
                 self._handle_response_channel(
-                    connection, value, principal, digest, deadline
+                    connection, value, principal, digest, deadline, admission=admission
                 )
             elif value.get("operation") == "SUBMIT":
                 self._handle_request_channel(
-                    connection, value, principal, digest, deadline
+                    connection, value, principal, digest, deadline, admission=admission
                 )
             else:
                 raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
@@ -645,33 +684,50 @@ class MtlsBrokerServer:
         except BaseException as error:
             self._record_fatal(error)
         finally:
+            # A delivered channel has already released its admission. Every other
+            # path releases it here, before the close the peer observes.
+            admission.release()
             if connection is not None:
                 connection.close()
             else:
                 raw.close()
-            self._connections.release()
             with self._state_lock:
                 self._threads.discard(current)
                 self._sockets.discard(raw)
                 if connection is not None:
                     self._sockets.discard(connection)
 
-    def _handle_response_channel(
+    def _handle_response_channel(  # noqa: PLR0913 - one argument per channel input
         self,
         connection: ssl.SSLSocket,
         value: dict[str, object],
         principal: AuthenticatedPrincipal,
         digest: str,
         deadline: float,
+        *,
+        admission: _SlotLease,
     ) -> None:
         if value.get("channel") != "response":
             raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
         request_id = _uuid(value.get("request_id"))
         if not self._exchanges.acquire(blocking=False):
             return
+        pending = _SlotLease(self._exchanges)
         exchange = secrets.token_hex(32)
         reservation = _Reservation(request_id, principal, digest, deadline, Event())
         inserted = False
+
+        def discard_reservation() -> None:
+            if inserted:
+                with self._state_lock:
+                    if self._reservations.get(exchange) is reservation:
+                        self._reservations.pop(exchange, None)
+
+        def release_delivered() -> None:
+            discard_reservation()
+            pending.release()
+            admission.release()
+
         try:
             with self._state_lock:
                 if exchange in self._reservations or self._stopping.is_set():
@@ -690,21 +746,20 @@ class MtlsBrokerServer:
                 _response_mapping(exchange, request_id, frame)
             )
             _send_all(connection, response_control + frame, deadline)
-            _full_tls_close(connection, deadline)
+            _release_before_close_notify(connection, deadline, release_delivered)
         finally:
-            if inserted:
-                with self._state_lock:
-                    if self._reservations.get(exchange) is reservation:
-                        self._reservations.pop(exchange, None)
-            self._exchanges.release()
+            discard_reservation()
+            pending.release()
 
-    def _handle_request_channel(  # noqa: PLR0912 - closed protocol multiplexing
+    def _handle_request_channel(  # noqa: PLR0912, PLR0913 - closed protocol multiplexing
         self,
         connection: ssl.SSLSocket,
         value: dict[str, object],
         principal: AuthenticatedPrincipal,
         digest: str,
         deadline: float,
+        *,
+        admission: _SlotLease,
     ) -> None:
         if value.get("channel") != "request":
             raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
@@ -718,6 +773,7 @@ class MtlsBrokerServer:
             blocking=False
         ):
             raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+        handler = _SlotLease(self._handlers)
         try:
             with self._state_lock:
                 expected_reservation = self._reservations.get(exchange)
@@ -772,10 +828,15 @@ class MtlsBrokerServer:
             except BaseException as error:
                 self._record_fatal(error)
                 return
+            # Publishing the response lets the paired channel complete the exchange,
+            # after which the client may start the next one at once. Free this
+            # channel's slots first; only non-blocking cleanup remains after that.
+            handler.release()
+            admission.release()
             reservation.response_frame = response_frame
             reservation.response_ready.set()
         finally:
-            self._handlers.release()
+            handler.release()
 
     def _dispatch(
         self,

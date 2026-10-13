@@ -124,6 +124,11 @@ test(
           ["/revert", reverse, "Meeting notes.docx", "picked.docx"],
         ]) {
           let ready = route === "/revert";
+          let templatesServed = () => {};
+          let releaseSearch = () => {};
+          const searchHeld = new Promise((resolve) => {
+            releaseSearch = resolve;
+          });
           const context = await browser.newContext({
             baseURL,
             viewport: { width, height: 1000 },
@@ -131,7 +136,8 @@ test(
           const page = await context.newPage();
           await page.route("**/api/v1/**", async (request) => {
             assert.equal(request.request().method(), "GET");
-            const path = new URL(request.request().url()).pathname;
+            const url = new URL(request.request().url());
+            const path = url.pathname;
             let body;
             if (path === "/api/v1/session") body = user;
             else if (path === "/api/v1/conversion-options")
@@ -152,9 +158,12 @@ test(
               };
             else if (path === "/api/v1/reversions")
               body = { items: [reverse], total: 1, offset: 0, limit: 10 };
-            else if (path === "/api/v1/templates")
+            else if (path === "/api/v1/templates") {
+              // Hold named searches so the indicator can be measured while visible.
+              if (url.searchParams.has("name")) await searchHeld;
+              else templatesServed();
               body = { items: [], total: 0, offset: 0, limit: 20 };
-            else if (path.endsWith(job.id))
+            } else if (path.endsWith(job.id))
               body = ready
                 ? job
                 : {
@@ -242,6 +251,9 @@ test(
             await page.getByText("Slide structure", { exact: true }).click();
             assert.equal(await details.evaluate((node) => node.open), false);
           }
+          const initialSearch = new Promise((resolve) => {
+            templatesServed = resolve;
+          });
           await page.reload();
           const history = page.getByRole("button", {
             name: `${name} · succeeded`,
@@ -294,6 +306,25 @@ test(
               (node) => getComputedStyle(node).backgroundColor,
             ),
           );
+          if (route !== "/revert") {
+            const searching = page.getByText("Searching templates…", {
+              exact: true,
+            });
+            await initialSearch;
+            await searching.waitFor({ state: "detached" });
+            const idle = await page.locator("#recent-heading").boundingBox();
+            await page
+              .getByRole("searchbox", { name: "Search active templates" })
+              .fill("Board");
+            await searching.waitFor();
+            const busy = await page.locator("#recent-heading").boundingBox();
+            releaseSearch();
+            assert.equal(
+              busy.y,
+              idle.y,
+              "A template search must not move the history column",
+            );
+          }
           await context.close();
         }
       }

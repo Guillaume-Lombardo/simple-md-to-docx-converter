@@ -894,3 +894,71 @@ def test_workspace_client_revalidates_required_and_optional_limits_before_transp
     assert captured.value.category is BrokerErrorCategory.PROTOCOL_ERROR
     encode.assert_not_called()
     socket_factory.assert_not_called()
+
+
+def _record_slot_release_and_close(
+    server: UnixBrokerServer, connection: Any, mocker: MockerFixture
+) -> list[str]:
+    events: list[str] = []
+    original_release = server._handlers.release
+
+    def release(n: int = 1) -> None:
+        events.append("release")
+        original_release(n)
+
+    mocker.patch.object(server._handlers, "release", side_effect=release)
+    connection.close.side_effect = lambda: events.append("close")
+    return events
+
+
+@pytest.mark.parametrize("outcome", ["returned", "failed"])
+def test_handler_frees_its_slot_before_the_close_that_completes_the_exchange(
+    tmp_path: Path, mocker: MockerFixture, outcome: str
+) -> None:
+    server = UnixBrokerServer(
+        _private_parent(tmp_path) / "broker.sock",
+        expected_client_uid=os.geteuid(),
+        principal=PRINCIPAL,
+        dispatcher=mocker.Mock(spec=BrokerDispatcher),
+        limits=_limits(),
+    )
+    connection = mocker.Mock(spec=socket.socket)
+    events = _record_slot_release_and_close(server, connection, mocker)
+    handle = mocker.patch.object(server, "_handle")
+    if outcome == "failed":
+        handle.side_effect = RuntimeError("handler failed")
+    assert server._handlers.acquire(blocking=False)
+
+    server._handle_and_release(connection)
+
+    assert events == ["release", "close"]
+    assert server._handlers.acquire(blocking=False)
+    assert server.failed is (outcome == "failed")
+
+
+def test_handler_thread_start_failure_frees_its_slot_before_closing(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    server = UnixBrokerServer(
+        _private_parent(tmp_path) / "broker.sock",
+        expected_client_uid=os.geteuid(),
+        principal=PRINCIPAL,
+        dispatcher=mocker.Mock(spec=BrokerDispatcher),
+        limits=_limits(),
+    )
+    connection = mocker.Mock(spec=socket.socket)
+    listener = mocker.Mock(spec=socket.socket)
+    listener.accept.return_value = (connection, None)
+    server._listener = listener
+    events = _record_slot_release_and_close(server, connection, mocker)
+    failure = RuntimeError("thread unavailable")
+    thread_type = mocker.patch("markweave.broker.unix_transport.Thread")
+    thread_type.return_value.start.side_effect = failure
+
+    server._accept_loop()
+
+    assert events == ["release", "close"]
+    assert server._handlers.acquire(blocking=False)
+    assert server._fatal_error is failure
+    assert not server._threads
+    assert not server._connections

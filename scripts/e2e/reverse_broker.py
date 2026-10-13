@@ -77,6 +77,20 @@ _MEMBER_PRE_EXIT_STATES = frozenset(
 )
 _MEMBER_BROKER_FAULT_CODES = ("termination_unproven", "transport_failure")
 _MAX_METRICS_BYTES = 1_048_576
+# T142: rootless Podman 4.9 on the hosted runner can stall the container-to-host
+# broker path for about 70 seconds after a container stop or restart. The gate
+# bound covers that observed stall with margin; it is a harness bound, not a
+# product default.
+_BROKER_PATH_TIMEOUT_SECONDS = 180.0
+_BROKER_PATH_POLL_SECONDS = 0.25
+_BROKER_PATH_RECONCILIATIONS = 3
+_RECONCILIATION_ATTEMPTS = (
+    "md_converter_reversion_operation_duration_seconds_count"
+    '{operation="reversion_reconciliation"}'
+)
+_RECONCILIATION_SUCCESSES = "md_converter_reversion_reconciliation_successes_total"
+_BROKER_PATH_COUNTERS = ("attempts", "successes", "faults")
+_RUNTIME_FAULTS_PREFIX = "md_converter_reversion_runtime_faults_total{"
 
 
 def _openssl(root: Path, *arguments: str) -> None:
@@ -636,6 +650,93 @@ def _fault_delta(
     return (metrics[key] or 0.0) - (baseline[key] or 0.0)
 
 
+def _broker_path_metrics(url: str) -> dict[str, float]:
+    samples = _read_metrics(url)
+    ready = samples.get("md_converter_reversion_broker_ready")
+    fault = samples.get("md_converter_reversion_broker_fault")
+    if ready is None or fault is None:
+        raise RuntimeError("T142 worker reverse runtime gauges are unavailable")
+    return {
+        "broker_ready": ready,
+        "broker_fault": fault,
+        "attempts": samples.get(_RECONCILIATION_ATTEMPTS, 0.0),
+        "successes": samples.get(_RECONCILIATION_SUCCESSES, 0.0),
+        "faults": sum(
+            value
+            for series, value in samples.items()
+            if series.startswith(_RUNTIME_FAULTS_PREFIX)
+        ),
+    }
+
+
+def _broker_path_window_broken(
+    latest: Mapping[str, float], baseline: Mapping[str, float]
+) -> bool:
+    """Return whether the scrape breaks the run of successes since the baseline.
+
+    Every counter comes from one atomic counter snapshot. A decrease is a
+    process restart, so the evidence restarts from the new values. A new fault
+    breaks the run. A reconciliation whose duration is published without a
+    matching success is a failed step whose fault may not be published yet, so
+    it breaks the run before fault handling settles. A scrape that lands inside
+    a successful step can only restart the run, never extend it.
+    """
+    if any(latest[name] < baseline[name] for name in _BROKER_PATH_COUNTERS):
+        return True
+    if latest["faults"] != baseline["faults"]:
+        return True
+    attempts = latest["attempts"] - baseline["attempts"]
+    return attempts > latest["successes"] - baseline["successes"]
+
+
+def wait_worker_broker(
+    metrics_url: str,
+    *,
+    timeout_seconds: float = _BROKER_PATH_TIMEOUT_SECONDS,
+) -> dict[str, float]:
+    """Wait until the reverse worker completes consecutive successful reconciliations.
+
+    Each worker reconciliation makes at least one authenticated broker exchange
+    over the container-to-host path. The worker counts a reconciliation as a
+    success only after that exchange returns without error, so a failed step can
+    never be counted. Any fault, failed step or counter reset restarts the run,
+    so success proves the path carries several consecutive exchanges before a
+    bounded fault window starts. Return the evidence: the elapsed seconds and
+    the faults observed.
+    """
+    started = time.monotonic()
+    deadline = started + timeout_seconds
+    latest = _broker_path_metrics(metrics_url)
+    baseline = latest
+    previous = latest
+    faults_observed = 0.0
+    while True:
+        if latest["faults"] >= previous["faults"]:
+            faults_observed += latest["faults"] - previous["faults"]
+        else:
+            faults_observed += latest["faults"]
+        if _broker_path_window_broken(latest, baseline):
+            baseline = latest
+        elif (
+            latest["broker_ready"] == 1
+            and latest["broker_fault"] == 0
+            and latest["successes"] - baseline["successes"]
+            >= _BROKER_PATH_RECONCILIATIONS
+        ):
+            return {
+                "elapsed_seconds": round(time.monotonic() - started, 3),
+                "faults_observed": faults_observed,
+            }
+        if time.monotonic() >= deadline:
+            raise RuntimeError(
+                "T142 worker broker path readiness timed out: "
+                + json.dumps(latest, sort_keys=True)
+            )
+        time.sleep(_BROKER_PATH_POLL_SECONDS)
+        previous = latest
+        latest = _broker_path_metrics(metrics_url)
+
+
 def watch_member(  # noqa: PLR0912, PLR0915 - linear fail-closed test observer
     root: Path,
     mode: str,
@@ -856,16 +957,41 @@ def _process_children(parent_pid: int) -> set[int]:
     return children
 
 
-def signal_broker(root: Path, parent_pid: int, signal_name: str) -> None:
-    """Signal the exact owned broker child, never its uv supervisor wrapper."""
+def _broker_arguments(root: Path, admission_report: Path | None) -> list[str]:
+    """Return the exact module arguments of the owned broker launcher."""
+    if admission_report is None:
+        return ["-m", "markweave.broker.process", str(root / "broker.json")]
+    if not admission_report.is_absolute():
+        raise ValueError("T141 admission report path must be absolute")
+    return [
+        "-m",
+        "scripts.e2e.admission_window_broker",
+        "--root",
+        str(root),
+        "--report",
+        str(admission_report),
+    ]
+
+
+def signal_broker(
+    root: Path,
+    parent_pid: int,
+    signal_name: str,
+    admission_report: Path | None = None,
+) -> None:
+    """Signal the exact owned broker child, never its uv supervisor wrapper.
+
+    With an admission report, the child is the T141 admission-window launcher
+    that runs the same broker entry point at admission limit one.
+    """
     if not root.is_absolute() or parent_pid <= 0 or signal_name not in {"TERM", "KILL"}:
         raise ValueError("T73 broker signal request is invalid")
-    expected = ["-m", "markweave.broker.process", str(root / "broker.json")]
+    expected = _broker_arguments(root, admission_report)
     parent_argv = _process_argv(parent_pid)
     if (
         not parent_argv
         or Path(parent_argv[0]).name != "uv"
-        or parent_argv[-4:] != ["python", *expected]
+        or parent_argv[-len(expected) - 1 :] != ["python", *expected]
     ):
         raise RuntimeError("T73 broker supervisor arguments differ")
     children = _process_children(parent_pid)
@@ -890,7 +1016,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "operation",
-        choices=("prepare", "ready", "sweep", "watch-pause", "watch-member", "signal"),
+        choices=(
+            "prepare",
+            "ready",
+            "sweep",
+            "watch-pause",
+            "watch-member",
+            "signal",
+            "wait-worker-broker",
+        ),
     )
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--image-repository")
@@ -906,6 +1040,7 @@ def main() -> None:
     parser.add_argument("--metrics-url")
     parser.add_argument("--ready", type=Path)
     parser.add_argument("--report", type=Path)
+    parser.add_argument("--admission-report", type=Path)
     args = parser.parse_args()
     if args.operation == "prepare":
         if not all((args.image_repository, args.image_digest, args.worker_host)):
@@ -931,10 +1066,17 @@ def main() -> None:
         ):
             parser.error("watch-member requires mode, metrics URL, ready and report")
         watch_member(args.root, args.mode, args.metrics_url, args.ready, args.report)
+    elif args.operation == "wait-worker-broker":
+        if args.metrics_url is None:
+            parser.error("wait-worker-broker requires metrics URL")
+        evidence = wait_worker_broker(args.metrics_url)
+        print(
+            "Reverse worker broker path ready: " + json.dumps(evidence, sort_keys=True)
+        )
     elif args.operation == "signal":
         if args.parent_pid is None or args.signal is None:
             parser.error("signal requires parent PID and signal")
-        signal_broker(args.root, args.parent_pid, args.signal)
+        signal_broker(args.root, args.parent_pid, args.signal, args.admission_report)
     elif args.operation == "ready":
         wait_ready(args.root)
     else:

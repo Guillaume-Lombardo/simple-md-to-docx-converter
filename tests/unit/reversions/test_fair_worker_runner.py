@@ -138,6 +138,7 @@ def test_reverse_broker_failure_does_not_block_forward(
         'md_converter_reversion_runtime_faults_total{code="transport_failure"} 1'
         in rendered
     )
+    assert "md_converter_reversion_reconciliation_successes_total" not in rendered
     log_event.assert_any_call(
         "reversion_runtime_fault_observed", error_code="transport_failure"
     )
@@ -220,6 +221,7 @@ def test_reverse_fault_categories_publish_their_exact_degraded_scope(
     rendered = metrics.render(QueueSnapshot(0, 0, 0))
     assert fault_gauge in rendered
     assert f'md_converter_reversion_runtime_faults_total{{code="{code}"}} 1' in rendered
+    assert "md_converter_reversion_reconciliation_successes_total" not in rendered
 
 
 def test_multi_page_reconciliation_interleaves_forward_before_reverse_claim(
@@ -285,6 +287,11 @@ def test_proof_recovery_returns_to_reconciliation_without_claiming(
     assert "md_converter_reversion_reconciliation_ready 0" in rendered
     assert "md_converter_reversion_degraded 1" in rendered
     assert "md_converter_reversion_recoveries_total 0" in rendered
+    assert "md_converter_reversion_reconciliation_successes_total 1" in rendered
+    assert (
+        "md_converter_reversion_operation_duration_seconds_count"
+        '{operation="reversion_reconciliation"} 2'
+    ) in rendered
 
 
 def test_due_reverse_cleanup_is_one_quantum_when_both_queues_are_empty(

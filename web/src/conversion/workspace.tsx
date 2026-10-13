@@ -423,7 +423,12 @@ export function ConversionWorkspace({
                     value={query}
                   />
                 </label>
-                <div aria-live="polite" aria-busy={state.searching}>
+                {/* Reserve the indicator line so a search never moves the stacked history column. */}
+                <div
+                  aria-live="polite"
+                  aria-busy={state.searching}
+                  className="min-h-6"
+                >
                   {state.searching ? "Searching templates…" : null}
                 </div>
                 {!state.searching && state.templates.length === 0 && query && (

@@ -51,6 +51,9 @@ rows. The endpoint exposes:
 - `md_converter_reversion_operation_duration_seconds_count` and `_sum`, labelled only by the
   closed operations `reversion_reconciliation`, `reversion_recovery`, `reversion_claim`, and
   `reversion_cleanup`;
+- `md_converter_reversion_reconciliation_successes_total`, which counts only reconciliation steps
+  whose broker exchange completed without error; the reconciliation duration count also includes
+  failed steps, so this counter is the success-only readiness signal;
 - `md_converter_job_step_duration_seconds_count` and `_sum`, labelled only by the fixed step;
 - `md_converter_job_failures_total`, labelled by stable safe error code;
 - `md_converter_job_saturation_total`, labelled `owner` or `global`;
