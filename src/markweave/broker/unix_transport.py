@@ -463,8 +463,8 @@ class UnixBrokerServer:
                 with self._threads_lock:
                     self._threads.discard(thread)
                     self._connections.discard(connection)
-                connection.close()
                 self._handlers.release()
+                connection.close()
                 self._record_fatal(error)
                 return
 
@@ -475,8 +475,12 @@ class UnixBrokerServer:
         except BaseException as error:
             self._record_fatal(error)
         finally:
-            connection.close()
+            # The close sends the EOF that completes the client's exchange, and the
+            # client may reconnect at once. Free the slot first so that admission
+            # never refuses that reconnection only because this thread still runs.
+            # Nothing that can block remains after the release.
             self._handlers.release()
+            connection.close()
             with self._threads_lock:
                 self._threads.discard(current)
                 self._connections.discard(connection)
