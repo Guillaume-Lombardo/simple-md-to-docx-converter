@@ -169,3 +169,25 @@ def test_inventory_lock_waits_never_outlive_the_dispatch_budget(
         SQLiteBrokerInventory(tmp_path / "inventory.sqlite3", b"i" * 32, max_records=1)
 
     assert [call.kwargs["timeout"] for call in connect.call_args_list] == [10.0, 0.0]
+
+
+def test_runner_reaps_a_command_without_pipes_within_the_budget(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    process = mocker.Mock(stdout=None, stderr=None, stdin=None, pid=4321)
+    mocker.patch(
+        "markweave.broker.command_runner.subprocess.Popen", return_value=process
+    )
+    killpg = mocker.patch("markweave.broker.command_runner.os.killpg")
+    runner = BoundedCommandRunner(
+        tmp_path / "unused", PodmanCommandLimits(20), environment={}
+    )
+
+    with (
+        operation_budget(time.monotonic() + 0.5),
+        pytest.raises(PodmanRuntimeError, match="command failed"),
+    ):
+        runner(("fixed",))
+
+    killpg.assert_called_once()
+    assert 0 < process.wait.call_args.kwargs["timeout"] <= 0.5

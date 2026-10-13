@@ -282,3 +282,14 @@ that stays populated past the bound raises `Podman stable unit cgroup is not emp
       the gate. Budgets make every holder release the gate a tenth of `T` earlier than before.
     - A stall of the whole broker process, such as a host freeze or `SIGSTOP`, is outside any
       in-process bound.
+  - Verification (2026-10-13):
+    - The real rootless Podman module passed 20 of 20 in three consecutive runs.
+    - `ruff format --check`, `ruff check`, `ty check`, `scripts.ci.e2e_shards` and `validate_ci`
+      all pass.
+    - The default canonical command: 6,202 passed and 8 failed, with 94.37% total coverage. The 8
+      failures are only in the untouched `test_local_test_services_interruption.py`, which passes
+      alone.
+    - Shard 2 was not rerun for this round: no E2E scenario changed, and ordinary E2E commands are
+      far shorter than their budget.
+    - Changed application lines: 117 of 118 were covered in the full run. The remaining line, the
+      pipe-less reaping path, is now covered by a dedicated unit test. Branch coverage is 90.47%.
