@@ -9,7 +9,6 @@ import os
 import signal
 import subprocess
 import tempfile
-import time
 import zipfile
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -34,6 +33,7 @@ from tests.golden.limits import RasterLimits
 from tests.golden.pdf import render_pdf
 from tests.golden.raster import RasterPage, RasterTolerance, compare_pdf_rasters
 from tests.golden.reference import normalize_reference_docx
+from tests.process_exit import wait_for_process_exit
 
 pytestmark = pytest.mark.integration
 LIBREOFFICE_VERSION = "LibreOffice 26.2.5.2 cd7284b4cbbfeb507e630c1aac019f4157393acb"
@@ -372,22 +372,13 @@ def _minimal_docx() -> bytes:
 
 
 def _wait_for_descendant_exit(descendant_pid: int) -> None:
-    def descendant_is_running() -> bool:
-        try:
-            state = Path(f"/proc/{descendant_pid}/stat").read_text().split()[2]
-        except FileNotFoundError, ProcessLookupError:
-            return False
-        return state != "Z"
-
-    deadline = time.monotonic() + 2.0
-    try:
-        while descendant_is_running() and time.monotonic() < deadline:
-            time.sleep(0.01)
-        assert not descendant_is_running()
-    finally:
-        if descendant_is_running():
-            with suppress(ProcessLookupError):
-                os.kill(descendant_pid, signal.SIGKILL)
+    # Decide from one latched observation: re-reading /proc after the descendant
+    # was seen exiting can catch it mid-reap (X) or a process that reused its PID.
+    if wait_for_process_exit(descendant_pid, 2.0):
+        return
+    with suppress(ProcessLookupError):
+        os.kill(descendant_pid, signal.SIGKILL)
+    pytest.fail("A descendant survived process-group cleanup.")
 
 
 @pytest.mark.parametrize("mode", ("timeout", "cancel", "probe-failure"))
