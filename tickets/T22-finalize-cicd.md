@@ -576,3 +576,21 @@ Changed files relative to main:
 - `.github/workflows/release.yml`
 - `scripts/ci/validate_ci.py`
 - `tickets/T22-finalize-cicd.md`
+
+
+## October 14, 2026 authorized refresh (PR #299)
+
+- User explicitly requested rebasing onto main and finishing remaining Dependabot
+  PRs. Unpublished local commits are rebased onto main 7a28b70; the existing
+  remote bot head is then incorporated for normal fast-forward publication.
+- Preserve T130/T135/T139 CI domains, image-build jobs, E2E partitions, caches
+  and coverage gates; conflicts refresh policy hashes without replacing new logic.
+- Fresh uv sync, Ruff formatting/lint, ty and module CI validator pass.
+- Local validation: 233 workflow checks; unchanged application source. All 13 Action uses retain existing inputs and cache settings.
+- Rebase validation encountered stale timestamp-based Python bytecode after
+  Git restored files; a separate bytecode cache verifies the actual current
+  source in fresh processes. No CI policy failure is suppressed.
+- Prior October 12 full-suite/native/image results are historical evidence,
+  not a claim of full execution on this updated main. Fresh hosted exact-head
+  CI and independent review are required before the authorized squash merge.
+- T22 remains In Progress; version 0.7.5 and published receipts are unchanged.
