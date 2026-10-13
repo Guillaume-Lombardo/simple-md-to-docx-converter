@@ -2,7 +2,7 @@
 ticket: T135
 linear_id: G1L-688
 linear_url: https://linear.app/g1lom/issue/G1L-688/t135-build-ci-images-once-and-split-long-final-image-jobs
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -104,3 +104,4 @@ Measured baseline (runs 38235590401 and 38150642257):
     so they are unaffected.
   - Hosted durations and the three consecutive full-suite runs remain to be measured after
     review.
+- 2026-10-13: Done. Merged as `0e0f7f3` (PR #300) after independent review. Five hosted full runs at `62d72fc` kept every final-image job at 12.6 minutes or less (E2E shards 8.8-12.6, container 9.7-10.2, supply-chain 6.4-9.5, build images 5.9-7.4, Compose sub-suites 1.5-6.5) and complete runs at 17-20 minutes; the unsharded release mode passed locally in both profiles. The two failures seen in those runs came from pre-existing intermittent tests fixed by T137 and tracked by T140. Main CI run 38308265441 passed.

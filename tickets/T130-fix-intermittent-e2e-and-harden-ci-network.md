@@ -2,7 +2,7 @@
 ticket: T130
 linear_id: G1L-683
 linear_url: https://linear.app/g1lom/issue/G1L-683/t130-fix-intermittent-final-image-e2e-failures-and-harden-ci-network
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -183,3 +183,4 @@ skipping Python tests for documentation-only changes.
       name, so `frontend_alias` remains a diagnostic resolver route.
     - PostgreSQL and RustFS stay pinned: they keep the same container across restarts, and the
       distributed job passed their outage and restart phases.
+- 2026-10-12: Done. Merged as `a10645a` (PR #297) after independent review and three consecutive complete hosted passes of both final-image profiles (38260824888, 38264318511, 38264352294); main CI passed.
