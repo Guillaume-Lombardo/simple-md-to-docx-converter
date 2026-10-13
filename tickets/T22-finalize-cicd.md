@@ -550,3 +550,29 @@ The existing Dependabot head and current main are ancestors of each local branch
 - Adopt pypdf 6.20.0 and regenerate canonical hash-required build constraints.
 - Preserve the paused Kubernetes capability, version 0.7.5 and public image pins.
 - Validation and remote publication are pending.
+
+
+## October 14, 2026 Python qualification (#305)
+
+- #298 closed without merge and is superseded by #305. Retain its reviewed
+  bounded Kubernetes protocol and four real generated-SDK integration tests,
+  updating all package, attester and assertion pins to Kubernetes37.0.1.
+- Adopt pypdf6.20.0, boto3 1.43.111, Ruff0.17.0 and ty0.0.86. Canonical
+  constraints export retains the explicitly constrained trove-classifiers
+  2026.6.1.19; no unrelated build-constraint drift is adopted.
+- Current main7a28b70 and bot head fe3ecbe are ancestors; normal push is valid.
+- ty0.0.86 rejects conditional scanner dictionary expansion in one test helper
+  with 28 argument errors. Use an explicit scanner argument with the same
+  TrustingUploadScanner default; no application executable body changes.
+- uv sync, Ruff format/check, ty and module CI validator pass; 1,156 targeted
+  broker/package/HTTP-adapter/release checks pass (one dependency warning).
+  Hash-required sdist/wheel build and integrity validation pass.
+- uv audit exits one with exactly the same six advisory/package/version entries
+  as current main, no introduced alert. No baseline finding is suppressed.
+- A frozen combined canonical suite and fresh hosted exact-head CI will verify
+  current-main integration; October12 native/image/default-suite evidence is
+  historical, not a current-main full-run claim. Host engine binaries remain
+  unavailable; hosted native and final-image E2E are mandatory.
+- User authorizes finishing remaining PRs, including protected squash integration
+  after checks and independent review. T22 stays In Progress until verified main.
+  Kubernetes stays paused; project.version and public receipts are unchanged.

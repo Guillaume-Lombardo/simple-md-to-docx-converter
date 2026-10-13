@@ -55,6 +55,7 @@ from markweave.jobs.service import JobService
 from markweave.malware import (
     MalwareDetectedError,
     MalwareScannerUnavailableError,
+    TrustingUploadScanner,
     UploadScanner,
 )
 from markweave.observability import QueueObserver
@@ -283,7 +284,7 @@ def isolated_client(  # noqa: PLR0913 - explicit adapter configuration
             readiness=MemoryReadinessProbe(ready=ready),
             object_store=mocker.Mock(),
             jobs=mocker.Mock(spec=JobService),
-            **({"scanner": scanner} if scanner is not None else {}),
+            scanner=scanner if scanner is not None else TrustingUploadScanner(),
         ),
     )
     return TestClient(app, base_url="https://testserver"), auth, admin, alice

@@ -78,7 +78,7 @@ rechecks the API identity, and the helper checks a kubelet-projected Pod UID bef
 Workspace exec transfers canonical attempt-channel files with bounded base64 framing,
 and the pinned websocket client receives the exact broker timeout during connection establishment
 as well as stream polling. This bounded connection path intentionally mirrors private `WSClient`
-initialization from the pinned `kubernetes==37.0.0` dependency; upgrades must pass the compatibility
+initialization from the pinned `kubernetes==37.0.1` dependency; upgrades must pass the compatibility
 test before changing that pin. The kill exec acknowledgement is never considered termination evidence.
 
 The committed `NodeAttestationEngine` is the fail-closed policy core. The production process uses
