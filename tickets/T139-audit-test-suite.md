@@ -2,7 +2,7 @@
 ticket: T139
 linear_id: G1L-692
 linear_url: https://linear.app/g1lom/issue/G1L-692/t139-audit-the-test-suite-for-redundant-obsolete-or-low-value-tests
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -140,3 +140,4 @@ scripts they test), and C1 to C3. Not approved in this scope: K3 and K5.
   - The marker guard rejected two new T137 tests in `tests/unit/broker/test_cgroup_events_polling.py`
     that had no category marker. They use a fake clock and are now marked `unit`. Every other new
     T137 and T138 test already had a marker.
+- 2026-10-13: Done. Merged as `961d174` (PR #303) after three independent review rounds; main CI run 38357485228 passed with the reduced domain set. The default canonical command takes about 8 minutes serially and application branch coverage is 90.55%.

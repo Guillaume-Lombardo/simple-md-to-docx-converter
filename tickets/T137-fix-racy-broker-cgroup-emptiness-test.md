@@ -2,7 +2,7 @@
 ticket: T137
 linear_id: G1L-690
 linear_url: https://linear.app/g1lom/issue/G1L-690/t137-fix-the-racy-cgroup-emptiness-assertion-in-the-rootless-podman
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -293,3 +293,4 @@ that stays populated past the bound raises `Podman stable unit cgroup is not emp
       far shorter than their budget.
     - Changed application lines: 117 of 118 were covered in the full run. The remaining line, the
       pipe-less reaping path, is now covered by a dedicated unit test. Branch coverage is 90.47%.
+- 2026-10-13: Done. Merged as `016bbe7` (PR #301) after four independent review rounds; three consecutive hosted runs passed at `d5d5dd1` with `container` at 9-12 minutes (38328185711, 38329752300, 38331577994), and main CI run 38336902838 passed. Follow-ups: T141 (handler slot release race) and T142 (intermittent binding readiness timeout).
