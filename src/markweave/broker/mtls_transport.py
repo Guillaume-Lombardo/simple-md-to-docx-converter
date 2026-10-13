@@ -21,6 +21,7 @@ import markweave.broker.mtls_identity as _mtls_identity
 from markweave.broker.dispatch import BrokerDispatcher
 from markweave.broker.errors import BrokerError, BrokerErrorCategory
 from markweave.broker.models import AuthenticatedPrincipal, RuntimeChannelLimits
+from markweave.broker.operation_deadline import dispatch_budget, operation_budget
 from markweave.broker.protocol import (
     LENGTH_PREFIX_BYTES,
     BrokerRequest,
@@ -747,7 +748,9 @@ class MtlsBrokerServer:
                 ):
                     raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
                 reservation.claimed = True
-            response = self._dispatch(request, principal, deadline)
+            budget = dispatch_budget(deadline, self._limits.operation_timeout_seconds)
+            with operation_budget(budget):
+                response = self._dispatch(request, principal, deadline)
             if response is None:
                 return
             try:

@@ -18,6 +18,7 @@ import pytest
 from pytest_mock import MockerFixture
 
 from markweave.broker import mtls_transport
+from markweave.broker.command_runner import PodmanRuntimeError
 from markweave.broker.dispatch import BrokerDispatcher
 from markweave.broker.errors import BrokerError, BrokerErrorCategory
 from markweave.broker.models import (
@@ -33,6 +34,10 @@ from markweave.broker.mtls_transport import (
     MtlsPeerIdentity,
     MtlsTransportLimits,
     leaf_certificate_sha256,
+)
+from markweave.broker.operation_deadline import (
+    RESPONSE_RESERVE_FRACTION,
+    remaining_seconds,
 )
 from markweave.broker.protocol import (
     CreateRequest,
@@ -56,6 +61,10 @@ from markweave.broker.workspace_protocol import (
 from markweave.reversions.errors import ReverseErrorCategory
 from markweave.reversions.models import ReverseContentLimits, ReverseOutputMode
 from markweave.reversions.options import ReverseExtraction, ReversionOptions
+from tests.integration.broker.slow_reaping import (
+    budget_exhausting_runner,
+    install_slow_reaping,
+)
 
 pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
 
@@ -438,6 +447,65 @@ def test_real_paired_mtls_lifecycle_exchange(
     dispatcher.dispatch.assert_called_once_with(
         CLIENT_PRINCIPAL, ReadyRequest(REQUEST_ID, 1)
     )
+
+
+def test_real_mtls_dispatch_publishes_a_budget_before_its_deadline(
+    certificates: CertificateSet, mocker: MockerFixture
+) -> None:
+    observed: list[float | None] = []
+
+    def dispatch(*_args: object) -> ReadyResponse:
+        observed.append(remaining_seconds())
+        return ReadyResponse(REQUEST_ID, True)
+
+    dispatcher = mocker.Mock(spec=BrokerDispatcher)
+    dispatcher.dispatch.side_effect = dispatch
+    server, client_local, server_peer = _server(certificates, dispatcher)
+
+    with server:
+        client = _client(server, client_local, server_peer)
+        assert client.request(ReadyRequest(REQUEST_ID, 1)) == ReadyResponse(
+            REQUEST_ID, True
+        )
+
+    assert len(observed) == 1
+    assert observed[0] is not None
+    assert 0 < observed[0] <= 2 * (1 - RESPONSE_RESERVE_FRACTION)
+    assert remaining_seconds() is None
+
+
+def test_real_mtls_dispatch_refuses_before_its_deadline_when_reaping_is_slow(
+    certificates: CertificateSet, mocker: MockerFixture, tmp_path: Path
+) -> None:
+    runner = budget_exhausting_runner(tmp_path)
+    refusals: list[str] = []
+
+    def dispatch(*_args: object) -> ReadyResponse:
+        try:
+            runner(("fixed",))
+        except PodmanRuntimeError as error:
+            refusals.append(str(error))
+        return ReadyResponse(REQUEST_ID, False)
+
+    dispatcher = mocker.Mock(spec=BrokerDispatcher)
+    dispatcher.dispatch.side_effect = dispatch
+    server, client_local, server_peer = _server(certificates, dispatcher)
+    reap_all = install_slow_reaping(mocker, 0.6)
+    server.start()
+    try:
+        client = _client(server, client_local, server_peer, timeout=3)
+        started = time.monotonic()
+        response = client.request(ReadyRequest(REQUEST_ID, 1))
+        elapsed = time.monotonic() - started
+
+        assert response == ReadyResponse(REQUEST_ID, False)
+        assert refusals == ["Podman command cleanup failed"]
+        assert elapsed < 2
+        assert server.failed is False
+        assert server.stopping is False
+    finally:
+        server.stop()
+        reap_all()
 
 
 def test_real_paired_mtls_reconciliation_binds_certificate_principal(

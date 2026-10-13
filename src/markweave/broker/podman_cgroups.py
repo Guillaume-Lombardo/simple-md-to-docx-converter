@@ -5,7 +5,10 @@ from __future__ import annotations
 import os
 import re
 import stat
+from collections.abc import Callable
 from contextlib import suppress
+from dataclasses import dataclass
+from math import isfinite
 from pathlib import Path
 from typing import Final
 
@@ -16,6 +19,64 @@ _CGROUP_EVENTS_MAX_BYTES: Final = 4096
 _SYSTEMD_PROPERTIES_MAX_BYTES: Final = 512
 
 _OWNER_ONLY_MODE: Final = 0o700
+
+
+@dataclass(frozen=True, slots=True)
+class CgroupEmptinessWait:
+    """Bound the wait for the kernel to clear a stopped unit's populated flag.
+
+    Podman reports a killed container as exited before its conmon monitor and that
+    monitor's cleanup command leave the unit slice, so cgroup-v2 emptiness lags the
+    runtime exit state. Only an explicit ``populated 1`` observation is retried;
+    invalid evidence and a persistent member still fail closed.
+    """
+
+    timeout_seconds: float = 5.0
+    poll_interval_seconds: float = 0.05
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.timeout_seconds) not in {int, float}
+            or not isfinite(self.timeout_seconds)
+            or self.timeout_seconds <= 0
+            or type(self.poll_interval_seconds) not in {int, float}
+            or not isfinite(self.poll_interval_seconds)
+            or self.poll_interval_seconds <= 0
+            or self.poll_interval_seconds > self.timeout_seconds
+        ):
+            raise ValueError("Podman cgroup emptiness wait is invalid")
+
+
+def _await_unpopulated(
+    read: Callable[[], bytes],
+    wait: CgroupEmptinessWait,
+    monotonic: Callable[[], float],
+    sleep: Callable[[float], None],
+    limit_seconds: float | None = None,
+) -> dict[str, int]:
+    """Return parsed events once unpopulated, or fail when the bound expires.
+
+    The first observation is accepted immediately. A later observation counts
+    only when both the pause and the read completed before the deadline, so a
+    delayed pause can never turn evidence observed after the bound into proof.
+    ``limit_seconds`` further shortens the bound to the remaining dispatch budget.
+    """
+
+    timeout = wait.timeout_seconds
+    if limit_seconds is not None:
+        timeout = min(timeout, limit_seconds)
+    deadline = monotonic() + timeout
+    events = _parse_cgroup_events(read())
+    while events.get("populated") != 0:
+        remaining = deadline - monotonic()
+        if remaining > 0:
+            sleep(min(wait.poll_interval_seconds, remaining))
+        if deadline - monotonic() <= 0:
+            raise PodmanRuntimeError("Podman stable unit cgroup is not empty")
+        events = _parse_cgroup_events(read())
+        if deadline - monotonic() <= 0:
+            raise PodmanRuntimeError("Podman stable unit cgroup is not empty")
+    return events
 
 
 class SystemdCgroupRemover:

@@ -7,6 +7,7 @@ import math
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from pathlib import Path
+from time import monotonic, sleep
 from typing import Any
 from uuid import UUID, uuid5
 
@@ -23,6 +24,7 @@ from markweave.broker.models import (
     RuntimeRecoveryBinding,
     policy_specification_evidence,
 )
+from markweave.broker.operation_deadline import remaining_seconds
 from markweave.broker.ports import RuntimeUnit
 from markweave.reversions.attempt_channel import (
     MAX_METADATA_BYTES,
@@ -74,6 +76,8 @@ _OWNER_ONLY_MODE = _podman_cgroups._OWNER_ONLY_MODE
 PodmanRuntimeUnit = _podman_contract.PodmanRuntimeUnit
 Command = _podman_contract.Command
 SystemdCgroupRemover = _podman_cgroups.SystemdCgroupRemover
+CgroupEmptinessWait = _podman_cgroups.CgroupEmptinessWait
+_await_unpopulated = _podman_cgroups._await_unpopulated
 _container_name = _podman_contract._container_name
 _cgroup_parent = _podman_contract._cgroup_parent
 _read_cgroup_events = _podman_cgroups._read_cgroup_events
@@ -129,6 +133,9 @@ class PodmanIsolationRuntime:
         cgroup_create: Callable[[Path], None] | None = None,
         cgroup_read: Callable[[Path], bytes] | None = None,
         process_cgroup_read: Callable[[int], bytes] | None = None,
+        emptiness_wait: CgroupEmptinessWait | None = None,
+        clock: Callable[[], float] | None = None,
+        pause: Callable[[float], None] | None = None,
     ) -> None:
         if (
             type(image_repository) is not str
@@ -151,6 +158,12 @@ class PodmanIsolationRuntime:
                 hooks_directory_validate is not None
                 and not callable(hooks_directory_validate)
             )
+            or (
+                emptiness_wait is not None
+                and type(emptiness_wait) is not CgroupEmptinessWait
+            )
+            or (clock is not None and not callable(clock))
+            or (pause is not None and not callable(pause))
         ):
             raise ValueError("Podman runtime configuration is invalid")
         self._image_repository = image_repository
@@ -166,6 +179,9 @@ class PodmanIsolationRuntime:
         self._process_cgroup_read = process_cgroup_read or _read_process_cgroup
         self._cgroup_remove = cgroup_remove
         self._cgroup_root_validate = cgroup_root_validate or _validate_cgroup_root
+        self._emptiness_wait = emptiness_wait or CgroupEmptinessWait()
+        self._clock = clock or monotonic
+        self._pause = pause or sleep
         self._environment_verified = False
         self._runtime_capabilities: tuple[str, ...] = ()
 
@@ -419,7 +435,12 @@ class PodmanIsolationRuntime:
         )
 
     def confirm_empty(self, runtime_unit: RuntimeUnit) -> EvidenceDigest:
-        """Digest positive runtime and cgroup-v2 whole-unit emptiness evidence."""
+        """Digest positive runtime and cgroup-v2 whole-unit emptiness evidence.
+
+        The exited runtime state is checked once. The unit slice can stay populated
+        briefly while conmon and its cleanup command exit, so the cgroup-v2 flag is
+        re-read within the bounded emptiness wait before failing closed.
+        """
 
         self._require_rootless_environment()
         verified = self._coerce_unit(runtime_unit)
@@ -435,11 +456,14 @@ class PodmanIsolationRuntime:
             or _string(state, "Status") not in {"exited", "stopped"}
         ):
             raise PodmanRuntimeError("Podman stable unit is not empty")
-        cgroup_events = _parse_cgroup_events(
-            self._cgroup_read(self._cgroup_path(verified.unit_id))
+        cgroup = self._cgroup_path(verified.unit_id)
+        cgroup_events = _await_unpopulated(
+            lambda: self._cgroup_read(cgroup),
+            self._emptiness_wait,
+            self._clock,
+            self._pause,
+            remaining_seconds(),
         )
-        if cgroup_events.get("populated") != 0:
-            raise PodmanRuntimeError("Podman stable unit cgroup is not empty")
         return _evidence(
             "empty",
             {
@@ -631,6 +655,9 @@ class PodmanIsolationRuntime:
         input_bytes: bytes | None = None,
         accepted_exit_codes: frozenset[int] = frozenset({0}),
     ) -> tuple[int, bytes]:
+        remaining = remaining_seconds()
+        if remaining is not None and remaining <= 0:
+            raise PodmanRuntimeError("Podman operation budget expired")
         if input_bytes is None:
             return self._command(
                 self._podman_arguments(arguments),

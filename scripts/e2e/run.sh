@@ -183,6 +183,7 @@ broker_directory="$temporary_directory/reverse-broker"
 broker_pid=""
 reverse_pause_pid=""
 reverse_diagnostics_pid=""
+reverse_member_pid=""
 created=()
 succeeded=false
 browser_smoke_succeeded=false
@@ -330,7 +331,7 @@ cleanup() {
       exit_code=1
     fi
   fi
-  for resource in "$reverse_pause_pid" "$reverse_diagnostics_pid"; do
+  for resource in "$reverse_pause_pid" "$reverse_diagnostics_pid" "$reverse_member_pid"; do
     if [[ -n "$resource" ]]; then
       kill -TERM "$resource" 2>/dev/null || true
       wait "$resource" || true
@@ -354,6 +355,8 @@ cleanup() {
     kill -TERM "$broker_pid" 2>/dev/null || true
     wait "$broker_pid" || exit_code=1
   fi
+  # A slice-member observer always stops its member; this only covers a killed observer.
+  systemctl --user stop 'markweave-e2e-slice-member-*.service' >/dev/null 2>&1 || true
   if [[ -f "$broker_directory/broker.json" ]]; then
     # No authorized worker may reconnect while startup reconciliation sweeps units.
     if ! require_reverse_workers_removed || \
@@ -1081,6 +1084,46 @@ run_reverse_lifecycle() {
 
 # Start the profile application with its reviewed hardened runtime. Extra
 # arguments add runtime environment for one isolated phase.
+# Hold a foreign process in the next broker-managed unit slice during one real
+# reverse attempt. `transient` releases it inside the broker's emptiness bound,
+# so the attempt publishes on its first generation; `persistent` keeps it until
+# the worker reports the refused proof, so the job publishes only after
+# reconciliation proves the released slice empty and recovery runs.
+run_reverse_member_fault() {
+  local mode="$1"
+  local lifecycle_url
+  lifecycle_url="http://127.0.0.1:$(podman port "$application_name" 8080/tcp | sed 's/.*://')"
+  local metrics_url="$lifecycle_url/metrics"
+  if [[ "$profile" == distributed ]]; then
+    metrics_url="http://127.0.0.1:$(podman port "$worker_one_name" 9464/tcp | sed 's/.*://')/metrics"
+  fi
+  local scenario="member-$mode"
+  local stem="reverse-$scenario"
+  local state="$browser_session_directory/$stem.json"
+  local diagnostics="$browser_session_directory/$stem-diagnostics.json"
+  local report="$temporary_directory/browser-artifacts/$stem-observer.json"
+  local ready="$broker_directory/$stem.ready"
+  uv run python -m scripts.e2e.reverse_broker watch-member --root "$broker_directory" \
+    --mode "$mode" --metrics-url "$metrics_url" --ready "$ready" --report "$report" &
+  reverse_member_pid=$!
+  wait_reverse_marker "$ready" "$reverse_member_pid"
+  uv run python -m tests.e2e.reverse_lifecycle_workflow prepare-member \
+    --base-url "$lifecycle_url" --profile "$profile" --scenario "$scenario" --state-file "$state"
+  wait "$reverse_member_pid"
+  reverse_member_pid=""
+  uv run python -m tests.e2e.reverse_lifecycle_workflow verify-member \
+    --base-url "$lifecycle_url" --profile "$profile" --scenario "$scenario" --state-file "$state"
+  chmod 0644 "$state"
+  podman exec "$application_name" /opt/md-converter/venv/bin/python \
+    /e2e/reverse_lifecycle_workflow.py diagnostics --state-file "/browser-session/$stem.json" \
+    --output "/browser-session/$stem-diagnostics.json"
+  podman exec "$application_name" chmod 0644 "/browser-session/$stem-diagnostics.json"
+  uv run python -m tests.e2e.reverse_lifecycle_workflow verify-member \
+    --base-url "$lifecycle_url" --profile "$profile" --scenario "$scenario" --state-file "$state" \
+    --diagnostics-file "$diagnostics" --observer-report "$report"
+  echo "Reverse slice-member $mode fault passed for $profile with exact-unit proof evidence."
+}
+
 start_application() {
   created=("$application_name" "${created[@]}")
   e2e_run_in_harness_directory \
@@ -2089,10 +2132,13 @@ e2e_phase_browser_session() {
     --env "MARKWEAVE_E2E_COMPOSER_STATE=/browser-session/composer-$profile.json"
 }
 
-# Reverse worker-restart fencing on the initial runtime.
+# Reverse worker-restart fencing and broker emptiness proof with a foreign
+# unit-slice member on the initial runtime.
 e2e_phase_reverse_lifecycle() {
   use_api_runtime
   run_reverse_lifecycle worker-restart
+  run_reverse_member_fault transient
+  run_reverse_member_fault persistent
 }
 
 # Conversion, reversion, presentation, local-image, and workspace journeys, then

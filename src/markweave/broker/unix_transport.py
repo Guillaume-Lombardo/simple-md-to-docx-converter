@@ -20,6 +20,7 @@ import markweave.broker.response_binding as _response_binding
 from markweave.broker.dispatch import BrokerDispatcher
 from markweave.broker.errors import BrokerError, BrokerErrorCategory
 from markweave.broker.models import AuthenticatedPrincipal, RuntimeChannelLimits
+from markweave.broker.operation_deadline import dispatch_budget, operation_budget
 from markweave.broker.protocol import (
     LENGTH_PREFIX_BYTES,
     PROTOCOL_NAME,
@@ -516,7 +517,11 @@ class UnixBrokerServer:
             return
         try:
             try:
-                response = self._dispatch_before_deadline(request, deadline)
+                budget = dispatch_budget(
+                    deadline, self._limits.operation_timeout_seconds
+                )
+                with operation_budget(budget):
+                    response = self._dispatch_before_deadline(request, deadline)
                 if response is None:
                     frame = None
                 elif workspace:

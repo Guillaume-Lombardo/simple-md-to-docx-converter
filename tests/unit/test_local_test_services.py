@@ -13,6 +13,7 @@ import pytest
 from pytest_mock import MockerFixture, MockType
 
 from scripts.testing import services
+from tests.local_service_bookkeeping import isolated_service_bookkeeping
 
 pytestmark = pytest.mark.unit
 
@@ -32,13 +33,8 @@ def clear_service_environment(
     runtime = tmp_path / "runtime"
     runtime.mkdir()
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
-    yield
-    for held in services._HELD.values():
-        os.close(held.descriptor)
-    services._HELD.clear()
-    services._CREATION_ATTEMPTED.clear()
-    services._OWNED.clear()
-    services._UNSETTLED.clear()
+    with isolated_service_bookkeeping():
+        yield
 
 
 @pytest.fixture
@@ -893,3 +889,30 @@ def test_release_without_creation_needs_no_listing(mocker: MockerFixture) -> Non
     resources = mocker.patch.object(services, "project_resources")
     assert services.release_if_settled(PROJECT) is True
     resources.assert_not_called()
+
+
+def test_isolated_bookkeeping_closes_only_its_own_locks(tmp_path: Path) -> None:
+    """A test's teardown never releases a stack the session already owns."""
+    outer_lock = tmp_path / "outer.lock"
+    outer = services._HeldLock(outer_lock, services._open_lock(outer_lock, create=True))
+    fcntl.flock(outer.descriptor, fcntl.LOCK_EX)
+    services._HELD[PROJECT] = outer
+    services._OWNED[PROJECT] = {}
+    services._CREATION_ATTEMPTED.add(PROJECT)
+    inner_lock = tmp_path / "inner.lock"
+    inner = services._open_lock(inner_lock, create=True)
+
+    with isolated_service_bookkeeping():
+        assert not services._HELD
+        assert not services._OWNED
+        assert not services._CREATION_ATTEMPTED
+        services._HELD[OTHER] = services._HeldLock(inner_lock, inner)
+        services._OWNED[OTHER] = {}
+        services._CREATION_ATTEMPTED.add(OTHER)
+
+    with pytest.raises(OSError, match="Bad file descriptor"):
+        os.fstat(inner)
+    assert dict(services._HELD) == {PROJECT: outer}
+    assert list(services._OWNED) == [PROJECT]
+    assert sorted(services._CREATION_ATTEMPTED) == [PROJECT]
+    assert _locked_elsewhere(outer_lock)

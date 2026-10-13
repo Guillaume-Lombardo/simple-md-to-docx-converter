@@ -12,9 +12,14 @@ from uuid import UUID
 import pytest
 from pytest_mock import MockerFixture
 
+from markweave.broker.command_runner import PodmanRuntimeError
 from markweave.broker.dispatch import BrokerDispatcher
 from markweave.broker.errors import BrokerError, BrokerErrorCategory
 from markweave.broker.models import AuthenticatedPrincipal, RuntimeChannelLimits
+from markweave.broker.operation_deadline import (
+    RESPONSE_RESERVE_FRACTION,
+    remaining_seconds,
+)
 from markweave.broker.process import BrokerProcess
 from markweave.broker.protocol import ReadyRequest, ReadyResponse, encode_request
 from markweave.broker.reconciliation_protocol import (
@@ -36,6 +41,10 @@ from markweave.broker.workspace_protocol import (
     encode_workspace_request,
 )
 from markweave.reversions.models import ReverseContentLimits, ReverseOutputMode
+from tests.integration.broker.slow_reaping import (
+    budget_exhausting_runner,
+    install_slow_reaping,
+)
 
 pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
 
@@ -129,6 +138,76 @@ def test_real_unix_exchange_authenticates_both_peers_and_dispatches_once(
     assert response == ReadyResponse(REQUEST_ID, True)
     dispatcher.dispatch.assert_called_once_with(PRINCIPAL, request)
     assert not path.exists()
+
+
+def test_real_unix_dispatch_publishes_a_budget_before_its_deadline(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    observed: list[float | None] = []
+    path, server, dispatcher = _server(
+        tmp_path, mocker, limits=UnixTransportLimits(2, 1, 1, 1)
+    )
+
+    def dispatch(*_args: object) -> ReadyResponse:
+        observed.append(remaining_seconds())
+        return ReadyResponse(REQUEST_ID, True)
+
+    dispatcher.dispatch.side_effect = dispatch
+    with server:
+        client = UnixBrokerClient(
+            path,
+            expected_server_uid=os.geteuid(),
+            expected_principal=PRINCIPAL,
+            operation_timeout_seconds=2,
+        )
+        assert client.request(ReadyRequest(REQUEST_ID, 1)) == ReadyResponse(
+            REQUEST_ID, True
+        )
+
+    assert len(observed) == 1
+    assert observed[0] is not None
+    assert 0 < observed[0] <= 2 * (1 - RESPONSE_RESERVE_FRACTION)
+    assert remaining_seconds() is None
+
+
+def test_real_unix_dispatch_refuses_before_its_deadline_when_reaping_is_slow(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    runner = budget_exhausting_runner(tmp_path)
+    path, server, dispatcher = _server(
+        tmp_path, mocker, limits=UnixTransportLimits(2, 1, 1, 1)
+    )
+    refusals: list[str] = []
+
+    def dispatch(*_args: object) -> ReadyResponse:
+        try:
+            runner(("fixed",))
+        except PodmanRuntimeError as error:
+            refusals.append(str(error))
+        return ReadyResponse(REQUEST_ID, False)
+
+    dispatcher.dispatch.side_effect = dispatch
+    reap_all = install_slow_reaping(mocker, 0.6)
+    server.start()
+    try:
+        client = UnixBrokerClient(
+            path,
+            expected_server_uid=os.geteuid(),
+            expected_principal=PRINCIPAL,
+            operation_timeout_seconds=3,
+        )
+        started = monotonic()
+        response = client.request(ReadyRequest(REQUEST_ID, 1))
+        elapsed = monotonic() - started
+
+        assert response == ReadyResponse(REQUEST_ID, False)
+        assert refusals == ["Podman command cleanup failed"]
+        assert elapsed < 2
+        assert server.failed is False
+        assert server.stopping is False
+    finally:
+        server.stop()
+        reap_all()
 
 
 def test_real_unix_reconciliation_exchange_binds_authenticated_principal(
