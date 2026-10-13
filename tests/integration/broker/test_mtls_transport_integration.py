@@ -61,6 +61,7 @@ from markweave.broker.workspace_protocol import (
 from markweave.reversions.errors import ReverseErrorCategory
 from markweave.reversions.models import ReverseContentLimits, ReverseOutputMode
 from markweave.reversions.options import ReverseExtraction, ReversionOptions
+from tests.integration.broker.slot_release import delay_slot_releases
 from tests.integration.broker.slow_reaping import (
     budget_exhausting_runner,
     install_slow_reaping,
@@ -1154,3 +1155,38 @@ def test_real_internal_dispatch_failure_sets_content_free_fatal_signal(
 
     assert "private dispatcher detail" not in str(captured.value)
     assert "private dispatcher detail" not in str(stopped.value)
+
+
+@pytest.mark.parametrize(
+    ("slot", "releases_per_exchange"),
+    [("_connections", 2), ("_exchanges", 1), ("_handlers", 1)],
+)
+def test_real_mtls_reconnect_at_each_slot_limit_is_admitted(
+    certificates: CertificateSet,
+    mocker: MockerFixture,
+    slot: str,
+    releases_per_exchange: int,
+) -> None:
+    # A client may start its next exchange as soon as the previous one completes.
+    # Every slot that exchange held must already be free then, however late the
+    # old channel threads run.
+    dispatcher = mocker.Mock(spec=BrokerDispatcher)
+    dispatcher.dispatch.return_value = ReadyResponse(REQUEST_ID, True)
+    server_local, client_peer, client_local, server_peer = _identities(certificates)
+    server = MtlsBrokerServer(
+        MtlsEndpoint("127.0.0.1", 0),
+        local_identity=server_local,
+        client_identity=client_peer,
+        dispatcher=dispatcher,
+        limits=MtlsTransportLimits(3, 3, 1, 1, 1, 1),
+    )
+    release = delay_slot_releases(mocker, getattr(server, slot))
+    request = ReadyRequest(REQUEST_ID, 1)
+
+    with server:
+        client = _client(server, client_local, server_peer, timeout=3)
+        responses = [client.request(request) for _ in range(3)]
+
+    assert responses == [ReadyResponse(REQUEST_ID, True)] * 3
+    assert dispatcher.dispatch.call_count == 3
+    assert release.call_count == 3 * releases_per_exchange

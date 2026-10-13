@@ -41,6 +41,7 @@ from markweave.broker.workspace_protocol import (
     encode_workspace_request,
 )
 from markweave.reversions.models import ReverseContentLimits, ReverseOutputMode
+from tests.integration.broker.slot_release import delay_slot_releases
 from tests.integration.broker.slow_reaping import (
     budget_exhausting_runner,
     install_slow_reaping,
@@ -714,3 +715,40 @@ def test_client_preserves_canonical_response_binding_failure(
             client.request(ReadyRequest(REQUEST_ID, 1))
 
     assert captured.value.category is BrokerErrorCategory.PROTOCOL_ERROR
+
+
+@pytest.mark.parametrize("first_exchange", ["served", "rejected"])
+def test_real_unix_reconnect_at_the_handler_limit_is_admitted(
+    tmp_path: Path, mocker: MockerFixture, first_exchange: str
+) -> None:
+    # A client may reconnect as soon as its exchange completes. The single handler
+    # slot must already be free then, however late the old handler thread runs.
+    path, server, dispatcher = _server(
+        tmp_path, mocker, limits=UnixTransportLimits(2, 2, 1, 1)
+    )
+    release = delay_slot_releases(mocker, server._handlers)
+    request = ReadyRequest(REQUEST_ID, 1)
+
+    with server:
+        client = UnixBrokerClient(
+            path,
+            expected_server_uid=os.geteuid(),
+            expected_principal=PRINCIPAL,
+            operation_timeout_seconds=2,
+        )
+        if first_exchange == "served":
+            first = client.request(request)
+            assert first == ReadyResponse(REQUEST_ID, True)
+        else:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as rejected:
+                rejected.settimeout(2)
+                rejected.connect(str(path))
+                rejected.sendall(encode_request(request) + b"x")
+                rejected.shutdown(socket.SHUT_WR)
+                _assert_peer_closed(rejected)
+        responses = [client.request(request), client.request(request)]
+
+    assert responses == [ReadyResponse(REQUEST_ID, True)] * 2
+    expected_dispatches = 3 if first_exchange == "served" else 2
+    assert dispatcher.dispatch.call_count == expected_dispatches
+    assert release.call_count == 3
