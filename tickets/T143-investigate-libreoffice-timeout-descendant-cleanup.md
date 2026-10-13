@@ -73,6 +73,10 @@ This is a security-relevant subprocess area. If the LibreOffice timeout path can
 - 2026-10-13: Follow-up candidates, out of scope here.
   - `test_template_activation.py` has a similar Z-only liveness predicate. It stops at the first exited observation, so it cannot produce this false failure.
   - In this test's `timeout` mode, the 0.3 s timeout can fire before the fake engine publishes the descendant pid on a heavily starved host. The stress harness hit this in 7 of 240 iterations. It would fail as a missing pid file, not as a surviving descendant.
+- 2026-10-13: Hosted evidence on PR #308, head 2b0b603. The `CI / document-engines` job passed three consecutive times in run 38439655886, with 295 passed each time:
+  - attempt 1: job 115442704111;
+  - attempt 2: job 115444345531;
+  - attempt 3: job 115445679165.
 
 ## Synchronization
 
