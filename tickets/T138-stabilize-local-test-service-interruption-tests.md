@@ -2,7 +2,7 @@
 ticket: T138
 linear_id: G1L-691
 linear_url: https://linear.app/g1lom/issue/G1L-691/t138-stabilize-the-local-test-service-interruption-tests-under-full
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -160,3 +160,4 @@ Each took about 55 seconds and failed with "removal of the stack could not be pr
   window. Delaying the slot release by 50 ms after the close reproduces the failure every time,
   and without the delay the test passes. The cause is unrelated to the subreaper defect and to the
   local service stack.
+- 2026-10-13: Done. Merged as `c5c0a89` (PR #302) after independent review; main CI run 38336902838 passed. The remaining parallel-run broker transport reset is tracked by T141.
