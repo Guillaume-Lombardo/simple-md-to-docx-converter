@@ -85,12 +85,10 @@ scripts they test), and C1 to C3. Not approved in this scope: K3 and K5.
     distributed coverage contracts, and trusted cache writes. Each case now asserts its rule
     error. Disabling each of the 16 targeted rules makes its cases fail. Only the two tests that
     target the digest rule itself still pass on the digest alone.
-  - **P1 to P5, P6.** Duplicates are parametrized with every input kept and intent-revealing
-    ids; collected cases per file and parameter values are unchanged. The protocol pair in
-    `tests/unit/broker/test_protocol.py` is left to T137, which owns that directory. In
-    `tests/test_ci_validation.py` only same-rule variants (repository guard, mutable action)
-    and the identical light/distributed coverage bodies were merged; `tests/test_ci_selection.py`
-    groups test different domains and stay separate.
+  - **P1 to P5.** Duplicates are parametrized with every input kept and intent-revealing ids;
+    collected cases per file and parameter values are unchanged. The protocol pair in
+    `tests/unit/broker/test_protocol.py` is left to T137, which owns that directory. P6 is not
+    approved (see the review correction below).
   - **D1.** Every assertion of the deleted test is rejected by the `mutation.yml` policy; the
     exact 30-minute timeout and the absence of `github.token` are enforced by its canonical
     digest only.
@@ -122,3 +120,15 @@ scripts they test), and C1 to C3. Not approved in this scope: K3 and K5.
     No `src/markweave` arc covered in every `main` run is missing from the branch runs. Five
     arcs vary between runs of unchanged tests in both trees (job submission, source activation
     and model-step expiry races).
+- 2026-10-13: Independent review round 1 (review 5497692323 on PR #303) required two changes.
+  - **Scope correction.** The owner approved P1 to P5 only, not P6, and including P6 came from the
+    implementation brief. The repository-guard and mutable-action release-policy tests are
+    restored exactly as on `main`; they already asserted their specific rule errors, so K4 does not
+    apply. The merged light shard and distributed coverage test remains part of K4, which
+    rewrote those cases to assert specific rules.
+  - **Marker guard under xdist.** A failed collection report stopped serial sessions but not
+    `pytest-xdist` workers, which still ran the remaining tests. On a violation the guard now also
+    drops every collected item, so no test body runs: serial sessions exit with status 2 and xdist
+    sessions with status 1. A subprocess regression test runs `-n 2` with and without `-m unit`
+    and checks the node-id diagnostic, the exit status and that no test body ran. It fails when
+    the abort is removed.
