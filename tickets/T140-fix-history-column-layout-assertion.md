@@ -79,3 +79,7 @@ Evidence, from a local production build of `web/` and the test under Chrome CPU 
     `Completion must not move the history column`.
   - With the fix, 36 throttled diagnostic runs (CPU rates 1, 3, 4 and 6; IndexedDB delays from
     0 to 120 ms) and 11 unthrottled runs of the test against a local production build passed.
+- 2026-10-13: Opened PR #307. Images built with `scripts.container.ci_images build` from the branch
+  passed final-image E2E shard 2 (`browser-workspaces` included) locally in both profiles. The
+  first hosted run of the PR passed every check, including `e2e-distributed-2` and
+  `e2e-standalone-2`. Two more consecutive hosted runs in both profiles are still required.
