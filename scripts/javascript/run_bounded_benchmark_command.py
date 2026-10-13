@@ -10,10 +10,12 @@ import signal
 import subprocess
 import sys
 import time
-from contextlib import suppress
+from collections.abc import Generator
+from contextlib import contextmanager, suppress
 from pathlib import Path
 
 PR_SET_CHILD_SUBREAPER = 36
+PR_GET_CHILD_SUBREAPER = 37
 TREE_VERIFICATION_SECONDS = 2.0
 POLL_SECONDS = 0.05
 MIN_ARGUMENTS = 6
@@ -32,11 +34,29 @@ def _positive_integer(value: str) -> int:
     return parsed
 
 
-def _enable_subreaper() -> None:
-    libc = ctypes.CDLL(None, use_errno=True)
-    if libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
+def _prctl(libc: ctypes.CDLL, option: int, argument: object) -> None:
+    if libc.prctl(option, argument, 0, 0, 0) != 0:
         error_number = ctypes.get_errno()
         raise OSError(error_number, os.strerror(error_number))
+
+
+@contextmanager
+def _child_subreaper() -> Generator[None]:
+    """Adopt orphaned descendants while supervising, then restore the caller's state.
+
+    The attribute belongs to the whole process, not to this call. An in-process
+    caller, such as a test, would otherwise stay a subreaper: it would adopt every
+    later orphan and never reap it, and the zombie would keep the orphan's process
+    group alive for any group-liveness check in that process.
+    """
+    libc = ctypes.CDLL(None, use_errno=True)
+    previous = ctypes.c_int()
+    _prctl(libc, PR_GET_CHILD_SUBREAPER, ctypes.byref(previous))
+    _prctl(libc, PR_SET_CHILD_SUBREAPER, 1)
+    try:
+        yield
+    finally:
+        _prctl(libc, PR_SET_CHILD_SUBREAPER, previous.value)
 
 
 def _direct_children(process_id: int, *, required: bool = False) -> set[int]:
@@ -210,9 +230,8 @@ def main(arguments: list[str] | None = None) -> int:
         )
         return 2
 
-    _enable_subreaper()
     Path(log_path).parent.mkdir(parents=True, exist_ok=True)
-    with Path(log_path).open("a", encoding="utf-8") as log:
+    with _child_subreaper(), Path(log_path).open("a", encoding="utf-8") as log:
         print(
             f"boundary_start label={shlex.quote(label)} "
             f"timeout_seconds={timeout_seconds} grace_seconds={grace_seconds} "

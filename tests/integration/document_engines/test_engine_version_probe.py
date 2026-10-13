@@ -52,7 +52,8 @@ def _descendant(pid_file: Path) -> int:
 def _running(pid: int) -> bool:
     try:
         stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
-    except FileNotFoundError:
+    except FileNotFoundError, ProcessLookupError:
+        # A process reaped while its entry is read yields ESRCH.
         return False
     return stat.rpartition(")")[2].split()[0] != "Z"
 

@@ -256,3 +256,73 @@ def test_application_log_handler_never_outlives_its_capture_stream(
     )
     result = _run(pytester, mode)
     result.assert_outcomes(passed=2)
+
+
+SUBREAPER_SAMPLE = """\
+import ctypes
+import subprocess
+
+from scripts.testing import services
+
+
+def test_leaves_subreaper():
+    assert ctypes.CDLL(None).prctl(36, 1, 0, 0, 0) == 0
+
+
+def test_detached_descendant_group_ends(monkeypatch):
+    # The shape of a Compose command whose startup child outlives it. Without
+    # the guard, the child is adopted by this process, never reaped, and its
+    # zombie keeps the group alive through every stop attempt.
+    monkeypatch.setattr(services, "STOP_GRACE_SECONDS", 0.5)
+    monkeypatch.setattr(services, "STOP_KILL_SECONDS", 0.5)
+    process = subprocess.Popen(
+        ["sh", "-c", "sleep 30 </dev/null >/dev/null 2>&1 &"],
+        start_new_session=True,
+    )
+    process.wait()
+    assert services.stop_process_group(process)
+"""
+
+
+@pytest.mark.integration
+@pytest.mark.light_coverage
+@MODES
+@pytest.mark.parametrize("guarded", [True, False], ids=["guarded", "unguarded"])
+def test_child_subreaper_leak_fails_its_own_test_and_is_undone(
+    pytester: pytest.Pytester,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: tuple[str, ...],
+    guarded: bool,
+) -> None:
+    """A test that leaves the worker a subreaper fails, and later tests do not.
+
+    Unguarded, the leak fails the next test that stops a command group whose
+    descendant outlived its leader, as it failed the interruption scenarios
+    of the local service stack; guarded, it fails only the leaking test.
+    """
+    _project(pytester, monkeypatch)
+    pytester.makeconftest(
+        HARNESS_CONFTEST
+        + ("from tests.conftest import keep_child_subreaper_state\n" if guarded else "")
+    )
+    pytester.makepyfile(test_sample=SUBREAPER_SAMPLE)
+    result = _run(pytester, mode)
+    if not guarded:
+        result.assert_outcomes(passed=1, failed=1)
+        result.stdout.fnmatch_lines(
+            [
+                "*_ test_detached_descendant_group_ends _*",
+                ">*assert services.stop_process_group(process)",
+            ]
+        )
+        return
+    result.assert_outcomes(passed=2, errors=1)
+    result.stdout.fnmatch_lines(
+        [
+            "*ERROR*test_leaves_subreaper*",
+            "*left PR_SET_CHILD_SUBREAPER at 1 instead of 0*",
+        ]
+    )
+    errors = [line for line in result.stdout.lines if "ERROR " in line]
+    assert errors
+    assert all("test_leaves_subreaper" in line for line in errors), errors

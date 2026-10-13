@@ -18,7 +18,8 @@ import os
 import signal
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -26,6 +27,7 @@ import pytest
 from pytest_mock import MockerFixture
 
 from scripts.testing import services
+from tests.local_service_bookkeeping import isolated_service_bookkeeping
 
 pytestmark = [
     pytest.mark.integration,
@@ -95,7 +97,8 @@ def _running(pid: int) -> bool:
     """Return whether a process exists and is not a zombie awaiting reaping."""
     try:
         stat = Path(f"/proc/{pid}/stat").read_text()
-    except FileNotFoundError:
+    except FileNotFoundError, ProcessLookupError:
+        # A process that exits while its entry is read yields ESRCH.
         return False
     return stat.rsplit(")", 1)[1].split()[0] != "Z"
 
@@ -134,10 +137,10 @@ class Fake:
         return [pid for pid in pids if _running(pid)]
 
 
-@pytest.fixture
-def fake(
+@contextmanager
+def _fake_engine(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mocker: MockerFixture
-) -> Iterator[Fake]:
+) -> Generator[Fake]:
     binary = tmp_path / "bin"
     binary.mkdir()
     executable = binary / "docker"
@@ -177,19 +180,26 @@ def fake(
 
     mocker.patch.object(services, "_close_lock", side_effect=checked_close)
     previous = signal.signal(signal.SIGINT, signal.default_int_handler)
-    yield result
-    result.stop.set()
-    for thread in result.threads:
-        thread.join(timeout=5)
-    signal.signal(signal.SIGINT, previous)
-    for process in services._UNSETTLED.values():
-        services.stop_process_group(process)
-    for held in services._HELD.values():
-        os.close(held.descriptor)
-    services._HELD.clear()
-    services._CREATION_ATTEMPTED.clear()
-    services._OWNED.clear()
-    services._UNSETTLED.clear()
+    # A session-scoped stack of this process may already be owned; the
+    # scenario must neither see nor release it.
+    with isolated_service_bookkeeping():
+        try:
+            yield result
+        finally:
+            result.stop.set()
+            for thread in result.threads:
+                thread.join(timeout=5)
+            signal.signal(signal.SIGINT, previous)
+            for process in services._UNSETTLED.values():
+                services.stop_process_group(process)
+
+
+@pytest.fixture
+def fake(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mocker: MockerFixture
+) -> Iterator[Fake]:
+    with _fake_engine(tmp_path, monkeypatch, mocker) as result:
+        yield result
 
 
 def _interrupt_after_child_start(fake: Fake, delays: tuple[float, ...]) -> None:
@@ -304,7 +314,49 @@ def test_every_exit_path_keeps_the_ownership_invariant(
     mocker: MockerFixture,
     name: str,
 ) -> None:
-    scenario = SCENARIOS[name]
+    _run_scenario(fake, monkeypatch, mocker, SCENARIOS[name])
+
+
+def test_a_session_stack_keeps_its_ownership_across_a_scenario(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mocker: MockerFixture
+) -> None:
+    """A stack the session already owns is neither used nor released by a scenario.
+
+    The scenario fixture once closed and forgot every held lock, including the
+    session stack's, which released that live stack's ``flock`` mid-session
+    and left its lock file behind after the session's own teardown.
+    """
+    lock = tmp_path / "session.lock"
+    descriptor = os.open(lock, os.O_RDWR | os.O_CREAT, 0o600)
+    fcntl.flock(descriptor, fcntl.LOCK_EX)
+    session = "markweave-tests-session"
+    held = services._HeldLock(lock, descriptor)
+    monkeypatch.setitem(services._HELD, session, held)
+    monkeypatch.setitem(services._OWNED, session, {"KEY": "value"})
+    monkeypatch.setattr(services, "_CREATION_ATTEMPTED", {session})
+    scenario_root = tmp_path / "scenario"
+    scenario_root.mkdir()
+    try:
+        with _fake_engine(scenario_root, monkeypatch, mocker) as scenario_fake:
+            assert session not in services._HELD
+            _run_scenario(scenario_fake, monkeypatch, mocker, SCENARIOS["normal"])
+            # No command group of the scenario is recorded in the session's lock.
+            assert lock.read_text() == ""
+        assert services._HELD[session] is held
+        assert services._OWNED[session] == {"KEY": "value"}
+        assert sorted(services._CREATION_ATTEMPTED) == [session]
+        assert _lock_held(lock)
+        os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _run_scenario(
+    fake: Fake,
+    monkeypatch: pytest.MonkeyPatch,
+    mocker: MockerFixture,
+    scenario: Scenario,
+) -> None:
     for variable, value in scenario.environment.items():
         monkeypatch.setenv(variable, value)
     if scenario.timeout is not None:
