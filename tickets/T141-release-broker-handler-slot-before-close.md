@@ -88,3 +88,19 @@ refused whenever every handler slot is busy only because of this ordering.
   (`_AttesterHttpServer.process_request_thread` in
   `src/markweave/broker/kubernetes_attester_transport.py`) both call `shutdown_request` before
   releasing their admission semaphore.
+- 2026-10-13: Verification at `71892cb` on a 4-CPU machine with no other suite running.
+  - `uv sync --all-groups`, `ruff format --check`, `ruff check` and `ty check` pass.
+  - Broker suites (`tests/unit/broker` and `tests/integration/broker` under the default marker
+    filter, `-n auto`): 1,207 passed.
+  - Default canonical command with `-n auto`, three consecutive runs:
+
+    | Run | Result | Time | Coverage |
+    |---|---|---|---|
+    | 1 | 6,232 passed, 0 failed | 205 s | 94.44% |
+    | 2 | 6,232 passed, 0 failed | 198 s | 94.45% |
+    | 3 | 6,232 passed, 0 failed | 194 s | 94.44% |
+
+  - Default canonical command, serial: 6,232 passed, 0 failed, in 468 s; coverage 94.44%.
+  - Every changed line of both transport modules is covered.
+  - Not run: the full `uv run pytest` suite including the Pandoc, Mermaid, LibreOffice and
+    Podman markers. The change touches no engine path.
