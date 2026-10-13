@@ -591,6 +591,11 @@ class OperationalMetrics:
         )
         log_event("reversion_worker_retry_scheduled", operation=operation)
 
+    def record_reversion_reconciliation_success(self) -> None:
+        """Record one reconciliation step whose broker exchange succeeded."""
+
+        self._increment("md_converter_reversion_reconciliation_successes_total")
+
     def record_reversion_recovery(self, count: int) -> None:
         if type(count) is not int or count < 0:
             raise ValueError("Reverse recovery count is invalid")
