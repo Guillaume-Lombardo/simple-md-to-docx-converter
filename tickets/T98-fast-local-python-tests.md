@@ -2,7 +2,7 @@
 ticket: T98
 linear_id: G1L-630
 linear_url: https://linear.app/g1lom/issue/G1L-630/t98-make-the-local-python-test-suite-fast-enough-for-iteration
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -178,6 +178,7 @@ Created from the repository analysis accepted by the owner on 2026-10-09 (sectio
   `tests/composer-generation-workspace-coverage.test.tsx` ("a rejected template version requires
   an explicit refreshed choice before retry"), which also failed once on `e5543f7` and passed
   locally and on `358dca6`; T98 does not touch `web/`.
+- 2026-10-12: Done. Merged as `9306cab` (PR #285) after independent review; main CI run 38284910544 passed with the Python shards at 1.8 and 2.2 minutes. The remaining deterministic interruption failures in the full local suite were a test-isolation defect fixed by T138 (`c5c0a89`).
 
 ## Synchronization
 
