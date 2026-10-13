@@ -19,9 +19,9 @@ def _write_registry(path: Path, *, command: list[str] | None = None) -> None:
         for domain in DOMAIN_PATTERNS
     }
     if command is not None:
-        registry["functional"] = {
+        registry["document-engines"] = {
             "status": "active",
-            "activation_ticket": "T06",
+            "activation_ticket": "T04",
             "command": command,
         }
     path.write_text(json.dumps(registry), encoding="utf-8")
@@ -36,7 +36,7 @@ def test_runner_passes_reviewed_argument_vector_without_shell(
     _write_registry(registry, command=["uv", "run", "pytest", "-m", "functional"])
     completed = mocker.Mock(returncode=0)
     run = mocker.patch("scripts.ci.run_domain.subprocess.run", return_value=completed)
-    assert main(["functional", "--registry", str(registry)]) == 0
+    assert main(["document-engines", "--registry", str(registry)]) == 0
     run.assert_called_once_with(
         ["uv", "run", "pytest", "-m", "functional"],
         check=False,
@@ -49,7 +49,7 @@ def test_runner_refuses_planned_domain(tmp_path: Path) -> None:
     registry = tmp_path / "domains.json"
     _write_registry(registry)
     with pytest.raises(ValueError, match="not active"):
-        run_domain("functional", registry)
+        run_domain("document-engines", registry)
 
 
 @pytest.mark.unit
@@ -69,4 +69,4 @@ def test_runner_propagates_real_process_status(tmp_path: Path, expected: int) ->
     _write_registry(
         registry, command=[sys.executable, "-c", f"raise SystemExit({expected})"]
     )
-    assert main(["functional", "--registry", str(registry)]) == expected
+    assert main(["document-engines", "--registry", str(registry)]) == expected

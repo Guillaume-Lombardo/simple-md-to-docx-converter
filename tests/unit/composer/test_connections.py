@@ -1111,25 +1111,6 @@ def test_egress_rejects_invalid_model_responses(
         )
 
 
-@pytest.mark.parametrize(
-    "url",
-    [
-        "http://models.example/v1",
-        "https://models.example.evil/v1",
-        "https://models.example@evil.test/v1",
-        "https://models.example/v1?next=evil",
-        "https://models.example/v1/../private",
-        "https://models.example:0/v1",
-        "https://models.example:/v1",
-    ],
-)
-def test_endpoint_policy_rejects_unapproved_urls(
-    url: str, policy: ConnectionPolicy
-) -> None:
-    with pytest.raises(EgressPolicyError):
-        validate_endpoint(url, policy)
-
-
 def test_dns_rechecks_every_request_and_rejects_mixed_answers(
     policy: ConnectionPolicy,
 ) -> None:

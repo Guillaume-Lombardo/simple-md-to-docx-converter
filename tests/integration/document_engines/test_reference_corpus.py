@@ -388,20 +388,12 @@ def test_archive_integer_limits_reject_bool_float_and_infinity(
         ArchiveLimits(values[0], values[1], values[2], 1.0)
 
 
-@pytest.mark.parametrize("invalid", [True, float("inf"), float("nan"), "2"])
-def test_archive_compression_ratio_rejects_non_finite_or_non_numeric(
-    invalid: object,
-) -> None:
-    with pytest.raises(ValueError, match="finite non-boolean"):
-        ArchiveLimits(1, 1, 1, cast("float", invalid))
-
-
 @pytest.mark.parametrize(
     "invalid",
-    [10**10_000, Fraction(10**10_000, 1)],
-    ids=["huge-int", "huge-fraction"],
+    [True, float("inf"), float("nan"), "2", 10**10_000, Fraction(10**10_000, 1)],
+    ids=["bool", "infinity", "nan", "string", "huge-int", "huge-fraction"],
 )
-def test_archive_compression_ratio_normalizes_numeric_overflow(
+def test_archive_compression_ratio_rejects_non_finite_non_numeric_or_overflow(
     invalid: object,
 ) -> None:
     with pytest.raises(ValueError, match="finite non-boolean"):

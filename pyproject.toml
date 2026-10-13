@@ -126,6 +126,8 @@ addopts = [
     "--strict-markers",
     "-p",
     "scripts.ci.pytest_branch_coverage",
+    "-p",
+    "tests.category_marker_guard",
     "--cov=src/markweave",
     "--cov-branch",
     "--cov-report=term-missing",

@@ -279,16 +279,15 @@ output and is not a general permission to widen response enums.
 
 ## T67 package-manager migration
 
-A T67 rollback reverses the complete, reviewed T67 candidate series from its exact npm parent. It
-must restore both npm locks,
+A T67 rollback reversed the complete, reviewed T67 candidate series from its exact npm parent. It
+had to restore both npm locks,
 the `npm@11.17.0` frontend manager metadata, npm CI caches and commands, and the frontend's `web/`
-build context while removing every pnpm/Corepack workspace surface. Before merging a rollback,
-run the rehearsal with the exact candidate and the direct npm parent of its first T67 commit on
-Node.js `24.19.0` and npm `11.17.0`:
-
-```bash
-scripts/javascript/rehearse-npm-rollback.sh '<T67-candidate>' '<T67-migration-commit>^'
-```
+build context while removing every pnpm/Corepack workspace surface. The migration rehearsed that
+rollback with the exact candidate and the direct npm parent of its first T67 commit on Node.js
+`24.19.0` and npm `11.17.0`, using
+`scripts/javascript/rehearse-npm-rollback.sh '<T67-candidate>' '<T67-migration-commit>^'`.
+T139 retired that script with the rest of the T67 tooling, so it is no longer a runnable
+repository path; see the end of this section.
 
 The last pre-migration lock digests are root
 `7fc4db9135c474c8fe4f48dc60028a10df9904fb4d918f728f6fe3f19fca1061` and frontend
@@ -304,8 +303,11 @@ explicitly approves it; this project does not invent a threshold after observing
 The completed T67 pull request's frontend job ran `scripts/javascript/benchmark-package-managers.sh` against
 the immutable npm baseline and reviewed pnpm candidate, then retained its environment, timing, disk,
 compressed-cache, image-size, manifest/lock digest, and raw command output for 30 days. T80 removes those branch-specific workflow steps and their manual input after the migration.
-The historical scripts and immutable baseline identifiers remain available for evidence review;
-they intentionally reference the old `spikes/toolchain` path at those historical commits.
+No workflow ran the T67 scripts after T80, and T139 removed them with their tests: the rollback
+rehearsal and commit selector, the benchmark, benchmark reuse and bounded command runner, and the
+benchmark metadata verifier. They remain in Git history for evidence review, last at commit
+`0e0f7f3`, and intentionally reference the old `spikes/toolchain` path at those historical
+commits. The immutable baseline identifiers above remain valid.
 
 A local rootless Podman diagnostic (not a substitute for hosted evidence) built the npm baseline
 at `1,061,525,142` bytes and the target-platform pnpm candidate at `1,033,797,849` bytes. The
