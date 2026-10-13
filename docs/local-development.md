@@ -347,7 +347,8 @@ engine test is skipped only through its registered marker and must never be repo
 Every test under `tests/` also carries one category marker: `unit`, `functional`, `integration` or
 `e2e`. CI selects Python tests only by marker expression, so `tests/category_marker_guard.py`,
 registered through `addopts` in `pyproject.toml`, reports each uncategorized test as a collection
-error before any marker or shard deselection, and the session fails.
+error before any marker or shard deselection and then drops every collected test, so no test body
+runs. A serial session exits with status 2, and a `pytest-xdist` session exits with status 1.
 
 ### Parallel light CI
 

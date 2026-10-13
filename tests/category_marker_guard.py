@@ -8,7 +8,10 @@ each of their tests must also match the light marker expression.
 
 This plugin is registered through ``addopts`` in ``pyproject.toml`` and checks
 every collected item under ``tests/`` before any marker, keyword or shard
-deselection runs.
+deselection runs. On a violation it reports one collection error per offending
+test and removes every collected item, so no test body runs: a serial session
+stops with exit status 2 and a pytest-xdist session schedules nothing and exits
+with status 1.
 """
 
 from __future__ import annotations
@@ -64,13 +67,16 @@ def _report(config: pytest.Config, node_id: str, reason: str) -> None:
 def pytest_collection_modifyitems(
     config: pytest.Config, items: list[pytest.Item]
 ) -> None:
-    """Report a collection error before deselection can hide an unselected test.
+    """Abort the session before deselection can hide an unselected test.
 
-    A failed collection report stops the session in a serial run and is
-    forwarded by every pytest-xdist worker to the controller, which stops too.
+    Each pytest-xdist worker forwards its failed collection reports to the
+    controller and then offers it no item to schedule, so no worker runs a
+    test either.
     """
+    uncategorized = uncategorized_node_ids(items, config.rootpath / "tests")
+    unselected = unselected_light_shard_node_ids(items, config.rootpath)
     categories = ", ".join(CATEGORY_MARKERS)
-    for node_id in uncategorized_node_ids(items, config.rootpath / "tests"):
+    for node_id in uncategorized:
         _report(
             config,
             node_id,
@@ -78,10 +84,12 @@ def pytest_collection_modifyitems(
             "so no CI marker selection would ever run it.",
         )
     light = " or ".join(LIGHT_SHARD_MARKERS)
-    for node_id in unselected_light_shard_node_ids(items, config.rootpath):
+    for node_id in unselected:
         _report(
             config,
             node_id,
             f"is not selected by the light shards ({light}), "
             "the only CI job that runs this suite.",
         )
+    if uncategorized or unselected:
+        items.clear()

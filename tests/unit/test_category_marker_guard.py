@@ -153,3 +153,38 @@ def test_other_integration_suites_need_no_light_marker(
     )
 
     result.assert_outcomes(passed=1)
+
+
+@pytest.mark.parametrize("selection", [(), ("-m", "unit")], ids=["all", "unit-only"])
+def test_xdist_session_reports_the_node_and_runs_no_test_body(
+    pytester: pytest.Pytester,
+    monkeypatch: pytest.MonkeyPatch,
+    selection: tuple[str, ...],
+) -> None:
+    pytester.makeini(MARKERS_INI)
+    ran = pytester.path / "ran"
+    tests = pytester.mkdir("tests")
+    (tests / "test_sample.py").write_text(
+        "import pathlib\n\nimport pytest\n\n"
+        f"RAN = pathlib.Path({str(ran)!r})\n\n"
+        "@pytest.mark.unit\ndef test_unit():\n    RAN.touch()\n\n"
+        "def test_bare():\n    RAN.touch()\n"
+    )
+    monkeypatch.setenv("PYTHONPATH", str(ROOT / "tests"))
+
+    result = pytester.runpytest_subprocess(
+        "-p",
+        "category_marker_guard",
+        "-p",
+        "no:cacheprovider",
+        "-n",
+        "2",
+        *selection,
+    )
+
+    assert result.ret == pytest.ExitCode.TESTS_FAILED
+    result.stdout.fnmatch_lines(
+        ["*tests/test_sample.py::test_bare carries no category marker*"]
+    )
+    result.assert_outcomes(errors=1)
+    assert not ran.exists()
