@@ -822,6 +822,10 @@ Changed files relative to main:
   KaTeX remains unpatched; both audit commands exit one, not a clean-audit result.
 - Main CI after the Actions and Mermaid merges passes all 23 jobs in runs
   38489099736 and 38491199400. Final Python main CI is monitored separately.
+  Its first light-job attempt rejects an invalid public GitHub release response;
+  the identical public-alignment command passes locally on unchanged source.
+  GitHub refuses a targeted rerun while that workflow is active; its failed
+  jobs will be rerun after completion, with terminal evidence retained in Linear.
 - Linear G1L-332 is Done only after the three dependency changes are verified
   on main. This documentation change mirrors that state and durable evidence.
 - Version 0.7.5, public image receipt pins and the paused Kubernetes capability
