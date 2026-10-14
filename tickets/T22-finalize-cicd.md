@@ -2,7 +2,7 @@
 ticket: T22
 linear_id: G1L-332
 linear_url: https://linear.app/g1lom/issue/G1L-332/
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -789,3 +789,41 @@ Changed files relative to main:
 - Baseline Python audit six entries and mitigated KaTeXLow remain documented.
   T22 stays In Progress until this final dependency patch is verified on main.
   No version/publicimage receipt change or Kubernetes backend activation.
+
+
+## October 14, 2026 maintenance closure
+
+- All remaining Dependabot changes are verified on main:
+  - #299, setup-uv 10.3: squash `9eef41ed1b474aa92e74b52641d8781efd713729`.
+  - #274, Mermaid CLI 12: squash `df55048c0fc195b70e1ea19840d27f47ea08f419`.
+  - #305, Kubernetes 37.0.1 and Python dependencies: squash
+    `bec1fe8ea7b3b756b1474ba01d19f2ac8bc4a333`.
+- Each final reviewed head passes all 23 hosted jobs in runs 38486940940,
+  38489206877 and 38491319506 respectively. These include actual document
+  engines, four final-image E2E partitions, both storage profiles, containers,
+  supply-chain verification, mutation checks and all coverage gates.
+- Independent exact-head review precedes every protected squash merge. No
+  force-push or protection bypass was used; remote source branches are absent.
+- Merged application, test and dependency trees match frozen candidate b681405.
+  Its canonical default suite passes 6,309 tests with 131 engine/runtime cases
+  deselected and 15 warnings in 427 seconds. Coverage is 94.44% total and 90.55%
+  branches (8,628/9,528). Changed executable coverage has zero changed executable
+  lines; this does not establish positive-line coverage from a zero denominator.
+- Earlier interrupted local runs and the old-image SIGPIPE failure remain
+  historical failure evidence. The fresh frozen local suite and all final
+  hosted-head runs pass. Incorrect validator/module invocations were corrected;
+  no failing policy, audit or coverage result is presented as a pass.
+- The unrestricted host suite remains unavailable without Pandoc, Mermaid and
+  LibreOffice on PATH. Hosted native and final-image execution provides their
+  required qualification; no integration or E2E exception was requested.
+- Python audit retains exactly six main-baseline entries and no introduced
+  finding. The final npm audit reports three Low nodes for the documented,
+  mitigated KaTeX advisory, with no Moderate/High/Critical finding. Bundled
+  KaTeX remains unpatched; both audit commands exit one, not a clean-audit result.
+- Main CI after the Actions and Mermaid merges passes all 23 jobs in runs
+  38489099736 and 38491199400. Final Python main CI is monitored separately.
+- Linear G1L-332 is Done only after the three dependency changes are verified
+  on main. This documentation change mirrors that state and durable evidence.
+- Version 0.7.5, public image receipt pins and the paused Kubernetes capability
+  remain unchanged. Cleanup is limited to this task's branches and four local
+  qualification images; unrelated worktrees are preserved.
