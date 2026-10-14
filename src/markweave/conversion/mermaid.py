@@ -499,7 +499,11 @@ class MermaidCliRenderer:
             )
             config_path.write_text(
                 json.dumps(
-                    {"securityLevel": "strict"},
+                    {
+                        "securityLevel": "strict",
+                        "theme": "default",
+                        "fontFamily": "Liberation Sans",
+                    },
                     sort_keys=True,
                     separators=(",", ":"),
                 ),
@@ -522,10 +526,13 @@ class MermaidCliRenderer:
             "png",
             "--backgroundColor",
             "transparent",
-            "--width",
-            str(self._config.viewport_width_pixels),
-            "--height",
-            str(self._config.viewport_height_pixels),
+            "--size",
+            str(
+                min(
+                    self._config.viewport_width_pixels,
+                    self._config.viewport_height_pixels,
+                )
+            ),
             "--scale",
             "1",
         ]

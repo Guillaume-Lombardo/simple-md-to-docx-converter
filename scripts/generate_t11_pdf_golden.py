@@ -105,7 +105,7 @@ def generate(output: Path, workspace: Path, source: Path = DEFAULT_SOURCE) -> No
         pandoc_reader=(
             "commonmark_x+pipe_tables+footnotes+attributes+yaml_metadata_block-raw_html"
         ),
-        mermaid_version="11.17.0",
+        mermaid_version="12.0.0",
         chromium_version="151.0.7922.173",
         font_manifest_sha256=_sha256(font_manifest),
     )
