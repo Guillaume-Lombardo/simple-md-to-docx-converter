@@ -724,3 +724,68 @@ Changed files relative to main:
   immutable npm graph. Refresh the one combined CI fingerprint.
 - Require fresh hosted CI and independent exact-head review before merging #274.
   Project version and public receipts remain unchanged; T22 stays In Progress.
+
+
+## Remaining Python Dependabot qualification (#298)
+
+- Qualify Kubernetes 37.0.0 against the existing bounded exec adapter and SDK
+  integration tests; narrow the protocol to the exact keyword arguments used.
+- Adopt pypdf 6.20.0 and regenerate canonical hash-required build constraints.
+- Preserve the paused Kubernetes capability, version 0.7.5 and public image pins.
+- Validation and remote publication are pending.
+
+
+## October 14, 2026 Python qualification (#305)
+
+- #298 closed without merge and is superseded by #305. Retain its reviewed
+  bounded Kubernetes protocol and four real generated-SDK integration tests,
+  updating all package, attester and assertion pins to Kubernetes37.0.1.
+- Adopt pypdf6.20.0, boto3 1.43.111, Ruff0.17.0 and ty0.0.86. Canonical
+  constraints export retains the explicitly constrained trove-classifiers
+  2026.6.1.19; no unrelated build-constraint drift is adopted.
+- Current main7a28b70 and bot head fe3ecbe are ancestors; normal push is valid.
+- ty0.0.86 rejects conditional scanner dictionary expansion in one test helper
+  with 28 argument errors. Use an explicit scanner argument with the same
+  TrustingUploadScanner default; no application executable body changes.
+- uv sync, Ruff format/check, ty and module CI validator pass; 1,156 targeted
+  broker/package/HTTP-adapter/release checks pass (one dependency warning).
+  Hash-required sdist/wheel build and integrity validation pass.
+- uv audit exits one with exactly the same six advisory/package/version entries
+  as current main, no introduced alert. No baseline finding is suppressed.
+- A frozen combined canonical suite and fresh hosted exact-head CI will verify
+  current-main integration; October12 native/image/default-suite evidence is
+  historical, not a current-main full-run claim. Host engine binaries remain
+  unavailable; hosted native and final-image E2E are mandatory.
+- User authorizes finishing remaining PRs, including protected squash integration
+  after checks and independent review. T22 stays In Progress until verified main.
+  Kubernetes stays paused; project.version and public receipts are unchanged.
+
+
+## Python refresh after protected Actions integration
+
+- #299 verified merged as9eef41ed1b474aa92e74b52641d8781efd713729 after
+  all23 hosted jobs and independent review. Incorporate that main normally.
+- Initial #305 CI38487115966 passes all23 jobs; reviewed source unchanged.
+- Current-main frozen combined b681405 canonical6309tests pass,131deselected,
+  15warnings,427s exit0;94.44%total and90.55%branch coverage. Changed-line
+  gate has zero executable changes, not positive-line coverage evidence.
+- Interrupted788-pass run after external checkout removal is superseded by
+  fresh unchanged source success in the preserved original workspace.
+- Require fresh hosted CI and independent review on this refreshed head before
+  protected squash. T22 stays In Progress; release version/receipts unchanged.
+
+
+## Final Python integration candidate after Mermaid
+
+- #274 protected squash df55048c0fc195b70e1ea19840d27f47ea08f419 is verified
+  merged after fresh23-job CI38489206877 and independent exact-head review.
+- #299 squash9eef41e is also verified merged. Both remote sources are absent.
+- #305 refreshed pre-Mermaid CI38489315177 passes all23 jobs; normally merge
+  the latest main and require fresh exact-head CI and independent review.
+- Application/source test and dependency graph trees match the frozen b681405
+  combined candidate that passed6309 tests,131deselected,15warnings,
+  94.44%total and90.55%branches. No repeated full local run is needed for
+  this documentation/history-only refresh; hostengine tests remain unavailable.
+- Baseline Python audit six entries and mitigated KaTeXLow remain documented.
+  T22 stays In Progress until this final dependency patch is verified on main.
+  No version/publicimage receipt change or Kubernetes backend activation.

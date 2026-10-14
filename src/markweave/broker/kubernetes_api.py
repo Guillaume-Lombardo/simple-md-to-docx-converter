@@ -90,21 +90,44 @@ class CoreV1ApiPort(Protocol):
     api_client: Any
 
     def create_namespaced_pod(
-        self, namespace: str, body: object, **kwargs: object
+        self, namespace: str, body: Any, *, _request_timeout: float
     ) -> Any: ...
 
     def read_namespaced_pod(
-        self, name: str, namespace: str, **kwargs: object
+        self, name: str, namespace: str, *, _request_timeout: float
     ) -> Any: ...
 
-    def list_namespaced_pod(self, namespace: str, **kwargs: object) -> Any: ...
+    def list_namespaced_pod(
+        self,
+        namespace: str,
+        *,
+        label_selector: str,
+        limit: int,
+        _request_timeout: float,
+    ) -> Any: ...
 
     def delete_namespaced_pod(
-        self, name: str, namespace: str, **kwargs: object
+        self,
+        name: str,
+        namespace: str,
+        *,
+        body: client.V1DeleteOptions,
+        _request_timeout: float,
     ) -> Any: ...
 
-    def connect_get_namespaced_pod_exec(
-        self, name: str, namespace: str, **kwargs: object
+    def connect_get_namespaced_pod_exec(  # noqa: PLR0913 - exact generated SDK surface
+        self,
+        name: str,
+        namespace: str,
+        *,
+        command: list[str],
+        container: str,
+        stderr: bool,
+        stdin: bool,
+        stdout: bool,
+        tty: bool,
+        _preload_content: bool,
+        _request_timeout: float,
     ) -> Any: ...
 
 
