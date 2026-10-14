@@ -14,7 +14,7 @@ is unchanged from the upstream v0.62.2 file installed by Debian package
 
 ## Document fonts
 
-The image contains only the 32 faces listed in `fonts/manifest.json`:
+The system Fontconfig inventory contains the 32 faces listed in `fonts/manifest.json`:
 
 - Liberation 2.1.5 under the SIL Open Font License 1.1, with the upstream
   `LICENSE` installed as `Liberation-LICENSE`;
@@ -26,3 +26,14 @@ The image contains only the 32 faces listed in `fonts/manifest.json`:
 The current approved corpus requires Latin and Greek, both covered by this set.
 No Noto family is installed. A future script expansion requires a separately
 reviewed, versioned, and checksum-locked image-manifest change.
+
+## Mermaid CLI bundled font assets
+
+The exact Mermaid 12 npm graph also includes Recursive and Open Sans webfont
+assets under `@fontsource-variable/recursive` and `@fontsource/open-sans`. Both
+retain their upstream SIL Open Font License 1.1 and copyright notices in the
+packages' `LICENSE` files installed by the frozen npm graph. These bundled assets
+are separate from the system Fontconfig inventory. The application adapter fixes
+its default theme and font family to `default` and Liberation Sans. Diagram
+styles still pass through the strict Mermaid renderer and image normalization;
+these bundled font assets do not expand the system Fontconfig inventory.

@@ -594,3 +594,133 @@ Changed files relative to main:
   not a claim of full execution on this updated main. Fresh hosted exact-head
   CI and independent review are required before the authorized squash merge.
 - T22 remains In Progress; version 0.7.5 and published receipts are unchanged.
+
+
+## Mermaid 12 qualification (#274)
+
+- Replace removed width/height options with a fixed size bounded by the smaller
+  configured axis; retain aspect-ratio normalization and physical document caps.
+- Fix the default theme and Liberation Sans family to avoid Mermaid 12 choosing
+  diagram-specific themes/fonts outside the reviewed system-font contract.
+- Synchronize runtime version reporting, future golden generation and smoke checks;
+  preserve historical golden artifacts and provenance.
+- Native engine, golden and final-image qualification remain required.
+- No project version or published image-pin change is included.
+
+### Mermaid engine and security qualification
+
+- Keep CLI 12.0.0, resolving its compatible Mermaid dependency to the official
+  integrity-bound 12.1.0 build, which embeds Lodash ES 4.18.1. No local vendor
+  patch or misleading standalone dependency override is used.
+- Refresh the CI lock checksum, its assertions and canonical workflow fingerprint
+  only after frozen installation, source review and native engine qualification.
+- npm audit has no High/Critical alert but reports the Low KaTeX advisory
+  GHSA-238p-pmpm-9mq7 through four dependency nodes. Mermaid 12.1.0 still embeds
+  KaTeX 0.16.47; a standalone override does not replace that compiled copy.
+  This is a documented mitigation, not a claim that bundled KaTeX is patched.
+- The advisory requires existing prototype pollution or attacker-controlled
+  options and unsanitized HTML insertion. The adapter rejects configuration
+  directives/frontmatter, fixes options, starts a fresh sandboxed browser with
+  no runtime network, and emits normalized bounded PNG only. Upstream Mermaid
+  sanitizes the KaTeX HTML before rendering. Native math cases include untrusted
+  hyperlink and external-image expressions; no HTML output reaches the application.
+- Upstream reference: https://github.com/KaTeX/KaTeX/security/advisories/GHSA-238p-pmpm-9mq7
+- The initial 48 native tests and 642 conversion/workflow tests pass; the final
+  graph is requalified after its security and checksum corrections. Canonical
+  Python suite and hosted final-image E2E remain pending.
+
+
+## Final local qualification for remaining Dependabot PRs
+
+- PR #294 is verified merged as f31640beb323a7c59474af608aa9ce25b9989352;
+  its main CI run 38255468046 passed all 19 jobs.
+- The frozen combined candidate a414ba19a2f2975b26863bc1d0ffc54644e91c0e
+  passes the canonical default command: 5,886 passed, 118 engine/runtime cases
+  deselected, 15 warnings, 4,562.93 seconds, exit zero.
+- Coverage is 94.36% total and 90.47% branches (8,591 of 9,496).
+  The changed-executable-line gate passes with zero executable changed lines;
+  protocol annotations are excluded and constant/argument changes are traced
+  through their unchanged enclosing statements, which executed in the suite.
+  This is not a claim of positive-line coverage from a zero-line denominator.
+- An earlier run was interrupted after 1,622 passes and five policy failures
+  because its imported workflow fingerprint preceded changes during execution.
+  That inconsistent run is not accepted; the fresh frozen run above supersedes it.
+- The latest Mermaid bot head 1ab86db07ccf89a307a1bd02196df4e78a572920
+  is integrated by normal merge. Its seven transitive package refreshes leave
+  application source identical to the full-suite candidate. Official registry
+  identities and licenses were independently reviewed. The final lock checksum
+  is 7c482e9ea57e31a772ac7004d24cab0cad11bbf1dd5911f3d4019a3202c1e3e2.
+- The refreshed graph passes 279 focused checks, 51 native document-engine
+  checks, and npm audit signatures (194 signatures, 54 attestations verified).
+  npm audit still exits one for four Low occurrences of the documented KaTeX
+  advisory; uv audit exits one for the same six baseline entries as main.
+- Final Mermaid image 888a9441cbb173acea1495e4874e7c67ed129d664d6559f10d45a210c78c9c25
+  and Python image 155d892c5504636f386466cfe1dd3bcfc0e606a530501d2f540ad8cfee8fc8ab
+  pass rootless smoke, local conversion E2E, standalone API conversion, and
+  distributed conversion/SIGTERM/lease-recovery E2E. The SDK 37 attester image
+  also builds and passes non-root import without activating Kubernetes.
+- An earlier Mermaid distributed harness execution exited 141 (SIGPIPE);
+  its unchanged image passed a diagnostic rerun. The refreshed final Mermaid
+  image passes all scripts on its first run, exit zero.
+- Ruff formatting/lint, ty, CI policy and hash-required packaging checks pass.
+  Direct-file CI validator invocation failed to resolve its scripts package;
+  the repository module invocation `uv run python -m scripts.ci.validate_ci`
+  succeeds. This invocation error required no source change.
+  The unrestricted host pytest suite is unavailable with Pandoc, Mermaid and
+  LibreOffice absent on PATH; actual native/container evidence is recorded above.
+  Hosted exact-head CI remains mandatory before merging; no E2E exception applies.
+- Independent review has no outstanding finding. Remote publication, squash
+  merges and cleanup await the explicit repository-required user approval.
+  T22 stays In Progress. Version 0.7.5 and published receipt digests are unchanged.
+
+### Prepared publication: `chore/T22-mermaid-12`
+
+Changed files relative to main:
+
+- `.github/workflows/ci.yml`
+- `docs/conversion-cli.md`
+- `docs/mermaid.md`
+- `docs/t00-toolchain-validation.md`
+- `scripts/ci/validate_ci.py`
+- `scripts/container/smoke.sh`
+- `scripts/generate_t11_pdf_golden.py`
+- `src/markweave/conversion/mermaid.py`
+- `src/markweave/conversion/runtime_manifest.py`
+- `tests/integration/document_engines/test_mermaid_cli.py`
+- `tests/test_ci_validation.py`
+- `tests/test_pnpm_workspace.py`
+- `tests/unit/conversion/test_mermaid.py`
+- `tickets/T22-finalize-cicd.md`
+- `toolchain/document-engines/THIRD_PARTY_NOTICES.md`
+- `toolchain/document-engines/package-lock.json`
+- `toolchain/document-engines/package.json`
+
+
+## October 14, 2026 authorized Mermaid refresh
+
+- User requests rebasing onto main and finishing remaining Dependabot PRs.
+  Unpublished commits rebased onto 7a28b70; remote bot ancestry retained for
+  normal publication, preserving current CI partitions, caches and gates.
+- uv sync, Ruff formatting/lint, ty, module CI validator and 299 focused
+  workflow/workspace/renderer checks pass. Final npm graph SHA7c482 remains
+  identical to the earlier native/image qualification; historical October12
+  results do not substitute for fresh hosted exact-head CI.
+- Rebase conflicts preserve current validator logic and recompute its fingerprint.
+  A fresh bytecode cache avoids stale imports after Git timestamp restoration.
+- T22 remains In Progress; version0.7.5 and published receipts unchanged.
+
+
+## October 14 integration after Actions merge
+
+- #299 passes all23 hosted jobs in38486940940 and independent review, then
+  protected squash merges as9eef41ed1b474aa92e74b52641d8781efd713729.
+- Initial #274 CI38486946802 and #305 CI38487115966 also pass all23 jobs.
+- Frozen combined b681405 passes6309 default tests,131 deselected,15warnings
+  in427s;94.44%total and90.55%branch coverage. Changed-executable-line gate
+  has zero executable changed lines, not a positive-line coverage claim.
+- The earlier788-pass localrun was interrupted when temporary checkouts were
+  externally removed. Fresh unchanged source in the preserved checkout passes.
+- Merge current main normally; preserve workflow policies, font notices and
+  immutable npm graph. Refresh the one combined CI fingerprint.
+- Require fresh hosted CI and independent exact-head review before merging #274.
+  Project version and public receipts remain unchanged; T22 stays In Progress.

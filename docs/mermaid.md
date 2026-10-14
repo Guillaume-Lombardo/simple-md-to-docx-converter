@@ -29,7 +29,9 @@ accepted for generated diagrams.
 ## Process and image boundary
 
 `MermaidCliRenderer` creates a private workspace and invokes the pinned local `mmdc` executable
-with fixed arguments, one diagram at a time. It writes fixed Mermaid `securityLevel: strict` and
+with fixed arguments, one diagram at a time. Mermaid 12 uses `--size` bounded by the
+smaller configured pixel axis, preserving aspect ratio within both caps. The adapter
+fixes the `default` theme and the approved Liberation Sans font family. It writes fixed Mermaid `securityLevel: strict` and
 Puppeteer configuration selecting the configured local Chrome executable with `headless: shell`.
 Puppeteer downloads are disabled. No document content can change executable paths, CLI options,
 theme, browser arguments, configuration, or output paths.
@@ -49,7 +51,7 @@ and never reopens the path. Pandoc revalidates the manifest before materializati
 The Python adapter does not claim to create network isolation. The runtime must deny network access,
 keep Chrome's sandbox enabled, and provide the checksum-locked T00 seccomp profile. `--no-sandbox`
 and equivalent relaxations are never used. T09 integration runs exercise the real Mermaid CLI
-11.17.0, Chrome 151.0.7922.173, Pillow normalization, Pandoc, and OpenXML media path. The rootless
+12.0.0, Chrome 151.0.7922.173, Pillow normalization, Pandoc, and OpenXML media path. The rootless
 Podman proof uses an arbitrary UID, read-only root, no network, no capabilities, no-new-privileges,
 bounded PID/memory/CPU/tmpfs resources, and the T00 profile. OpenShift proof remains deferred.
 

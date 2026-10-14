@@ -511,7 +511,7 @@ jobs:
         env:
           CHROME_SHA256: 878e5ab495b8a694980fca61bc09b37e651ccedce2291c73434d16e48a2646fd
           CHROME_URL: https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_151.0.7922.173-1_amd64.deb
-          MERMAID_LOCK_SHA256: 65e41ba309b46b59d92c0158899776ed0c4f04fc97c8aeaa96b0bfd571f9fcff
+          MERMAID_LOCK_SHA256: 7c482e9ea57e31a772ac7004d24cab0cad11bbf1dd5911f3d4019a3202c1e3e2
           PUPPETEER_SKIP_DOWNLOAD: "true"
         run: |
           set -euo pipefail
@@ -526,7 +526,7 @@ jobs:
           npm ci --prefix toolchain/document-engines --omit=dev --ignore-scripts
           echo "$GITHUB_WORKSPACE/toolchain/document-engines/node_modules/.bin" >> "$GITHUB_PATH"
           test "$(node --version)" = "v22.23.1"
-          test "$(toolchain/document-engines/node_modules/.bin/mmdc --version)" = "11.17.0"
+          test "$(toolchain/document-engines/node_modules/.bin/mmdc --version)" = "12.0.0"
           test "$(google-chrome-stable --version | awk '{$1=$1; print}')" \
             = "Google Chrome 151.0.7922.173"
       - name: Run selected domain suite without a shell
