@@ -294,6 +294,32 @@ the step's model identity, `provenance` `human:{decision}:model-step:{step_id}`,
 Markdown proposal publication route refuses Office proposals, and a plain Markdown step's text can
 never be published as an Office edit.
 
+The cited reference library stores private source documents that a user may search and quote.
+`POST /api/v1/composer/library` accepts multipart `file` (`.md`, `.txt`, `.docx`, or `.pptx`) and an
+optional `title` (at most 200 characters; the file stem by default). The upload is bounded by the
+Composer upload limit and malware-scanned before any parsing; Office packages pass the same
+admission rules as Office editing. Its readable text is split into immutable numbered chunks of
+whole paragraphs. A rejected, infected, empty, or unreadable source stores nothing. `GET
+/api/v1/composer/library?limit=50&offset=0&query=` lists documents the caller owns or was granted,
+and `GET .../library/{document_id}` returns one with its `ETag`. Only the owner sees
+`shared_with`. `POST .../library/{document_id}/versions` with `If-Match` publishes the next
+immutable version; earlier versions stay available to cite, list through `GET .../versions`, and
+download exactly through `GET .../versions/{version_id}/content`. `PUT` and `DELETE
+.../library/{document_id}/grants/{user_id}` share with or revoke one named active user, and `DELETE
+.../library/{document_id}` removes the document; all three require the current `If-Match`, are
+owner-only, and are audited without content. Another user's document, an inactive account, or an
+unknown identity returns `404 COMPOSER_LIBRARY_NOT_FOUND`; a stale `If-Match` or concurrent change
+returns `412 COMPOSER_LIBRARY_CHANGED`.
+
+`POST /api/v1/composer/library/search` takes `{ "query": "...", "limit": 10 }` with one to eight
+terms of at least two characters. It ranks chunks of current versions that contain every term and
+returns each hit's document, exact version, chunk number, score, and a bounded snippet.
+`POST /api/v1/composer/library/excerpts` takes up to 20 distinct `{ "version_id", "chunk" }`
+references and returns each exact chunk with its version number and SHA-256. Authorization is
+checked before any text is read: a search returns only authorized chunks, and an excerpt of an
+unauthorized, revoked, or deleted document returns `404` with no text. A search hit or a stored
+citation never grants access by itself. Responses are `private, no-store`.
+
 `POST /api/v1/composer/drafts/{id}/revisions/{approved_revision_id}/generations` accepts
 `{ "output": "docx"|"pdf"|"pptx", "template_id": null,
 "template_version_id": null, "presentation_dialect": null, "slide_level": null }`

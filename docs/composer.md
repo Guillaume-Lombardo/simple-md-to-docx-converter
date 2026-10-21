@@ -59,8 +59,8 @@ statements are unverified unless you approve them; a model response does not cre
 Accept the proposed text, enter a correction with your own value, or reject it. Rejection leaves
 the document unchanged. A stale decision after a concurrent edit asks you to reload and review.
 For approved Markdown proposals, **Publish approved text** creates a new immutable revision.
-Native Office editing is a separate later capability; an unsupported publication returns a safe
-error and leaves the existing artifact intact.
+Model suggestions for Word and PowerPoint text are reviewed and published as described in
+[Edit Word and PowerPoint text](#edit-word-and-powerpoint-text).
 
 ## Use author knowledge
 

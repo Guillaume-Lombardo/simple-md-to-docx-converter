@@ -24,6 +24,7 @@ from markweave.composer.egress import (
     EgressResponseError,
     EgressUnavailableError,
 )
+from markweave.composer.library import LibraryContentError
 from markweave.composer.office_edits import OfficeEditError
 from markweave.composer.revisions import (
     ComposerArtifactError,
@@ -42,6 +43,11 @@ from markweave.jobs.errors import (
 )
 from markweave.malware import MalwareDetectedError, MalwareScannerUnavailableError
 from markweave.persistence.composer import ComposerCapacityError
+from markweave.persistence.composer.library import (
+    LibraryArtifactError,
+    LibraryConflictError,
+    LibraryNotFoundError,
+)
 from markweave.persistence.composer.typed_templates import (
     TypedTemplateArtifactError,
     TypedTemplateConflictError,
@@ -271,6 +277,24 @@ def install_error_handlers(app: FastAPI) -> None:
             "COMPOSER_CREDENTIAL_UNAVAILABLE",
             "The model credential is unavailable.",
         ),
+        (
+            LibraryNotFoundError,
+            404,
+            "COMPOSER_LIBRARY_NOT_FOUND",
+            "The library document or excerpt is unavailable.",
+        ),
+        (
+            LibraryConflictError,
+            412,
+            "COMPOSER_LIBRARY_CHANGED",
+            "The library document has changed.",
+        ),
+        (
+            LibraryArtifactError,
+            503,
+            "COMPOSER_LIBRARY_UNAVAILABLE",
+            "The library content is unavailable.",
+        ),
     ):
 
         def handler(
@@ -313,6 +337,21 @@ def install_error_handlers(app: FastAPI) -> None:
                     "code": f"COMPOSER_TYPED_{error.code.upper()}",
                     "message": "The typed template or values are invalid.",
                     "paths": list(error.paths),
+                }
+            },
+            headers={"Cache-Control": "private, no-store"},
+        )
+
+    @app.exception_handler(LibraryContentError)
+    def library_content_handler(
+        _request: Request, error: LibraryContentError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=413 if error.code == "limit_exceeded" else 422,
+            content={
+                "error": {
+                    "code": f"COMPOSER_LIBRARY_{error.code.upper()}",
+                    "message": "The library source or query cannot be used.",
                 }
             },
             headers={"Cache-Control": "private, no-store"},

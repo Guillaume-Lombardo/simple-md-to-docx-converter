@@ -1178,6 +1178,9 @@ class ComposerModelStepRow(Base):
     payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     author_refs: Mapped[str] = mapped_column(String(), nullable=False, default="[]")
     author_preview_digest: Mapped[str | None] = mapped_column(String(64))
+    library_refs: Mapped[str] = mapped_column(
+        String(), nullable=False, default="[]", server_default="[]"
+    )
     idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
     state: Mapped[str] = mapped_column(String(16), nullable=False)
     intent: Mapped[str] = mapped_column(
@@ -1662,3 +1665,124 @@ class ComposerFillPlanDecisionRow(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+
+
+class ComposerLibraryDocumentRow(Base):
+    """Owner-scoped cited reference document; versions publish in two phases."""
+
+    __tablename__ = "composer_library_documents"
+    __table_args__ = (
+        CheckConstraint("revision > 0", name="ck_composer_library_revision"),
+        CheckConstraint(
+            "publication_state IN ('pending', 'published')",
+            name="ck_composer_library_publication",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    current_version_id: Mapped[str | None] = mapped_column(String(36))
+    publication_state: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+Index(
+    "ix_composer_library_documents_owner",
+    ComposerLibraryDocumentRow.owner_id,
+    ComposerLibraryDocumentRow.id,
+)
+
+
+class ComposerLibraryGrantRow(Base):
+    """Explicit named-user read access; it never implies other Composer access."""
+
+    __tablename__ = "composer_library_grants"
+
+    document_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("composer_library_documents.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+Index("ix_composer_library_grants_user", ComposerLibraryGrantRow.user_id)
+
+
+class ComposerLibraryVersionRow(Base):
+    """Immutable scanned source bytes and their bounded searchable text."""
+
+    __tablename__ = "composer_library_versions"
+    __table_args__ = (
+        UniqueConstraint(
+            "document_id", "number", name="uq_composer_library_versions_number"
+        ),
+        CheckConstraint("number > 0", name="ck_composer_library_versions_number"),
+        CheckConstraint("size > 0", name="ck_composer_library_versions_size"),
+        CheckConstraint("chunk_count >= 0", name="ck_composer_library_versions_chunks"),
+        CheckConstraint(
+            "publication_state IN ('pending', 'published')",
+            name="ck_composer_library_versions_publication",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    document_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("composer_library_documents.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    number: Mapped[int] = mapped_column(Integer, nullable=False)
+    expected_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    object_owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    created_by: Mapped[str] = mapped_column(String(36), nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    media_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    scan_receipt: Mapped[str] = mapped_column(String(), nullable=False)
+    chunk_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    publication_state: Mapped[str] = mapped_column(String(16), nullable=False)
+    publication_token: Mapped[str | None] = mapped_column(String(36))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+Index("ix_composer_library_versions_document", ComposerLibraryVersionRow.document_id)
+Index(
+    "ix_composer_library_versions_recovery",
+    ComposerLibraryVersionRow.publication_state,
+    ComposerLibraryVersionRow.lease_expires_at,
+)
+
+
+class ComposerLibraryChunkRow(Base):
+    """One bounded, citable excerpt of an exact library version."""
+
+    __tablename__ = "composer_library_chunks"
+    __table_args__ = (
+        CheckConstraint("ordinal >= 0", name="ck_composer_library_chunks_ordinal"),
+    )
+
+    version_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("composer_library_versions.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    ordinal: Mapped[int] = mapped_column(Integer, primary_key=True)
+    text: Mapped[str] = mapped_column(String(), nullable=False)

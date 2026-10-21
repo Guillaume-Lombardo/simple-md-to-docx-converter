@@ -24,6 +24,7 @@ class ObjectScope(StrEnum):
     COMPOSER_ARTIFACT = "composer-artifacts"
     COMPOSER_SOURCE = "composer-sources"
     TYPED_TEMPLATE = "typed-templates"
+    COMPOSER_LIBRARY = "composer-library"
 
 
 @dataclass(frozen=True, slots=True)

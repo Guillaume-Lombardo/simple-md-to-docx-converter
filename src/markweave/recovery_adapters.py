@@ -961,6 +961,9 @@ def _referenced_keys_from_rows(tables: Mapping[str, Any]) -> frozenset[str]:
     for row in tables.get("composer_artifacts", {}).get("rows", []):
         if row["revision_id"] in revisions:
             keys.add(f"composer-artifacts/{revisions[row['revision_id']]}/{row['id']}")
+    for row in tables.get("composer_library_versions", {}).get("rows", []):
+        if row.get("publication_state") == "published":
+            keys.add(f"composer-library/{row['object_owner_id']}/{row['id']}")
     for key in keys:
         _validate_object_key(key)
     return frozenset(keys)

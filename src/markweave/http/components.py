@@ -64,6 +64,7 @@ from markweave.persistence.composer import (
 from markweave.persistence.composer.admin_policy import SqlComposerAdminPolicyRepository
 from markweave.persistence.composer.author_knowledge import SqlAuthorKnowledgeRepository
 from markweave.persistence.composer.fill_plans import SqlFillPlanRepository
+from markweave.persistence.composer.library import SqlComposerLibraryRepository
 from markweave.persistence.composer.typed_templates import SqlTypedTemplateRepository
 from markweave.persistence.jobs import SqlJobRepository
 from markweave.persistence.migrations import upgrade_database
@@ -110,6 +111,9 @@ from markweave.templates.processor import (
 from markweave.templates.runtime import build_template_validator
 from markweave.templates.service import TemplateRecoveryPolicy, TemplateService
 
+# Bounded rows examined per library search before ranking; not a product limit.
+_LIBRARY_SEARCH_SCAN_LIMIT = 2_000
+
 
 @dataclass(frozen=True, slots=True)
 class AppComponents:
@@ -137,6 +141,7 @@ class AppComponents:
     composer_authors: SqlAuthorKnowledgeRepository | None = None
     composer_fill_templates: SqlTypedTemplateRepository | None = None
     composer_fill_plans: SqlFillPlanRepository | None = None
+    composer_library: SqlComposerLibraryRepository | None = None
     metrics: OperationalMetrics = field(default_factory=OperationalMetrics)
     queue_observer: QueueObserver | None = None
     audit_reader: AuditReader | None = None
@@ -590,6 +595,20 @@ def build_components(  # noqa: PLR0912, PLR0915 - explicit resource ownership co
             composer_fill_templates.recover_pending(
                 limit=job_policies.schedule.cleanup_limit
             )
+        composer_library = (
+            SqlComposerLibraryRepository(
+                engine,
+                object_store,
+                publication_lease=timedelta(
+                    seconds=settings.template_pending_publication_stale_seconds
+                ),
+                maximum_scanned_chunks=_LIBRARY_SEARCH_SCAN_LIMIT,
+            )
+            if composer_authors is not None
+            else None
+        )
+        if composer_library is not None:
+            composer_library.recover_pending(limit=job_policies.schedule.cleanup_limit)
         if settings.composer_pending_publication_stale_seconds is not None:
             stale_before = datetime.now(UTC) - timedelta(
                 seconds=settings.composer_pending_publication_stale_seconds
@@ -669,6 +688,7 @@ def build_components(  # noqa: PLR0912, PLR0915 - explicit resource ownership co
             composer_authors=composer_authors,
             composer_fill_templates=composer_fill_templates,
             composer_fill_plans=composer_fill_plans,
+            composer_library=composer_library,
             metrics=metrics,
             queue_observer=SqlOperationalObserver(
                 observation_engine,

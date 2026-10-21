@@ -694,6 +694,116 @@
     "response_class": "JSONResponse"
   },
   {
+    "path": "/api/v1/composer/library",
+    "methods": [
+      "GET"
+    ],
+    "name": "list_library",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/library",
+    "methods": [
+      "POST"
+    ],
+    "name": "create_library_document",
+    "include_in_schema": true,
+    "status_code": 201,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/library/{document_id}",
+    "methods": [
+      "GET"
+    ],
+    "name": "get_library_document",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/library/{document_id}",
+    "methods": [
+      "DELETE"
+    ],
+    "name": "delete_library_document",
+    "include_in_schema": true,
+    "status_code": 204,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/library/{document_id}/versions",
+    "methods": [
+      "GET"
+    ],
+    "name": "list_library_versions",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/library/{document_id}/versions",
+    "methods": [
+      "POST"
+    ],
+    "name": "replace_library_document",
+    "include_in_schema": true,
+    "status_code": 201,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/library/{document_id}/versions/{version_id}/content",
+    "methods": [
+      "GET"
+    ],
+    "name": "download_library_version",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/library/{document_id}/grants/{user_id}",
+    "methods": [
+      "PUT"
+    ],
+    "name": "grant_library_document",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/library/{document_id}/grants/{user_id}",
+    "methods": [
+      "DELETE"
+    ],
+    "name": "revoke_library_document",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/library/search",
+    "methods": [
+      "POST"
+    ],
+    "name": "search_library",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/library/excerpts",
+    "methods": [
+      "POST"
+    ],
+    "name": "read_library_excerpts",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
     "path": "/api/v1/composer/drafts/{draft_id}/model-steps/preview",
     "methods": [
       "POST"

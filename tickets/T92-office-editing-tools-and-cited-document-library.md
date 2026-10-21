@@ -139,6 +139,20 @@ T91.
   Evidence: 19 new vitest cases for the API client and panel plus two workspace cases; the full
   web check passes with 90.04% branch coverage; 16 CLI unit tests; HTTP diff assertions for DOCX
   and PPTX in SQLite and PostgreSQL/S3.
+- 2026-10-21: Fifth increment on `feat/T92-composer-library`, stacked on the UI/CLI branch: the
+  permissioned cited library backend. Migration `20261021_27` adds library documents, grants,
+  immutable versions, and numbered chunks plus a nullable `composer_model_steps.library_refs`
+  column reserved for citations. Uploads (`.md`, `.txt`, `.docx`, `.pptx`) are bounded, scanned
+  before parsing, split into whole-paragraph chunks, and published in two phases (pending row,
+  verified object write, finalize) with immediate cleanup of a failed or losing publication and
+  startup recovery of interrupted ones; one live publication per document keeps version numbers
+  contiguous. Owner-only replace, grant, revoke, and delete use `If-Match` and content-free
+  audit events. Listing, search, download, and excerpts filter owner or active grantee in SQL
+  before any text is loaded, so hits and citations never grant access. Evidence: 100% coverage of
+  `composer/library.py`, 95% branch coverage of the repository, 97% of the router; SQLite and
+  PostgreSQL/S3 HTTP workflows for lifecycle and revocation, Office sources, rejected sources,
+  concurrent replacements, failed writes and recovery, and request validation. Citations in model
+  steps, the library UI and CLI, and their final-image E2E phase remain open.
 
 ## Synchronization
 
