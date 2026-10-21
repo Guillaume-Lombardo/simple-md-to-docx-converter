@@ -2,7 +2,7 @@
 ticket: T146
 linear_id: G1L-704
 linear_url: https://linear.app/g1lom/issue/G1L-704/t146-overlap-e2e-retention-expiry-waits-with-other-journeys
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -121,6 +121,15 @@ Measured on scheduled main run 39109797384 (2026-10-18):
 - 2026-10-21: Owner decision on PR #322: the timing criterion is judged on the mean of the three
   comparable pairs, and the criterion above now says so. Measured result: shard 1 mean 59.7 s,
   shard 2 mean 56.0 s. No expiry assertion or retention value is weakened.
+
+- 2026-10-21: Verified on `main` and synchronized with G1L-704 (`Done`).
+  [PR #322](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/322) was squash-merged as
+  [`a143a09415cbb08b7f8da5a33b7564bc5f1ce4df`](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/commit/a143a09415cbb08b7f8da5a33b7564bc5f1ce4df); its tree matches
+  reviewed head [`c102c6e8b3ceb0f4c3e27fda13a4a9aa69655153`](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/commit/c102c6e8b3ceb0f4c3e27fda13a4a9aa69655153).
+  [Final reviewed-head CI run 39637450555](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/39637450555)
+  passed all required checks. The owner accepted the mean of the three comparable pairs on this
+  ticket only: shard 1 saved 59.7 s and shard 2 saved 56.0 s. All individual measurements, real
+  retention values and expiry assertions remain recorded above.
 
 ## Synchronization
 

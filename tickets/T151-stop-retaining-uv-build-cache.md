@@ -2,7 +2,7 @@
 ticket: T151
 linear_id: G1L-710
 linear_url: https://linear.app/g1lom/issue/G1L-710/t151-stop-retaining-the-uv-build-cache-in-the-python-images
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -32,6 +32,15 @@ The owner's scan of the backend CI archive found a retained uv cache under `/opt
 ## Progress
 
 - 2026-10-21: Created as the follow-up the owner chose for the uv cache gap left by T150. Locally, the container asset tests pass. The image contents remain to be verified in hosted CI.
+
+- 2026-10-21: Verified on `main` and synchronized with G1L-710 (`Done`).
+  [PR #327](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/327) was squash-merged as
+  [`b13fae96ff8b2d53d145d0c8d4a8349126e124a8`](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/commit/b13fae96ff8b2d53d145d0c8d4a8349126e124a8); its tree matches
+  reviewed head [`6bd65a86781bf968ddca054eb3091955177c35a5`](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/commit/6bd65a86781bf968ddca054eb3091955177c35a5).
+  [Final reviewed-head CI run 39633289621](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/39633289621)
+  passed all required checks. Independent inspection found no uv cache path in any layer of either
+  retained OCI archive: backend (24 layers, 135,340 entries) and reverse-attempt (one flattened
+  layer, 27,791 entries). Both Python installs use `uv sync --no-cache`.
 
 ## Synchronization
 

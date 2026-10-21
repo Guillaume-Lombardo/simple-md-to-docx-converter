@@ -2,7 +2,7 @@
 ticket: T152
 linear_id: G1L-711
 linear_url: https://linear.app/g1lom/issue/G1L-711/t152-gate-the-reverse-expiry-submission-on-the-worker-broker-path
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -73,6 +73,16 @@ PR #326 run 39643689513, `e2e-distributed-2` job 119378076059 (artifact 12366952
     worker; the second fails when the gate is missing between the runtime switch and
     `expiry-submit`.
   - `ruff`, `ty` and the E2E unit tests (314) pass.
+
+- 2026-10-21: Verified on `main` and synchronized with G1L-711 (`Done`).
+  [PR #329](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/329) was squash-merged as
+  [`e3da69db74b216c290c64f492ffe1506f058888d`](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/commit/e3da69db74b216c290c64f492ffe1506f058888d); its tree matches
+  reviewed head [`900dbcd9f9aa9e3adc0f7253b780e6d634b6c111`](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/commit/900dbcd9f9aa9e3adc0f7253b780e6d634b6c111).
+  [Final reviewed-head CI run 39650371239](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/39650371239)
+  passed all required checks. Both final-image E2E profiles passed. The reverse-enabled
+  application or first worker is gated before expiry submission; the forward-only second worker is
+  excluded. The healthy hosted gates took about 1.04 s; this does not claim reproduction of the
+  earlier prolonged broker stall.
 
 ## Synchronization
 
