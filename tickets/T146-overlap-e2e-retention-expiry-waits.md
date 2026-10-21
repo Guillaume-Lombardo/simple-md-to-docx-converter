@@ -42,9 +42,10 @@ Measured on scheduled main run 39109797384 (2026-10-18):
 - Both expiry checks keep their assertions and still fail when the job does not expire within the
   bound, or when a result stays downloadable.
 - Each verify step records how long it actually waited.
-- e2e-standalone-1 and e2e-distributed-1 are about 55 s shorter, and both shard-2 jobs about 60 s
-  shorter. This is measured on three consecutive full hosted runs, with before and after durations
-  recorded.
+- Averaged over three consecutive comparable full hosted runs, e2e-standalone-1 and
+  e2e-distributed-1 are about 55 s shorter, and both shard-2 jobs about 60 s shorter. Each pair
+  runs the baseline and the change in the same minutes and compares the suite step only. Every
+  per-run before and after duration is recorded.
 - The canonical checks pass, and both E2E profiles pass on the final rootless images.
 
 ## Dependencies
@@ -110,14 +111,16 @@ Measured on scheduled main run 39109797384 (2026-10-18):
   | `verify-expiration`, distributed (shard 1) | 18.8 s | 18.3 s | 2.6 s |
   | reverse `expiry-verify` (shard 2, both profiles) | 1.0–1.2 s | 1.1 s | 1.1–1.2 s |
 
-  Before this change, each of these steps slept for the full retention window. Shard 1 saved 59.7 s
-  on average over the three pairs (about 55 s expected) and shard 2 saved 56 s (about 60 s
-  expected). The criterion is not met on every pair: pair 3 saved 59 and 29 s on shard 1 and 33
-  and 10 s on shard 2, and pair 2 saved 14 s on e2e-standalone-1. The verify waits show that the
-  retention windows now overlap other journeys in every run (the reverse wait is at most 1.2 s). So
-  the spread between pairs comes from runner-to-runner variation in the rest of the suite (the same
-  baseline shard ranges from 404 to 460 s), not from the change. Whether the per-pair criterion
-  stands or the three-pair mean is accepted is an owner decision.
+  Before this change, each of these steps slept for the full retention window. Shard 1 saved
+  59.7 s on average over the three pairs (about 55 s expected) and shard 2 saved 56.0 s (about
+  60 s expected). Single pairs vary widely: pair 3 saved 59 and 29 s on shard 1 and 33 and 10 s on
+  shard 2, and pair 2 saved 14 s on e2e-standalone-1. The verify waits show that the retention
+  windows overlap other journeys in every run (the reverse wait is at most 1.2 s). The spread
+  between pairs is consistent with runner-to-runner variation in the rest of the suite (the same
+  baseline shard ranges from 404 to 460 s), though these runs do not prove it is the only cause.
+- 2026-10-21: Owner decision on PR #322: the timing criterion is judged on the mean of the three
+  comparable pairs, and the criterion above now says so. Measured result: shard 1 mean 59.7 s,
+  shard 2 mean 56.0 s. No expiry assertion or retention value is weakened.
 
 ## Synchronization
 
