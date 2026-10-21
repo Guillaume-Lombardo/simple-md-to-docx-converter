@@ -2,7 +2,7 @@
 ticket: T150
 linear_id: G1L-708
 linear_url: https://linear.app/g1lom/issue/G1L-708/t150-adopt-pillow-13-for-the-critical-jpeg-decoder-advisory-and-retain
-status: In Progress
+status: Done
 priority: Urgent
 project: Markdown to DOCX and PDF Converter
 ---
@@ -80,3 +80,10 @@ None. Unblocks the supply-chain gate on every open pull request, including the T
   staging or tool directory, and a bundle that does not verify; an accepted summary prints a
   manifest digest that the real `verify_supply_chain` accepts. Removing the retention move or
   restoring the stop-at-first-failure wrapper makes the corresponding tests fail.
+- 2026-10-21: Done. Squash-merged as #325 into `main` at
+  `ddd91fa394a440234c45ec5050da16001cfd5216`, whose tree matches the reviewed head `636ba2c`.
+  All required final-head checks passed in hosted run 39621557601, including the unchanged
+  supply-chain gate for the backend and reverse-attempt images, the document engines, the
+  containers and all four final-image E2E shards. Every acceptance criterion is met; no
+  limitation remains. The offline Pillow 12 fixture-generation recipe in
+  `docs/composer-preview.md` stays tied to its recorded fixture digests and does not ship.
