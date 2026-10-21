@@ -229,9 +229,11 @@ sequential archive downloads.
   - Other candidate load steps: container 38 and 40 s, supply-chain 38 and 36 s, frontend 15 and
     13 s. The pair 3 baseline took 69, 70 and 21 s; the pair 2 push baseline had no such jobs.
 - 2026-10-21: Timing criterion met. Across the three complete comparable pairs, all twelve candidate
-  E2E load steps are between 42 and 50 s, below the under-65-second target. They are about the
-  longest single load (the backend, 40.4–48.2 s) plus 0.3–1.3 s. The baselines were 70–94 s, and
-  the per-pair means went from 89.0, 88.75 and 81.0 s to 46.5, 47.0 and 48.25 s.
+  E2E load steps are between 42 and 50 s, below the under-65-second target. Each Actions
+  "Load verified final images" step lasts the longest single load (the backend, 40.4–48.2 s) plus
+  1.4–2.6 s. The loader's internal `concurrent_load_seconds` counter exceeds the backend load by
+  only 0.3–0.6 s; the rest of the step is the `uv run` start and the preconditions. The baselines
+  were 70–94 s, and the per-pair means went from 89.0, 88.75 and 81.0 s to 46.5, 47.0 and 48.25 s.
 
 ## Synchronization
 
