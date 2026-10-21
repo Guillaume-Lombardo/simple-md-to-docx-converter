@@ -313,7 +313,8 @@ returns `412 COMPOSER_LIBRARY_CHANGED`. Deletion records a cleanup obligation fo
 stored source in the same transaction, and each maintenance pass (at startup and on the retention
 cadence) sweeps those obligations, then lists the library's object scope and removes any source
 that no version references, such as a late write from an upload interrupted by the deletion. The
-distributed profile therefore needs permission to list the bucket.
+distributed profile therefore needs permission to list the bucket. Each pass lists the whole
+library scope, so its cost grows with the number of stored library versions.
 
 `POST /api/v1/composer/library/search` takes `{ "query": "...", "limit": 10 }` with one to eight
 terms of at least two characters. It ranks chunks of current versions that contain every term and

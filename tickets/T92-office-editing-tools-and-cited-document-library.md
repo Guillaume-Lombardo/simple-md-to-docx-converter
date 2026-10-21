@@ -179,6 +179,11 @@ T91.
     port (filesystem directory walk, S3 `ListObjectsV2` with a prefix) and removes any object that
     no version row references; a version row always precedes its object and is never reused. The
     shared SQLite and PostgreSQL/S3 scenario reproduces the pause, sweep, write and crash.
+    Operational limitation: every maintenance pass (startup and each retention cycle) lists the
+    whole `composer-library` scope and checks it against `composer_library_versions` in batches
+    of 500, so its cost grows with the number of stored library versions; deletions per pass are
+    bounded by the cleanup limit, but the listing is not. A persisted cursor or a sweep journal
+    keyed by in-flight uploads would bound it if the library grows large.
   - **Cited admission race.** A cited retry that loses the race to an identical request now
     replays the durable step after the precondition failure instead of returning 412.
 
