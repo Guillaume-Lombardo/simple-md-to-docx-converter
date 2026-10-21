@@ -21,6 +21,7 @@ import {
 } from "./library-api";
 import { parseOfficeProposal } from "./office-edit-api";
 import { ComposerOfficeEditPanel } from "./office-edit-panel";
+import { ComposerOfficeStructurePanel } from "./office-structure-panel";
 import {
   ComposerPreview,
   type ActivePreviewRevision,
@@ -2564,6 +2565,24 @@ function ComposerWorkspaceInner({
                   onProposalReady={() => {
                     if (selectedId.current === draft.id) void load(draft.id);
                   }}
+                  onPublished={(revisionId) => {
+                    if (selectedId.current === draft.id)
+                      void load(draft.id, revisionId);
+                  }}
+                  revisionId={revision.id}
+                />
+              )}
+            {api.officeStructure &&
+              revision &&
+              revision.id === draft.current_revision_id &&
+              (format === "docx" || format === "pptx") && (
+                <ComposerOfficeStructurePanel
+                  api={api.officeStructure}
+                  draftEtag={draft.etag}
+                  draftId={draft.id}
+                  expire={expireSession}
+                  format={format}
+                  key={revision.id}
                   onPublished={(revisionId) => {
                     if (selectedId.current === draft.id)
                       void load(draft.id, revisionId);

@@ -1457,6 +1457,42 @@
         "title": "ComposerHandoffRequest",
         "type": "object"
       },
+      "ComposerImageTargetResponse": {
+        "properties": {
+          "media_type": {
+            "title": "Media Type",
+            "type": "string"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "used_by": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Used By",
+            "type": "array"
+          }
+        },
+        "required": [
+          "target",
+          "media_type",
+          "sha256",
+          "size",
+          "used_by"
+        ],
+        "title": "ComposerImageTargetResponse",
+        "type": "object"
+      },
       "ComposerMessageCreateRequest": {
         "properties": {
           "content": {
@@ -1742,6 +1778,39 @@
         "title": "ComposerModelStepResponse",
         "type": "object"
       },
+      "ComposerMoveSlideOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_position": {
+            "minimum": 1.0,
+            "title": "Expected Position",
+            "type": "integer"
+          },
+          "op": {
+            "const": "move_slide",
+            "title": "Op",
+            "type": "string"
+          },
+          "position": {
+            "minimum": 1.0,
+            "title": "Position",
+            "type": "integer"
+          },
+          "slide_id": {
+            "minimum": 0.0,
+            "title": "Slide Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "op",
+          "slide_id",
+          "expected_position",
+          "position"
+        ],
+        "title": "ComposerMoveSlideOperation",
+        "type": "object"
+      },
       "ComposerOfficeEditStepCreateRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1909,6 +1978,166 @@
           "text"
         ],
         "title": "ComposerOfficeEditTargetText",
+        "type": "object"
+      },
+      "ComposerOfficeStructureEditRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "operations": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "move_slide": "#/components/schemas/ComposerMoveSlideOperation",
+                  "replace_image": "#/components/schemas/ComposerReplaceImageOperation",
+                  "set_paragraph_style": "#/components/schemas/ComposerSetParagraphStyleOperation"
+                },
+                "propertyName": "op"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/ComposerSetParagraphStyleOperation"
+                },
+                {
+                  "$ref": "#/components/schemas/ComposerMoveSlideOperation"
+                },
+                {
+                  "$ref": "#/components/schemas/ComposerReplaceImageOperation"
+                }
+              ]
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Operations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "operations"
+        ],
+        "title": "ComposerOfficeStructureEditRequest",
+        "type": "object"
+      },
+      "ComposerOfficeStructureResponse": {
+        "properties": {
+          "download_sha256": {
+            "title": "Download Sha256",
+            "type": "string"
+          },
+          "engine_version": {
+            "title": "Engine Version",
+            "type": "integer"
+          },
+          "format": {
+            "enum": [
+              "docx",
+              "pptx"
+            ],
+            "title": "Format",
+            "type": "string"
+          },
+          "images": {
+            "items": {
+              "$ref": "#/components/schemas/ComposerImageTargetResponse"
+            },
+            "title": "Images",
+            "type": "array"
+          },
+          "paragraph_styles": {
+            "items": {
+              "$ref": "#/components/schemas/ComposerParagraphStyleResponse"
+            },
+            "title": "Paragraph Styles",
+            "type": "array"
+          },
+          "paragraphs": {
+            "items": {
+              "$ref": "#/components/schemas/ComposerParagraphTargetResponse"
+            },
+            "title": "Paragraphs",
+            "type": "array"
+          },
+          "revision_id": {
+            "format": "uuid",
+            "title": "Revision Id",
+            "type": "string"
+          },
+          "slides": {
+            "items": {
+              "$ref": "#/components/schemas/ComposerSlideTargetResponse"
+            },
+            "title": "Slides",
+            "type": "array"
+          }
+        },
+        "required": [
+          "format",
+          "revision_id",
+          "download_sha256",
+          "engine_version",
+          "paragraphs",
+          "paragraph_styles",
+          "slides",
+          "images"
+        ],
+        "title": "ComposerOfficeStructureResponse",
+        "type": "object"
+      },
+      "ComposerParagraphStyleResponse": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "style_id": {
+            "title": "Style Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "style_id",
+          "name"
+        ],
+        "title": "ComposerParagraphStyleResponse",
+        "type": "object"
+      },
+      "ComposerParagraphTargetResponse": {
+        "properties": {
+          "in_table": {
+            "title": "In Table",
+            "type": "boolean"
+          },
+          "paragraph": {
+            "title": "Paragraph",
+            "type": "integer"
+          },
+          "style": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Style"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target",
+          "paragraph",
+          "in_table",
+          "style",
+          "text"
+        ],
+        "title": "ComposerParagraphTargetResponse",
         "type": "object"
       },
       "ComposerPptxEditRequest": {
@@ -2302,6 +2531,48 @@
         "title": "ComposerQuestionResponse",
         "type": "object"
       },
+      "ComposerReplaceImageOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "content_base64": {
+            "minLength": 4,
+            "title": "Content Base64",
+            "type": "string"
+          },
+          "expected_sha256": {
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Expected Sha256",
+            "type": "string"
+          },
+          "filename": {
+            "maxLength": 255,
+            "minLength": 5,
+            "title": "Filename",
+            "type": "string"
+          },
+          "op": {
+            "const": "replace_image",
+            "title": "Op",
+            "type": "string"
+          },
+          "target": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op",
+          "target",
+          "expected_sha256",
+          "filename",
+          "content_base64"
+        ],
+        "title": "ComposerReplaceImageOperation",
+        "type": "object"
+      },
       "ComposerRevisionDiffChange": {
         "properties": {
           "after_end": {
@@ -2609,6 +2880,71 @@
           "created_at"
         ],
         "title": "ComposerRevisionSummaryResponse",
+        "type": "object"
+      },
+      "ComposerSetParagraphStyleOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_style": {
+            "anyOf": [
+              {
+                "maxLength": 253,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Style"
+          },
+          "op": {
+            "const": "set_paragraph_style",
+            "title": "Op",
+            "type": "string"
+          },
+          "style": {
+            "maxLength": 253,
+            "minLength": 1,
+            "title": "Style",
+            "type": "string"
+          },
+          "target": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op",
+          "target",
+          "expected_style",
+          "style"
+        ],
+        "title": "ComposerSetParagraphStyleOperation",
+        "type": "object"
+      },
+      "ComposerSlideTargetResponse": {
+        "properties": {
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "slide_id": {
+            "title": "Slide Id",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slide_id",
+          "position",
+          "title"
+        ],
+        "title": "ComposerSlideTargetResponse",
         "type": "object"
       },
       "ConnectionCreateRequest": {
@@ -16173,6 +16509,398 @@
         ]
       }
     },
+    "/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/docx-structure": {
+      "get": {
+        "description": "List the paragraph styles, slides, and images a reviewer may change.",
+        "operationId": "get_docx_structure_api_v1_composer_drafts__draft_id__revisions__revision_id__docx_structure_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Draft Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "revision_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Revision Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComposerOfficeStructureResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested resource was not found",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request body is too large",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get Docx Structure",
+        "tags": [
+          "composer"
+        ]
+      }
+    },
+    "/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/docx-structure-edits": {
+      "post": {
+        "description": "Publish a new revision that differs only in the requested structure.",
+        "operationId": "edit_docx_structure_api_v1_composer_drafts__draft_id__revisions__revision_id__docx_structure_edits_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Draft Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "revision_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Revision Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComposerOfficeStructureEditRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComposerRevisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested resource was not found",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A request precondition failed",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request body is too large",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request requires a precondition",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Edit Docx Structure",
+        "tags": [
+          "composer"
+        ]
+      }
+    },
     "/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/docx-text-targets": {
       "get": {
         "operationId": "list_text_targets_api_v1_composer_drafts__draft_id__revisions__revision_id__docx_text_targets_get",
@@ -17082,6 +17810,398 @@
           }
         },
         "summary": "Edit Pptx Text",
+        "tags": [
+          "composer"
+        ]
+      }
+    },
+    "/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/pptx-structure": {
+      "get": {
+        "description": "List the paragraph styles, slides, and images a reviewer may change.",
+        "operationId": "get_pptx_structure_api_v1_composer_drafts__draft_id__revisions__revision_id__pptx_structure_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Draft Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "revision_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Revision Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComposerOfficeStructureResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested resource was not found",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request body is too large",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get Pptx Structure",
+        "tags": [
+          "composer"
+        ]
+      }
+    },
+    "/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/pptx-structure-edits": {
+      "post": {
+        "description": "Publish a new revision that differs only in the requested structure.",
+        "operationId": "edit_pptx_structure_api_v1_composer_drafts__draft_id__revisions__revision_id__pptx_structure_edits_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Draft Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "revision_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Revision Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComposerOfficeStructureEditRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComposerRevisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested resource was not found",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A request precondition failed",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request body is too large",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request requires a precondition",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Edit Pptx Structure",
         "tags": [
           "composer"
         ]

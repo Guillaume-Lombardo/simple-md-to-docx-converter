@@ -904,6 +904,46 @@
     "response_class": "JSONResponse"
   },
   {
+    "path": "/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/docx-structure",
+    "methods": [
+      "GET"
+    ],
+    "name": "get_docx_structure",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/docx-structure-edits",
+    "methods": [
+      "POST"
+    ],
+    "name": "edit_docx_structure",
+    "include_in_schema": true,
+    "status_code": 201,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/pptx-structure",
+    "methods": [
+      "GET"
+    ],
+    "name": "get_pptx_structure",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/pptx-structure-edits",
+    "methods": [
+      "POST"
+    ],
+    "name": "edit_pptx_structure",
+    "include_in_schema": true,
+    "status_code": 201,
+    "response_class": "JSONResponse"
+  },
+  {
     "path": "/api/v1/composer/drafts/{draft_id}/revisions/from-source",
     "methods": [
       "POST"

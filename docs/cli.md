@@ -49,6 +49,11 @@ Use
 `markweave composer revisions diff DRAFT_ID TO_REVISION_ID --from-revision FROM_REVISION_ID`
 for bounded line changes. `markweave composer office` lists, edits, and proposes exact DOCX and
 PPTX text changes; see [Administration CLI](administration-cli.md#composer-connections).
+`markweave composer office structure DRAFT_ID REVISION_ID --format docx` lists paragraph styles,
+slide order, and images, and `office restructure` publishes a private JSON list of
+`set_paragraph_style`, `move_slide`, and `replace_image` operations with the current `--etag`;
+each `replace_image` names a local PNG or JPEG in `image_file`, which the service scans and
+re-encodes before it replaces the image.
 
 The author directory and typed Word filling use separate Composer command families:
 

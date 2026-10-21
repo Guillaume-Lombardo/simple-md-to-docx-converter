@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import getpass
 import hashlib
 import json
@@ -586,11 +587,11 @@ def _register_revisions(
     _bind(restore, "revisions restore", _restore_revision)
 
 
-def _register_office(
+def _register_office(  # noqa: PLR0915 - declarative argparse registry
     commands: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     office = commands.add_parser(
-        "office", help="Edit the text of exact DOCX and PPTX revisions."
+        "office", help="Edit the text and structure of exact DOCX and PPTX revisions."
     )
     actions = office.add_subparsers(dest="office_command", metavar="COMMAND")
 
@@ -656,6 +657,38 @@ def _register_office(
     _idempotency_key(publish)
     _profile(publish)
     _bind(publish, "office publish", _office_publish)
+
+    structure = actions.add_parser(
+        "structure",
+        help="List a revision's paragraph styles, slide order, and images.",
+    )
+    _draft_id(structure)
+    _revision_id(structure)
+    _office_format(structure)
+    _profile(structure)
+    _bind(structure, "office structure", _office_structure)
+
+    restructure = actions.add_parser(
+        "restructure",
+        help="Publish reviewed style, slide-order, and image edits as a new revision.",
+    )
+    _draft_id(restructure)
+    _revision_id(restructure)
+    _office_format(restructure)
+    restructure.add_argument(
+        "--operations-file",
+        required=True,
+        action=_Store,
+        metavar="PATH",
+        help=(
+            "JSON list of set_paragraph_style, move_slide, and replace_image "
+            "operations; replace_image names its PNG or JPEG in image_file."
+        ),
+    )
+    _etag(restructure)
+    _idempotency_key(restructure)
+    _profile(restructure)
+    _bind(restructure, "office restructure", _office_restructure)
 
 
 def _office_format(parser: argparse.ArgumentParser) -> None:
@@ -2160,6 +2193,134 @@ def _office_edit(
         "office_edit_failed",
     )
     writer.success("Composer text edits published.", {"revision": revision})
+
+
+def _office_structure(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    draft_id, revision_id = _draft(command), _revision(command)
+    office_format = _required_string(command, "format")
+    payload = _object(
+        _request(
+            context,
+            command,
+            "GET",
+            f"/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/"
+            f"{office_format}-structure",
+        ),
+        _OK,
+        "office_structure_failed",
+    )
+    lines = [
+        *(
+            f"{item['target']}\t{item['style'] or '(default)'}\t{item['text']}"
+            for item in payload.get("paragraphs", ())
+        ),
+        *(
+            f"slide {item['position']}\t{item['slide_id']}\t{item['title']}"
+            for item in payload.get("slides", ())
+        ),
+        *(
+            f"{item['target']}\t{item['media_type']}\t{item['sha256']}"
+            for item in payload.get("images", ())
+        ),
+    ]
+    writer.success("\n".join(lines) or "No editable structure.", payload)
+
+
+_STRUCTURE_FIELDS: dict[str, frozenset[str]] = {
+    "set_paragraph_style": frozenset({"op", "target", "expected_style", "style"}),
+    "move_slide": frozenset({"op", "slide_id", "expected_position", "position"}),
+    "replace_image": frozenset({"op", "target", "expected_sha256", "image_file"}),
+}
+_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg"})
+
+
+def _structure_operation(item: object, maximum_image_bytes: int) -> dict[str, Any]:
+    invalid = CliError("invalid_operations", "The structure operations are invalid.")
+    if (
+        not isinstance(item, dict)
+        or not isinstance(item.get("op"), str)
+        or set(item) != _STRUCTURE_FIELDS.get(item["op"], frozenset())
+    ):
+        raise invalid
+    if item["op"] == "move_slide":
+        if not all(
+            type(item[name]) is int
+            for name in ("slide_id", "expected_position", "position")
+        ):
+            raise invalid
+        return dict(item)
+    if not isinstance(item["target"], str):
+        raise invalid
+    if item["op"] == "set_paragraph_style":
+        if not isinstance(item["style"], str) or not (
+            item["expected_style"] is None or isinstance(item["expected_style"], str)
+        ):
+            raise invalid
+        return dict(item)
+    if not isinstance(item["expected_sha256"], str) or not isinstance(
+        item["image_file"], str
+    ):
+        raise invalid
+    path = Path(item["image_file"])
+    content = _read_source(
+        path, maximum_bytes=maximum_image_bytes, suffixes=_IMAGE_SUFFIXES
+    )
+    return {
+        "op": "replace_image",
+        "target": item["target"],
+        "expected_sha256": item["expected_sha256"],
+        "filename": path.name,
+        "content_base64": base64.b64encode(content).decode("ascii"),
+    }
+
+
+def _office_restructure(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    draft_id, revision_id = _draft(command), _revision(command)
+    office_format = _required_string(command, "format")
+    capabilities = _composer_capabilities(context, command)
+    operations_limit = _capability_value(capabilities, "maximum_model_request_bytes")
+    image_limit = _capability_value(capabilities, "maximum_upload_bytes")
+    raw = _read_model_content_file(
+        Path(_required_string(command, "operations_file")),
+        maximum_bytes=operations_limit,
+        label="Office structure",
+    )
+    if len(raw) > operations_limit:
+        raise CliError(
+            "content_too_large", "The structure operations exceed the service limit."
+        )
+    try:
+        operations = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as error:
+        raise CliError(
+            "invalid_operations", "The structure operations are invalid."
+        ) from error
+    if not isinstance(operations, list) or not operations:
+        raise CliError("invalid_operations", "The structure operations are invalid.")
+    revision = _object(
+        _request(
+            context,
+            command,
+            "POST",
+            f"/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/"
+            f"{office_format}-structure-edits",
+            body={
+                "operations": [
+                    _structure_operation(item, image_limit) for item in operations
+                ]
+            },
+            csrf=True,
+            etag=_required_string(command, "etag"),
+            idempotency_key=_required_string(command, "idempotency_key"),
+        ),
+        _CREATED,
+        "office_structure_edit_failed",
+    )
+    writer.success("Composer structure edits published.", {"revision": revision})
 
 
 def _office_propose(

@@ -294,6 +294,35 @@ the step's model identity, `provenance` `human:{decision}:model-step:{step_id}`,
 Markdown proposal publication route refuses Office proposals, and a plain Markdown step's text can
 never be published as an Office edit.
 
+Structural edits use the same current-revision, `If-Match`, `Idempotency-Key`, and publication
+rules. `GET .../revisions/{revision_id}/docx-structure` lists the current DOCX revision's body
+paragraphs (`word/document.xml#p<n>`) with their explicit style or `null`, its paragraph styles,
+and its body images with SHA-256 and size. Paragraphs in tracked changes, content controls,
+alternate content, or text boxes, and paragraphs with a tracked formatting change, are not
+listed. `GET .../pptx-structure` lists slides in presentation order with their stable `slide_id`
+and first text, plus slide images. `POST .../docx-structure-edits` and `POST
+.../pptx-structure-edits` take up to 100 `operations`:
+
+- `{ "op": "set_paragraph_style", "target", "expected_style", "style" }` (DOCX only) applies an
+  existing paragraph style while the paragraph still has `expected_style`, writing only its
+  `w:pStyle` declaration.
+- `{ "op": "move_slide", "slide_id", "expected_position", "position" }` (PPTX only) moves one
+  slide's entry in the presentation's slide list; each slide moves at most once per request.
+- `{ "op": "replace_image", "target", "expected_sha256", "filename", "content_base64" }`
+  replaces a PNG or JPEG image part whose bytes still match `expected_sha256`. The decoded upload
+  is bounded by the Composer upload limit and malware-scanned before it is parsed, must be a PNG
+  or JPEG within the configured image bounds, and is re-encoded without metadata into the
+  target's own format.
+
+The revision records operation `docx_structure_edit:{revision_id}` or
+`pptx_structure_edit:{revision_id}`, provenance `human:{operation}`, and the frozen operations
+with each replacement image's SHA-256 instead of its bytes. Only the edited parts change; every
+other part, text node, and target is verified unchanged. Failures return
+`COMPOSER_{DOCX|PPTX}_EDIT_*` codes such as `UNSUPPORTED_TARGET`, `TARGET_CHANGED`,
+`UNKNOWN_STYLE`, `INVALID_POSITION`, `INVALID_IMAGE`, or `UNSUPPORTED_OPERATION` with the
+affected targets, and an infected image returns `UPLOAD_MALWARE_DETECTED`; nothing is published.
+Structural edits are not offered to models.
+
 The cited reference library stores private source documents that a user may search and quote.
 `POST /api/v1/composer/library` accepts multipart `file` (`.md`, `.txt`, `.docx`, or `.pptx`) and an
 optional `title` (at most 200 characters; the file stem by default). The upload is bounded by the

@@ -62,7 +62,7 @@ def _store(dependencies: HttpDependencies) -> SqlComposerRepository:
     return store
 
 
-def _office_download(
+def office_download(
     store: SqlComposerRepository,
     owner_id: UUID,
     revision: ComposerRevision,
@@ -75,26 +75,37 @@ def _office_download(
     return content, artifact.sha256
 
 
-def _publish_edit(  # noqa: PLR0913, PLR0917 - one explicit publication contract
+def _text_edit(
+    requested: tuple[ComposerDocxReplaceTextOperation, ...],
+    apply: Callable[[bytes, tuple[ReplaceText, ...], TypedDocxLimits], bytes],
+) -> tuple[str, Callable[[bytes, TypedDocxLimits], bytes]]:
+    operations = tuple(
+        ReplaceText(item.target, item.expected_text, item.text) for item in requested
+    )
+    return operations_record(operations), lambda content, limits: apply(
+        content, operations, limits
+    )
+
+
+def publish_office_edit(  # noqa: PLR0913 - one explicit publication contract
     dependencies: HttpDependencies,
     user: User,
     draft_id: UUID,
     revision_id: UUID,
-    requested: tuple[ComposerDocxReplaceTextOperation, ...],
     headers: tuple[str, str],
     *,
     label: str,
     media_type: str,
-    apply: Callable[[bytes, tuple[ReplaceText, ...], TypedDocxLimits], bytes],
+    record: str,
+    edit: Callable[[bytes, TypedDocxLimits], bytes],
 ) -> ComposerRevision:
-    """Edit a private copy of the current revision and publish the exact result."""
+    """Edit a private copy of the current revision and publish the exact result.
+
+    ``record`` is the frozen operation record; a retried key must repeat it.
+    """
 
     match, key = headers
     store = _store(dependencies)
-    operations = tuple(
-        ReplaceText(item.target, item.expected_text, item.text) for item in requested
-    )
-    record = operations_record(operations)
     operation = f"{label}:{revision_id}"
     replay = store.find_revision_by_key(user.id, draft_id, key)
     if replay is not None:
@@ -108,8 +119,8 @@ def _publish_edit(  # noqa: PLR0913, PLR0917 - one explicit publication contract
     if draft.current_revision_id != revision_id:
         raise ComposerConflictError("Only the current revision can be edited")
     base = store.get_revision(user.id, draft_id, revision_id)
-    content, _digest = _office_download(store, user.id, base, media_type)
-    edited = apply(content, operations, typed_docx_limits(dependencies))
+    content, _digest = office_download(store, user.id, base, media_type)
+    edited = edit(content, typed_docx_limits(dependencies))
     return store.publish_revision(
         user.id,
         draft_id,
@@ -136,7 +147,7 @@ def _publish_edit(  # noqa: PLR0913, PLR0917 - one explicit publication contract
     )
 
 
-def _published(
+def published_response(
     dependencies: HttpDependencies,
     user: User,
     draft_id: UUID,
@@ -171,7 +182,7 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:
     ) -> ComposerDocxTextTargetListResponse:
         store = _store(dependencies)
         revision = store.get_revision(user.id, draft_id, revision_id)
-        content, digest = _office_download(
+        content, digest = office_download(
             store, user.id, revision, DOCX_EDIT_MEDIA_TYPE
         )
         targets = inspect_docx_text(content, typed_docx_limits(dependencies))
@@ -212,18 +223,19 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:
     ) -> ComposerRevisionResponse:
         """Publish a new revision whose DOCX differs only in the requested text."""
 
-        revision = _publish_edit(
+        record, edit = _text_edit(payload.operations, apply_docx_text_edits)
+        revision = publish_office_edit(
             dependencies,
             user,
             draft_id,
             revision_id,
-            payload.operations,
             _require_headers(if_match, idempotency_key),
             label="docx_edit",
             media_type=DOCX_EDIT_MEDIA_TYPE,
-            apply=apply_docx_text_edits,
+            record=record,
+            edit=edit,
         )
-        return _published(dependencies, user, draft_id, revision, response)
+        return published_response(dependencies, user, draft_id, revision, response)
 
     @router.get(
         f"{_REVISION}/pptx-text-targets",
@@ -241,7 +253,7 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:
     ) -> ComposerPptxTextTargetListResponse:
         store = _store(dependencies)
         revision = store.get_revision(user.id, draft_id, revision_id)
-        content, digest = _office_download(
+        content, digest = office_download(
             store, user.id, revision, PPTX_EDIT_MEDIA_TYPE
         )
         targets = inspect_pptx_text(content, typed_docx_limits(dependencies))
@@ -284,17 +296,18 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:
     ) -> ComposerRevisionResponse:
         """Publish a new revision whose PPTX differs only in the requested text."""
 
-        revision = _publish_edit(
+        record, edit = _text_edit(payload.operations, apply_pptx_text_edits)
+        revision = publish_office_edit(
             dependencies,
             user,
             draft_id,
             revision_id,
-            payload.operations,
             _require_headers(if_match, idempotency_key),
             label="pptx_edit",
             media_type=PPTX_EDIT_MEDIA_TYPE,
-            apply=apply_pptx_text_edits,
+            record=record,
+            edit=edit,
         )
-        return _published(dependencies, user, draft_id, revision, response)
+        return published_response(dependencies, user, draft_id, revision, response)
 
     return router
