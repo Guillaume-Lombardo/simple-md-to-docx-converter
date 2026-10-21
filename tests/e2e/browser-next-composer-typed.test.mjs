@@ -772,7 +772,11 @@ async function officePanelJourney(alice, connection, suffix) {
       .getByRole("textbox", { name: /: Fixture Document$/ })
       .fill("Panel E2E title");
     await panel.getByRole("button", { name: "Publish text edits (1)" }).click();
-    await panel.getByText(/Text edits published as revision \d+\./).waitFor();
+    // The success notice belongs to the panel instance that the published
+    // revision replaces, so wait for the remounted panel's durable target.
+    await panel
+      .getByRole("textbox", { name: /: Panel E2E title$/ })
+      .waitFor({ timeout: 30_000 });
     const edited = await currentOfficeRevision(alice, path);
     assert.match(edited.operation, /^docx_edit:/);
     assert.equal(await officeTitle(alice, path, edited.id), "Panel E2E title");
@@ -833,7 +837,9 @@ async function officePanelJourney(alice, connection, suffix) {
   await alice
     .getByRole("button", { name: "Publish approved text edits" })
     .click();
-  await alice.getByText(/Approved text edits published/).waitFor();
+  await panel
+    .getByRole("textbox", { name: /: Model E2E title$/ })
+    .waitFor({ timeout: 30_000 });
   const proposed = await currentOfficeRevision(alice, path);
   assert.match(proposed.operation, /^office_edit_proposal:/);
   assert.equal(proposed.model_identity, providerModel);
