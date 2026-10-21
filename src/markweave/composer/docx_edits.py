@@ -109,6 +109,7 @@ class _PendingText:
     preserves_space: bool
     in_table: bool
     paragraph: int
+    depth: int
     parts: list[str] = field(default_factory=list)
 
 
@@ -275,9 +276,17 @@ def _text_nodes(payload: bytes) -> tuple[_TextNode, ...]:  # noqa: PLR0915 - one
         if encoding is not None and encoding.casefold().replace("-", "") != "utf8":
             raise DocxEditError("unsupported_encoding")
 
+    def nested(*_arguments: object) -> None:
+        # A text node holds only character data; any markup inside it is not
+        # editable text and would be silently dropped by a replacement.
+        if current is not None:
+            current.eligible = False
+
     def start(name: str, attributes: dict[str, str]) -> None:
         nonlocal current, paragraph, fields
-        if name == _PARAGRAPH:
+        if current is not None:
+            current.eligible = False
+        elif name == _PARAGRAPH:
             paragraph += 1
         elif name == _FIELD_CHARACTER:
             kind = attributes.get(_FIELD_TYPE)
@@ -305,6 +314,7 @@ def _text_nodes(payload: bytes) -> tuple[_TextNode, ...]:  # noqa: PLR0915 - one
                 preserves_space=_XML_SPACE in attributes,
                 in_table=_TABLE in stack,
                 paragraph=paragraph,
+                depth=len(stack),
             )
         stack.append(name)
 
@@ -315,7 +325,7 @@ def _text_nodes(payload: bytes) -> tuple[_TextNode, ...]:  # noqa: PLR0915 - one
     def end(name: str) -> None:
         nonlocal current
         stack.pop()
-        if name != _TEXT or current is None:
+        if name != _TEXT or current is None or len(stack) != current.depth:
             return
         value = "".join(current.parts)
         if current.self_closing:
@@ -342,6 +352,8 @@ def _text_nodes(payload: bytes) -> tuple[_TextNode, ...]:  # noqa: PLR0915 - one
     parser.StartDoctypeDeclHandler = reject
     parser.EntityDeclHandler = reject
     parser.XmlDeclHandler = declaration
+    parser.CommentHandler = nested
+    parser.ProcessingInstructionHandler = nested
     parser.StartElementHandler = start
     parser.CharacterDataHandler = characters
     parser.EndElementHandler = end

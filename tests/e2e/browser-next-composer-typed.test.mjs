@@ -9,6 +9,9 @@ const baseURL = process.env.MARKWEAVE_E2E_BASE_URL || "http://localhost:3100";
 const profile = process.env.MARKWEAVE_E2E_PROFILE || "standalone";
 const typedDocx = "/spikes/anydoc/corpus/docx/typed.docx";
 const typedSchema = "/spikes/anydoc/corpus/docx/typed-schema.json";
+const editableDocx = "/spikes/anydoc/corpus/docx/text.docx";
+const docxMediaType =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const malwareMarker =
   "X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*";
 const providerEndpoint = "https://e2e-llm:8443/v1";
@@ -44,6 +47,18 @@ async function api(page, method, path, options = {}) {
           }),
         );
         form.set("title", options.source.title);
+        body = form;
+      } else if (options.upload) {
+        const form = new FormData();
+        form.set(
+          "source",
+          new File(
+            [new Uint8Array(options.upload.bytes)],
+            options.upload.filename,
+            { type: options.upload.type },
+          ),
+        );
+        form.set("title", options.upload.title);
         body = form;
       } else if (options.typed) {
         const form = new FormData();
@@ -141,6 +156,190 @@ async function exactDocx(page, path, revision) {
     sha256(previewBytes),
   );
   return downloadBytes;
+}
+
+async function docxTextEdits(alice, bob, suffix) {
+  const sourceBytes = await readFile(editableDocx);
+  const draft = expectStatus(
+    await api(alice, "POST", "/api/v1/composer/drafts", {
+      upload: {
+        bytes: Array.from(sourceBytes),
+        filename: "editable.docx",
+        type: docxMediaType,
+        title: `Editable report ${suffix}`,
+      },
+    }),
+    201,
+  );
+  const path = `/api/v1/composer/drafts/${draft.id}`;
+  const base = expectStatus(
+    await api(alice, "POST", `${path}/revisions/from-source`, {
+      headers: {
+        "If-Match": draft.etag,
+        "Idempotency-Key": `docx-edit-source-${suffix}`,
+      },
+    }),
+    201,
+  );
+  assert.deepEqual(await exactDocx(alice, path, base), sourceBytes);
+  const targetsPath = `${path}/revisions/${base.id}/docx-text-targets`;
+  const listed = expectStatus(
+    await api(alice, "GET", `${targetsPath}?limit=500`),
+    200,
+  );
+  assert.equal(listed.download_sha256, sha256(sourceBytes));
+  assert.equal(listed.engine_version, 1);
+  const title = listed.targets[0];
+  const cell = listed.targets.find((item) => item.in_table);
+  assert.equal(title.target, "word/document.xml#t0");
+  assert.ok(cell, "The qualified fixture has an editable table cell");
+  const editPath = `${path}/revisions/${base.id}/docx-edits`;
+  const operation = (target, expected, text) => ({
+    op: "replace_text",
+    target,
+    expected_text: expected,
+    text,
+  });
+
+  const ready = expectStatus(await api(alice, "GET", path), 200);
+  assert.equal(ready.current_revision_id, base.id);
+  assert.equal((await api(bob, "GET", targetsPath)).status, 404);
+  assert.equal(
+    (
+      await api(bob, "POST", editPath, {
+        headers: {
+          "If-Match": ready.etag,
+          "Idempotency-Key": `docx-edit-foreign-${suffix}`,
+        },
+        json: { operations: [operation(title.target, title.text, "Taken")] },
+      })
+    ).status,
+    404,
+  );
+  for (const [rejected, code] of [
+    [operation(title.target, "Stale text", "x"), "TARGET_CHANGED"],
+    [operation("word/document.xml#t99999", "", "x"), "UNSUPPORTED_TARGET"],
+    [operation(title.target, title.text, "line\nbreak"), "INVALID_TEXT"],
+  ]) {
+    const response = await api(alice, "POST", editPath, {
+      headers: {
+        "If-Match": ready.etag,
+        "Idempotency-Key": `docx-edit-rejected-${code}-${suffix}`,
+      },
+      json: { operations: [rejected] },
+    });
+    assert.equal(response.status, 422, response.text);
+    assert.equal(response.json.error.code, `COMPOSER_DOCX_EDIT_${code}`);
+  }
+  assert.equal(
+    expectStatus(await api(alice, "GET", path), 200).etag,
+    ready.etag,
+  );
+
+  const editedTitle = `Edited E2E title ${suffix}`;
+  const winnerRequest = {
+    operations: [
+      operation(title.target, title.text, editedTitle),
+      operation(cell.target, cell.text, "Edited E2E cell"),
+    ],
+  };
+  const race = await Promise.all(
+    [0, 1, 2].map((index) =>
+      api(alice, "POST", editPath, {
+        headers: {
+          "If-Match": ready.etag,
+          "Idempotency-Key": `docx-edit-race-${index}-${suffix}`,
+        },
+        json:
+          index === 0
+            ? winnerRequest
+            : {
+                operations: [
+                  operation(title.target, title.text, `Racer ${index}`),
+                ],
+              },
+      }),
+    ),
+  );
+  assert.deepEqual(race.map((result) => result.status).sort(), [201, 412, 412]);
+  const winnerIndex = race.findIndex((result) => result.status === 201);
+  const edited = race[winnerIndex].json;
+  assert.equal(edited.operation, `docx_edit:${base.id}`);
+  assert.equal(edited.provenance, "human:docx_edit");
+  assert.equal(edited.model_identity, null);
+  const replay = expectStatus(
+    await api(alice, "POST", editPath, {
+      headers: {
+        "If-Match": ready.etag,
+        "Idempotency-Key": `docx-edit-race-${winnerIndex}-${suffix}`,
+      },
+      json:
+        winnerIndex === 0
+          ? winnerRequest
+          : {
+              operations: [
+                operation(title.target, title.text, `Racer ${winnerIndex}`),
+              ],
+            },
+    }),
+    201,
+  );
+  assert.equal(replay.id, edited.id);
+  const editedBytes = await exactDocx(alice, path, edited);
+  assert.notDeepEqual(editedBytes, sourceBytes);
+  const reread = expectStatus(
+    await api(
+      alice,
+      "GET",
+      `${path}/revisions/${edited.id}/docx-text-targets?limit=500`,
+    ),
+    200,
+  );
+  assert.equal(reread.total, listed.total);
+  const expectedTitle =
+    winnerIndex === 0 ? editedTitle : `Racer ${winnerIndex}`;
+  assert.equal(reread.targets[0].text, expectedTitle);
+
+  await alice.goto(`${baseURL}/composer`, { waitUntil: "networkidle" });
+  await alice
+    .getByRole("combobox", { name: "Saved drafts" })
+    .selectOption(draft.id);
+  const frame = alice.frameLocator('iframe[title^="DOCX revision"]');
+  await frame.getByText(expectedTitle).waitFor();
+
+  const afterEdit = expectStatus(await api(alice, "GET", path), 200);
+  assert.equal(afterEdit.current_revision_id, edited.id);
+  assert.equal(
+    (
+      await api(alice, "POST", editPath, {
+        headers: {
+          "If-Match": afterEdit.etag,
+          "Idempotency-Key": `docx-edit-stale-base-${suffix}`,
+        },
+        json: winnerRequest,
+      })
+    ).status,
+    412,
+  );
+  const restored = expectStatus(
+    await api(alice, "POST", `${path}/revisions/${base.id}/restore`, {
+      headers: {
+        "If-Match": afterEdit.etag,
+        "Idempotency-Key": `docx-edit-restore-${suffix}`,
+      },
+    }),
+    201,
+  );
+  assert.deepEqual(await exactDocx(alice, path, restored), sourceBytes);
+  const history = expectStatus(
+    await api(alice, "GET", `${path}/revisions`),
+    200,
+  ).revisions.map((item) => item.operation);
+  assert.deepEqual(history, [
+    "capture_source",
+    `docx_edit:${base.id}`,
+    "restore",
+  ]);
 }
 
 test(`typed Composer shares, human decisions, and exact regeneration in ${profile}`, async () => {
@@ -761,6 +960,7 @@ test(`typed Composer shares, human decisions, and exact regeneration in ${profil
     );
     assert.equal((await api(admin, "GET", authorPath)).status, 200);
     assert.equal((await api(admin, "GET", templatePath)).status, 200);
+    await docxTextEdits(alice, bob, suffix);
   } finally {
     await Promise.all(contexts.map((context) => context.close()));
     await browser.close();

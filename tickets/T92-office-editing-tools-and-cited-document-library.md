@@ -76,6 +76,21 @@ T91.
   passed 843 of 844 tests, and the remaining existing author-pagination test timed out at 5 s
   under CPU contention and passed 47/47 when its file was rerun alone. Hosted CI remains the
   required proof for the Docker-backed and engine-marked suites.
+- 2026-10-21: Review corrections for PR #314. A text node that contains any child element,
+  nested text node, comment, or processing instruction is now ineligible, so its markup can no
+  longer be silently dropped; later targets keep their ordinals. Executor regressions and an
+  HTTP no-publication test cover the reviewed `<w:t>before<w:b/>after</w:t>` case. The SQLite HTTP
+  scenarios are now shared with a new PostgreSQL/S3 module covering a successful edit, download,
+  and restore, the four rejection paths, request validation, Markdown refusal, ownership,
+  four-way concurrent publication, and nested markup. The final-rootless-image Composer browser
+  phase, which runs in both standalone and distributed profiles, now uploads the real DOCX
+  fixture, checks target listing, foreign-user 404s, rejected edits without publication, a
+  three-way concurrent edit with one winner, idempotent replay, exact preview/download bytes,
+  the edited text inside the private DOCX preview iframe, a stale-base 412, and an exact restore.
+  Locally, 165 focused tests pass, including the 10 new PostgreSQL/S3 tests. They ran against
+  native PostgreSQL 16 and a moto S3 endpoint because the pinned PostgreSQL 18 and RustFS images
+  could not be pulled (Docker Hub 429; GHCR blob download refused by the proxy). Podman is
+  unavailable, so the final-image phase is verified only by hosted CI.
 
 ## Synchronization
 

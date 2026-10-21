@@ -211,6 +211,11 @@ def test_existing_preserve_attribute_and_empty_text_node_are_kept() -> None:
         "<w:p><w:r><w:t w:custom='1'>attribute</w:t></w:r></w:p>",
         "<w:p><w:r><w:t>tab&#9;inside</w:t></w:r></w:p>",
         "<w:p><w:t>no run</w:t></w:p>",
+        "<w:p><w:r><w:t>before<w:b/>after</w:t></w:r></w:p>",
+        "<w:p><w:r><w:t>a<x:y xmlns:x='urn:example'/>b</w:t></w:r></w:p>",
+        "<w:p><w:r><w:t>a<w:t>b</w:t>c</w:t></w:r></w:p>",
+        "<w:p><w:r><w:t>a<!-- note -->b</w:t></w:r></w:p>",
+        "<w:p><w:r><w:t>a<?marker value?>b</w:t></w:r></w:p>",
     ],
 )
 def test_text_owned_by_other_mechanisms_is_not_a_target(body: str) -> None:
@@ -551,7 +556,7 @@ def test_expat_rejects_markup_the_tree_parser_did_not_see(
 
 def test_directory_entries_and_whitespace_are_tolerated() -> None:
     source = _package(
-        "\n  <w:p>\n    <w:r><w:t>kept</w:t></w:r>\n  </w:p>\n",
+        "\n  <!-- outside -->\n  <w:p>\n    <w:r><w:t>kept</w:t></w:r>\n  </w:p>\n",
         extra={"word/media/": b""},
     )
 
@@ -583,3 +588,26 @@ def test_long_document_edits_every_target_in_one_bounded_pass() -> None:
     assert [item.text for item in inspect_docx_text(edited, limits)] == [
         f"LINE {index}" for index in range(2_000)
     ]
+
+
+def test_markup_inside_a_text_node_keeps_later_targets_stable() -> None:
+    source = _package(
+        "<w:p><w:r><w:t>before<w:b/>after</w:t></w:r>"
+        "<w:r><w:t>kept</w:t></w:r></w:p><w:p><w:r><w:t>next</w:t></w:r></w:p>"
+    )
+
+    assert [
+        (item.target, item.paragraph, item.text)
+        for item in inspect_docx_text(source, _limits())
+    ] == [("word/document.xml#t1", 0, "kept"), ("word/document.xml#t2", 1, "next")]
+    edited = apply_docx_text_edits(
+        source, (ReplaceText("word/document.xml#t1", "kept", "changed"),), _limits()
+    )
+    assert b"<w:t>before<w:b/>after</w:t>" in _members(edited)[_MAIN]
+    with pytest.raises(DocxEditError) as rejected:
+        apply_docx_text_edits(
+            source,
+            (ReplaceText("word/document.xml#t0", "beforeafter", "x"),),
+            _limits(),
+        )
+    assert rejected.value.code == "unsupported_target"
