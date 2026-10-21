@@ -1032,6 +1032,19 @@ def test_an_accepted_scan_publishes_a_verifiable_bundle(tmp_path: Path) -> None:
     assert list(temporary.iterdir()) == []
 
 
+def test_python_images_install_without_retaining_a_uv_cache() -> None:
+    for containerfile in (
+        Path("Containerfile"),
+        Path("containers/reverse-attempt/Containerfile"),
+    ):
+        source = containerfile.read_text(encoding="utf-8")
+        sync = next(
+            line for line in source.splitlines() if line.startswith("RUN uv sync ")
+        )
+        assert "--no-cache" in sync, containerfile
+        assert ".cache/uv" not in source, containerfile
+
+
 def test_every_frontend_image_build_command_requests_oci_format() -> None:
     release = Path(".github/workflows/container-qualify.yml").read_text(
         encoding="utf-8"
