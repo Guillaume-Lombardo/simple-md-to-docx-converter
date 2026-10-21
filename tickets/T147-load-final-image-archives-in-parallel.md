@@ -204,6 +204,34 @@ sequential archive downloads.
     runner. The archives are 10 to 14 percent smaller.
   - Every loaded ID equals the build output, and every job used memory staging.
   - The step still ends with the backend load, about 1.3 s after `concurrent_load_seconds`.
+- 2026-10-21: Pairs 2 and 3 of 3, both on `main` `e3da69d` (after T152) and candidate `b6b2f6a`,
+  with the loader and export unchanged. Every job succeeded on its first attempt.
+  - Pair 2: baseline `main` push run 39654029621 (14 jobs, plus a skipped matrix placeholder)
+    against candidate run 39654260610 (23 jobs).
+  - Pair 3: complete `workflow_dispatch` reruns, baseline 39655964502 against candidate
+    39655968735 (23 jobs each).
+
+  | Shard | Pair 2 baseline → candidate | Pair 3 baseline → candidate |
+  |---|---|---|
+  | e2e-standalone-1 | 89 → 45 s | 72 → 45 s |
+  | e2e-standalone-2 | 94 → 48 s | 70 → 48 s |
+  | e2e-distributed-1 | 92 → 45 s | 94 → 50 s |
+  | e2e-distributed-2 | 80 → 50 s | 88 → 50 s |
+  | mean | 88.75 → 47.0 s | 81.0 → 48.25 s |
+
+  Candidate diagnostics, in shard order:
+
+  | Pair | Backend load | CPU busy / iowait | Disk busy (device) | Export |
+  |---|---|---|---|---|
+  | 2 | 43.6 / 46.2 / 42.8 / 47.4 s | 58/2, 56/5, 38/31, 36/32 % | 27, 32 (8:1); 95, 93 (259:1) % | 56.7 s |
+  | 3 | 43.5 / 45.9 / 48.2 / 48.0 s | 61/3, 54/6, 51/9, 52/8 % | 28, 32, 34, 32 (8:1) % | 56.8 s |
+
+  - Other candidate load steps: container 38 and 40 s, supply-chain 38 and 36 s, frontend 15 and
+    13 s. The pair 3 baseline took 69, 70 and 21 s; the pair 2 push baseline had no such jobs.
+- 2026-10-21: Timing criterion met. Across the three complete comparable pairs, all twelve candidate
+  E2E load steps are between 42 and 50 s, below the under-65-second target. They are about the
+  longest single load (the backend, 40.4–48.2 s) plus 0.3–1.3 s. The baselines were 70–94 s, and
+  the per-pair means went from 89.0, 88.75 and 81.0 s to 46.5, 47.0 and 48.25 s.
 
 ## Synchronization
 
