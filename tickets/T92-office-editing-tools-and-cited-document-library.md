@@ -106,6 +106,25 @@ T91.
   final-image Composer browser phase now stages `pptx/pres.pptx` and checks the PPTX workflow,
   including the edited title in the private PPTX preview, in both profiles; that phase is
   verified only by hosted CI.
+- 2026-10-21: Third increment on `feat/T92-model-office-edits`, stacked on the PPTX branch:
+  model-proposed Office text edits. `office-edit-steps/preview` discloses only user-selected,
+  currently eligible targets of the current DOCX or PPTX revision with an exact transmitted text
+  and digest; `office-edit-steps` starts an ordinary bounded model step (intent `office_edit`, no
+  migration) whose disclosure context stays in memory with the running step. The reply is
+  accepted only as allowlisted `replace_text` operations on disclosed targets; any other
+  operation, target, key, shape, prose, or invalid text fails with `provider_invalid` and no
+  proposal. Proposals are canonical JSON with transmitted expected texts; edited decisions may
+  only change or drop replacement texts. `proposals/{id}/office-edits` publishes accepted or
+  edited proposals through the executor only while the reviewed base revision is current, with
+  a dedicated persistence fence that also prevents Markdown/Office provenance confusion in both
+  directions. Evidence: 100% branch coverage of `office_edit_proposals`; SQLite and
+  PostgreSQL/S3 HTTP workflows cover review, edited decisions, publication and replay,
+  eight tool-misuse and prompt-injection replies, stale/foreign/ineligible requests, superseded
+  proposals, PPTX notes proposals, Markdown masquerade refusal, and request edges. The
+  final-image Composer browser phase now runs a real provider round trip that fails closed on an
+  injected undisclosed target and publishes an accepted model proposal; the provider's expected
+  successful chat counts rise from 12 to 14 and from 17 to 19. That phase is verified only by
+  hosted CI.
 
 ## Synchronization
 

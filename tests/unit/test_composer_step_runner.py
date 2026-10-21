@@ -10,6 +10,7 @@ from pytest_mock import MockerFixture
 
 from markweave.composer.connections import ConnectionActor, ConnectionService
 from markweave.composer.egress import EgressCancelledError, EgressCapacityError
+from markweave.composer.office_edit_proposals import OfficeEditContext
 from markweave.composer.revisions import ComposerConflictError
 from markweave.http.composer_errors import ComposerUnavailableError
 from markweave.http.composer_step_runner import ComposerStepRunner, ModelStepInput
@@ -93,6 +94,52 @@ def test_question_intent_publishes_only_one_plain_question(
             == completion
         )
         repository.fail_model_step.assert_not_called()
+    else:
+        repository.finish_model_step.assert_not_called()
+        assert (
+            repository.fail_model_step.call_args.kwargs["error_code"]
+            == "provider_invalid"
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("with_context", [True, False])
+def test_office_edit_intent_requires_its_in_memory_disclosure(
+    mocker: MockerFixture, with_context: bool
+) -> None:
+    repository = mocker.Mock(spec=SqlComposerModelStepRepository)
+    connection = mocker.Mock(spec=ConnectionService)
+    step = replace(_step(), intent="office_edit")
+    repository.start_model_step.return_value = (step, True)
+    repository.get_model_step.return_value = step
+    reply = (
+        '{"operations":[{"op":"replace_text","target":"word/document.xml#t0",'
+        '"text":"New"}]}'
+    )
+    connection.chat.return_value = {"choices": [{"message": {"content": reply}}]}
+    done = Event()
+    repository.finish_model_step.side_effect = lambda *_args, **_kwargs: done.set()
+    repository.fail_model_step.side_effect = lambda *_args, **_kwargs: done.set()
+    runner = ComposerStepRunner(
+        repository, connection, maximum_active=1, lease=timedelta(seconds=2)
+    )
+    context = OfficeEditContext(
+        "docx", UUID(int=9), "b" * 64, (("word/document.xml#t0", "Old"),), 50
+    )
+    actor = ConnectionActor(UUID(int=2), is_admin=False, can_manage_personal=True)
+    runner.start(
+        actor,
+        step.draft_id,
+        replace(
+            _input(), intent="office_edit", office=context if with_context else None
+        ),
+    )
+    assert done.wait(1)
+    runner.close()
+    if with_context:
+        proposed = repository.finish_model_step.call_args.kwargs["proposed_value"]
+        assert '"expected_text":"Old"' in proposed
+        assert '"kind":"office_edit"' in proposed
     else:
         repository.finish_model_step.assert_not_called()
         assert (

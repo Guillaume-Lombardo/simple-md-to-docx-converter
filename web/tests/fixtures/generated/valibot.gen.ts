@@ -325,6 +325,51 @@ export const vComposerModelStepResponse = v.object({
 });
 
 /**
+ * ComposerOfficeEditStepCreateRequest
+ */
+export const vComposerOfficeEditStepCreateRequest = v.strictObject({
+    approved_endpoint: v.pipe(v.string(), v.minLength(1)),
+    approved_model: v.pipe(v.string(), v.minLength(1)),
+    connection_id: v.pipe(v.string(), v.uuid()),
+    instruction: v.pipe(v.string(), v.minLength(1)),
+    max_output_tokens: v.pipe(v.number(), v.integer(), v.gtValue(0)),
+    preview_digest: v.pipe(v.string(), v.length(64)),
+    targets: v.pipe(v.array(v.string()), v.minLength(1), v.maxLength(100))
+});
+
+/**
+ * ComposerOfficeEditStepPreviewRequest
+ */
+export const vComposerOfficeEditStepPreviewRequest = v.strictObject({
+    approved_endpoint: v.pipe(v.string(), v.minLength(1)),
+    approved_model: v.pipe(v.string(), v.minLength(1)),
+    connection_id: v.pipe(v.string(), v.uuid()),
+    instruction: v.pipe(v.string(), v.minLength(1)),
+    max_output_tokens: v.pipe(v.number(), v.integer(), v.gtValue(0)),
+    targets: v.pipe(v.array(v.string()), v.minLength(1), v.maxLength(100))
+});
+
+/**
+ * ComposerOfficeEditTargetText
+ */
+export const vComposerOfficeEditTargetText = v.object({
+    target: v.string(),
+    text: v.string()
+});
+
+/**
+ * ComposerOfficeEditStepPreviewResponse
+ */
+export const vComposerOfficeEditStepPreviewResponse = v.object({
+    base_revision_id: v.pipe(v.string(), v.uuid()),
+    base_sha256: v.string(),
+    format: v.picklist(['docx', 'pptx']),
+    preview_digest: v.string(),
+    targets: v.array(vComposerOfficeEditTargetText),
+    transmitted_content: v.string()
+});
+
+/**
  * ComposerPptxEditRequest
  */
 export const vComposerPptxEditRequest = v.strictObject({
@@ -2106,6 +2151,22 @@ export const vDecideProposalApiV1ComposerDraftsDraftIdProposalsProposalIdDecisio
  */
 export const vDecideProposalApiV1ComposerDraftsDraftIdProposalsProposalIdDecisionPostResponse = vComposerProposalResponse;
 
+export const vPublishOfficeEditProposalApiV1ComposerDraftsDraftIdProposalsProposalIdOfficeEditsPostHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'Idempotency-Key': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vPublishOfficeEditProposalApiV1ComposerDraftsDraftIdProposalsProposalIdOfficeEditsPostPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid()),
+    proposal_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vPublishOfficeEditProposalApiV1ComposerDraftsDraftIdProposalsProposalIdOfficeEditsPostResponse = vComposerRevisionResponse;
+
 export const vPublishProposalApiV1ComposerDraftsDraftIdProposalsProposalIdPublishPostHeaders = v.object({
     'If-Match': v.nullish(v.string()),
     'Idempotency-Key': v.nullish(v.string()),
@@ -2272,6 +2333,40 @@ export const vListTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxTe
  * Successful Response
  */
 export const vListTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxTextTargetsGetResponse = vComposerDocxTextTargetListResponse;
+
+export const vStartOfficeEditStepApiV1ComposerDraftsDraftIdRevisionsRevisionIdOfficeEditStepsPostBody = vComposerOfficeEditStepCreateRequest;
+
+export const vStartOfficeEditStepApiV1ComposerDraftsDraftIdRevisionsRevisionIdOfficeEditStepsPostHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'Idempotency-Key': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vStartOfficeEditStepApiV1ComposerDraftsDraftIdRevisionsRevisionIdOfficeEditStepsPostPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid()),
+    revision_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vStartOfficeEditStepApiV1ComposerDraftsDraftIdRevisionsRevisionIdOfficeEditStepsPostResponse = vComposerModelStepResponse;
+
+export const vPreviewOfficeEditStepApiV1ComposerDraftsDraftIdRevisionsRevisionIdOfficeEditStepsPreviewPostBody = vComposerOfficeEditStepPreviewRequest;
+
+export const vPreviewOfficeEditStepApiV1ComposerDraftsDraftIdRevisionsRevisionIdOfficeEditStepsPreviewPostHeaders = v.object({
+    'If-Match': v.nullish(v.string())
+});
+
+export const vPreviewOfficeEditStepApiV1ComposerDraftsDraftIdRevisionsRevisionIdOfficeEditStepsPreviewPostPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid()),
+    revision_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vPreviewOfficeEditStepApiV1ComposerDraftsDraftIdRevisionsRevisionIdOfficeEditStepsPreviewPostResponse = vComposerOfficeEditStepPreviewResponse;
 
 export const vEditPptxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxEditsPostBody = vComposerPptxEditRequest;
 

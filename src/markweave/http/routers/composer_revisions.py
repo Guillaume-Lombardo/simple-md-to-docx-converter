@@ -176,6 +176,10 @@ def _proposal_model_identity(
     step = steps.get_model_step(owner_id, draft_id, step_id)
     if step.status != "completed" or step.proposal_id != proposal.id:
         raise ComposerConflictError("Composer proposal origin changed")
+    if step.intent == "office_edit":
+        raise ComposerRequestError(
+            "Office edit proposals are published as Office edits"
+        )
     return step.model_identity
 
 

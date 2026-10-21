@@ -192,7 +192,7 @@ class SqlComposerModelStepRepository:
             or not isinstance(max_active, int)
             or max_active <= 0
             or lease <= timedelta(0)
-            or intent not in {"proposal", "question"}
+            or intent not in {"proposal", "question", "office_edit"}
             or (bool(author_refs) != bool(author_preview_digest))
             or (
                 author_preview_digest is not None

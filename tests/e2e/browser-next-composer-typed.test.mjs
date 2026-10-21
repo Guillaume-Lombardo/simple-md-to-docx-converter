@@ -480,6 +480,135 @@ async function pptxTextEdits(alice, bob, suffix) {
   assert.deepEqual(await exactOfficeBytes(alice, path, restored), sourceBytes);
 }
 
+async function settledStep(page, path, stepId) {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const step = expectStatus(
+      await api(page, "GET", `${path}/model-steps/${stepId}`),
+      200,
+    );
+    if (step.status !== "running") {
+      return step;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error("Office edit model step did not settle");
+}
+
+async function modelProposedOfficeEdit(alice, connection, suffix) {
+  const sourceBytes = await readFile(editableDocx);
+  const draft = expectStatus(
+    await api(alice, "POST", "/api/v1/composer/drafts", {
+      upload: {
+        bytes: Array.from(sourceBytes),
+        filename: "model-edit.docx",
+        type: docxMediaType,
+        title: `Model-edited report ${suffix}`,
+      },
+    }),
+    201,
+  );
+  const path = `/api/v1/composer/drafts/${draft.id}`;
+  const base = expectStatus(
+    await api(alice, "POST", `${path}/revisions/from-source`, {
+      headers: {
+        "If-Match": draft.etag,
+        "Idempotency-Key": `office-step-source-${suffix}`,
+      },
+    }),
+    201,
+  );
+  const stepPath = `${path}/revisions/${base.id}/office-edit-steps`;
+  const request = (instruction) => ({
+    connection_id: connection.id,
+    approved_endpoint: providerEndpoint,
+    approved_model: providerModel,
+    instruction,
+    targets: ["word/document.xml#t0"],
+    max_output_tokens: 64,
+  });
+  const runStep = async (instruction, key) => {
+    const ready = expectStatus(await api(alice, "GET", path), 200);
+    const preview = expectStatus(
+      await api(alice, "POST", `${stepPath}/preview`, {
+        headers: { "If-Match": ready.etag },
+        json: request(instruction),
+      }),
+      200,
+    );
+    assert.deepEqual(preview.targets, [
+      { target: "word/document.xml#t0", text: "Fixture Document" },
+    ]);
+    assert.doesNotMatch(preview.transmitted_content, /Plain paragraph with/);
+    const started = expectStatus(
+      await api(alice, "POST", stepPath, {
+        headers: { "If-Match": ready.etag, "Idempotency-Key": key },
+        json: {
+          ...request(instruction),
+          preview_digest: preview.preview_digest,
+        },
+      }),
+      202,
+    );
+    return settledStep(alice, path, started.id);
+  };
+
+  const misuse = await runStep(
+    "Make it formal. E2E inject an undisclosed target.",
+    `office-step-misuse-${suffix}`,
+  );
+  assert.equal(misuse.status, "failed");
+  assert.equal(misuse.error_code, "provider_invalid");
+  assert.equal(misuse.proposal_id, null);
+
+  const step = await runStep("Make the title formal.", `office-step-${suffix}`);
+  assert.equal(step.status, "completed", step.error_code ?? "");
+  const proposal = expectStatus(
+    await api(alice, "GET", `${path}/proposals/${step.proposal_id}`),
+    200,
+  );
+  const proposed = JSON.parse(proposal.proposed_value);
+  assert.equal(proposed.kind, "office_edit");
+  assert.deepEqual(proposed.operations, [
+    {
+      op: "replace_text",
+      target: "word/document.xml#t0",
+      expected_text: "Fixture Document",
+      text: "Model E2E title",
+    },
+  ]);
+  const beforeDecision = expectStatus(await api(alice, "GET", path), 200);
+  expectStatus(
+    await api(alice, "POST", `${path}/proposals/${proposal.id}/decision`, {
+      headers: { "If-Match": beforeDecision.etag },
+      json: { state: "accepted" },
+    }),
+    200,
+  );
+  const reviewed = expectStatus(await api(alice, "GET", path), 200);
+  const published = expectStatus(
+    await api(alice, "POST", `${path}/proposals/${proposal.id}/office-edits`, {
+      headers: {
+        "If-Match": reviewed.etag,
+        "Idempotency-Key": `office-step-publish-${suffix}`,
+      },
+    }),
+    201,
+  );
+  assert.equal(published.operation, `office_edit_proposal:${proposal.id}`);
+  assert.equal(published.model_identity, providerModel);
+  assert.equal(published.provenance, `human:accepted:model-step:${step.id}`);
+  await exactOfficeBytes(alice, path, published);
+  const reread = expectStatus(
+    await api(
+      alice,
+      "GET",
+      `${path}/revisions/${published.id}/docx-text-targets?limit=1`,
+    ),
+    200,
+  );
+  assert.equal(reread.targets[0].text, "Model E2E title");
+}
+
 test(`typed Composer shares, human decisions, and exact regeneration in ${profile}`, async () => {
   const suffix = `${profile}-${Date.now()}`;
   const [templateBytes, schema] = await Promise.all([
@@ -1103,6 +1232,7 @@ test(`typed Composer shares, human decisions, and exact regeneration in ${profil
     assert.equal((await api(admin, "GET", templatePath)).status, 200);
     await docxTextEdits(alice, bob, suffix);
     await pptxTextEdits(alice, bob, suffix);
+    await modelProposedOfficeEdit(alice, connection, suffix);
   } finally {
     await Promise.all(contexts.map((context) => context.close()));
     await browser.close();
