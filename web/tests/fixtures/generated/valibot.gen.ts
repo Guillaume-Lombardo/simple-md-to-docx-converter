@@ -34,32 +34,11 @@ export const vAuditRecordResponse = v.object({
 });
 
 /**
- * AuthorPromptPreviewRequest
- */
-export const vAuthorPromptPreviewRequest = v.strictObject({
-    approved_endpoint: v.pipe(v.string(), v.minLength(1)),
-    approved_model: v.pipe(v.string(), v.minLength(1)),
-    author_ids: v.array(v.pipe(v.string(), v.uuid())),
-    connection_id: v.pipe(v.string(), v.uuid()),
-    content: v.pipe(v.string(), v.minLength(1)),
-    max_output_tokens: v.pipe(v.number(), v.integer(), v.gtValue(0))
-});
-
-/**
  * AuthorReference
  */
 export const vAuthorReference = v.object({
     id: v.pipe(v.string(), v.uuid()),
     version: v.pipe(v.number(), v.integer(), v.gtValue(0))
-});
-
-/**
- * AuthorPromptPreviewResponse
- */
-export const vAuthorPromptPreviewResponse = v.object({
-    author_refs: v.array(vAuthorReference),
-    preview_digest: v.string(),
-    transmitted_content: v.string()
 });
 
 /**
@@ -72,12 +51,27 @@ export const vBodyCreateDraftApiV1ComposerDraftsPost = v.object({
 });
 
 /**
+ * Body_create_library_document_api_v1_composer_library_post
+ */
+export const vBodyCreateLibraryDocumentApiV1ComposerLibraryPost = v.object({
+    file: v.string(),
+    title: v.nullish(v.pipe(v.string(), v.maxLength(200)))
+});
+
+/**
  * Body_create_template_api_v1_composer_fill_templates_post
  */
 export const vBodyCreateTemplateApiV1ComposerFillTemplatesPost = v.object({
     file: v.string(),
     name: v.string(),
     schema: v.string()
+});
+
+/**
+ * Body_replace_library_document_api_v1_composer_library__document_id__versions_post
+ */
+export const vBodyReplaceLibraryDocumentApiV1ComposerLibraryDocumentIdVersionsPost = v.object({
+    file: v.string()
 });
 
 /**
@@ -289,42 +283,6 @@ export const vComposerMessageListResponse = v.object({
 });
 
 /**
- * ComposerModelStepCreateRequest
- *
- * Exact user-approved text for one bounded model proposal attempt.
- */
-export const vComposerModelStepCreateRequest = v.object({
-    answered_question_id: v.nullish(v.pipe(v.string(), v.uuid())),
-    approved_endpoint: v.pipe(v.string(), v.minLength(1)),
-    approved_model: v.pipe(v.string(), v.minLength(1)),
-    author_preview_digest: v.nullish(v.string()),
-    author_refs: v.optional(v.array(vAuthorReference), []),
-    connection_id: v.pipe(v.string(), v.uuid()),
-    content: v.pipe(v.string(), v.minLength(1)),
-    intent: v.optional(v.picklist(['proposal', 'question']), 'proposal'),
-    max_output_tokens: v.pipe(v.number(), v.integer(), v.gtValue(0))
-});
-
-/**
- * ComposerModelStepResponse
- */
-export const vComposerModelStepResponse = v.object({
-    answered_question_id: v.nullable(v.pipe(v.string(), v.uuid())),
-    base_version: v.pipe(v.number(), v.integer()),
-    connection_id: v.pipe(v.string(), v.uuid()),
-    created_at: v.pipe(v.string(), v.isoTimestamp()),
-    draft_id: v.pipe(v.string(), v.uuid()),
-    error_code: v.nullable(v.string()),
-    id: v.pipe(v.string(), v.uuid()),
-    intent: v.picklist(['proposal', 'question']),
-    model_identity: v.string(),
-    proposal_id: v.nullable(v.pipe(v.string(), v.uuid())),
-    question_id: v.nullable(v.pipe(v.string(), v.uuid())),
-    status: v.string(),
-    updated_at: v.pipe(v.string(), v.isoTimestamp())
-});
-
-/**
  * ComposerOfficeEditStepCreateRequest
  */
 export const vComposerOfficeEditStepCreateRequest = v.strictObject({
@@ -448,32 +406,6 @@ export const vComposerProposalListResponse = v.object({
  */
 export const vComposerQuestionAnswerRequest = v.object({
     content: v.pipe(v.string(), v.minLength(1))
-});
-
-/**
- * ComposerQuestionResponse
- */
-export const vComposerQuestionResponse = v.object({
-    answer_content: v.nullable(v.string()),
-    answer_message_id: v.nullable(v.pipe(v.string(), v.uuid())),
-    answered_at: v.nullable(v.pipe(v.string(), v.isoTimestamp())),
-    base_version: v.pipe(v.number(), v.integer()),
-    created_at: v.pipe(v.string(), v.isoTimestamp()),
-    draft_id: v.pipe(v.string(), v.uuid()),
-    id: v.pipe(v.string(), v.uuid()),
-    model_step_id: v.pipe(v.string(), v.uuid()),
-    source_author_ids: v.optional(v.array(v.pipe(v.string(), v.uuid())), []),
-    state: v.picklist(['pending', 'answered']),
-    text: v.string()
-});
-
-/**
- * ComposerQuestionListResponse
- */
-export const vComposerQuestionListResponse = v.object({
-    limit: v.pipe(v.number(), v.integer()),
-    offset: v.pipe(v.number(), v.integer()),
-    questions: v.array(vComposerQuestionResponse)
 });
 
 /**
@@ -814,6 +746,204 @@ export const vJobOutput = v.picklist([
  * Stable conversion-list grouping shared by document and presentation UIs.
  */
 export const vJobOutputFamily = v.picklist(['document', 'presentation']);
+
+/**
+ * LibraryCitationReference
+ */
+export const vLibraryCitationReference = v.strictObject({
+    chunk: v.pipe(v.number(), v.integer(), v.minValue(0)),
+    version_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * AuthorPromptPreviewRequest
+ */
+export const vAuthorPromptPreviewRequest = v.strictObject({
+    approved_endpoint: v.pipe(v.string(), v.minLength(1)),
+    approved_model: v.pipe(v.string(), v.minLength(1)),
+    author_ids: v.array(v.pipe(v.string(), v.uuid())),
+    connection_id: v.pipe(v.string(), v.uuid()),
+    content: v.pipe(v.string(), v.minLength(1)),
+    library_refs: v.optional(v.pipe(v.array(vLibraryCitationReference), v.maxLength(20)), []),
+    max_output_tokens: v.pipe(v.number(), v.integer(), v.gtValue(0))
+});
+
+/**
+ * ComposerModelStepCreateRequest
+ *
+ * Exact user-approved text for one bounded model proposal attempt.
+ */
+export const vComposerModelStepCreateRequest = v.object({
+    answered_question_id: v.nullish(v.pipe(v.string(), v.uuid())),
+    approved_endpoint: v.pipe(v.string(), v.minLength(1)),
+    approved_model: v.pipe(v.string(), v.minLength(1)),
+    author_preview_digest: v.nullish(v.string()),
+    author_refs: v.optional(v.array(vAuthorReference), []),
+    connection_id: v.pipe(v.string(), v.uuid()),
+    content: v.pipe(v.string(), v.minLength(1)),
+    intent: v.optional(v.picklist(['proposal', 'question']), 'proposal'),
+    library_refs: v.optional(v.pipe(v.array(vLibraryCitationReference), v.maxLength(20)), []),
+    max_output_tokens: v.pipe(v.number(), v.integer(), v.gtValue(0))
+});
+
+/**
+ * ComposerModelStepResponse
+ */
+export const vComposerModelStepResponse = v.object({
+    answered_question_id: v.nullable(v.pipe(v.string(), v.uuid())),
+    base_version: v.pipe(v.number(), v.integer()),
+    connection_id: v.pipe(v.string(), v.uuid()),
+    created_at: v.pipe(v.string(), v.isoTimestamp()),
+    draft_id: v.pipe(v.string(), v.uuid()),
+    error_code: v.nullable(v.string()),
+    id: v.pipe(v.string(), v.uuid()),
+    intent: v.picklist(['proposal', 'question']),
+    library_refs: v.optional(v.array(vLibraryCitationReference), []),
+    model_identity: v.string(),
+    proposal_id: v.nullable(v.pipe(v.string(), v.uuid())),
+    question_id: v.nullable(v.pipe(v.string(), v.uuid())),
+    status: v.string(),
+    updated_at: v.pipe(v.string(), v.isoTimestamp())
+});
+
+/**
+ * ComposerQuestionResponse
+ */
+export const vComposerQuestionResponse = v.object({
+    answer_content: v.nullable(v.string()),
+    answer_message_id: v.nullable(v.pipe(v.string(), v.uuid())),
+    answered_at: v.nullable(v.pipe(v.string(), v.isoTimestamp())),
+    base_version: v.pipe(v.number(), v.integer()),
+    created_at: v.pipe(v.string(), v.isoTimestamp()),
+    draft_id: v.pipe(v.string(), v.uuid()),
+    id: v.pipe(v.string(), v.uuid()),
+    model_step_id: v.pipe(v.string(), v.uuid()),
+    source_author_ids: v.optional(v.array(v.pipe(v.string(), v.uuid())), []),
+    source_library_refs: v.optional(v.array(vLibraryCitationReference), []),
+    state: v.picklist(['pending', 'answered']),
+    text: v.string()
+});
+
+/**
+ * ComposerQuestionListResponse
+ */
+export const vComposerQuestionListResponse = v.object({
+    limit: v.pipe(v.number(), v.integer()),
+    offset: v.pipe(v.number(), v.integer()),
+    questions: v.array(vComposerQuestionResponse)
+});
+
+/**
+ * LibraryDocumentResponse
+ */
+export const vLibraryDocumentResponse = v.object({
+    created_at: v.pipe(v.string(), v.isoTimestamp()),
+    current_version_id: v.pipe(v.string(), v.uuid()),
+    etag: v.string(),
+    id: v.pipe(v.string(), v.uuid()),
+    owner_id: v.pipe(v.string(), v.uuid()),
+    shared_with: v.array(v.pipe(v.string(), v.uuid())),
+    title: v.string(),
+    updated_at: v.pipe(v.string(), v.isoTimestamp()),
+    version: v.pipe(v.number(), v.integer())
+});
+
+/**
+ * LibraryDocumentListResponse
+ */
+export const vLibraryDocumentListResponse = v.object({
+    documents: v.array(vLibraryDocumentResponse),
+    limit: v.pipe(v.number(), v.integer()),
+    offset: v.pipe(v.number(), v.integer())
+});
+
+/**
+ * LibraryExcerptRequest
+ */
+export const vLibraryExcerptRequest = v.strictObject({
+    references: v.pipe(v.array(vLibraryCitationReference), v.minLength(1), v.maxLength(20))
+});
+
+/**
+ * LibraryExcerptResponse
+ */
+export const vLibraryExcerptResponse = v.object({
+    chunk: v.pipe(v.number(), v.integer()),
+    document_id: v.pipe(v.string(), v.uuid()),
+    text: v.string(),
+    title: v.string(),
+    version_id: v.pipe(v.string(), v.uuid()),
+    version_number: v.pipe(v.number(), v.integer()),
+    version_sha256: v.string()
+});
+
+/**
+ * AuthorPromptPreviewResponse
+ */
+export const vAuthorPromptPreviewResponse = v.object({
+    author_refs: v.array(vAuthorReference),
+    library_excerpts: v.optional(v.array(vLibraryExcerptResponse), []),
+    preview_digest: v.string(),
+    transmitted_content: v.string()
+});
+
+/**
+ * LibraryExcerptListResponse
+ */
+export const vLibraryExcerptListResponse = v.object({
+    excerpts: v.array(vLibraryExcerptResponse)
+});
+
+/**
+ * LibrarySearchHitResponse
+ */
+export const vLibrarySearchHitResponse = v.object({
+    chunk: v.pipe(v.number(), v.integer()),
+    document_id: v.pipe(v.string(), v.uuid()),
+    score: v.pipe(v.number(), v.integer()),
+    snippet: v.string(),
+    title: v.string(),
+    version_id: v.pipe(v.string(), v.uuid()),
+    version_number: v.pipe(v.number(), v.integer())
+});
+
+/**
+ * LibrarySearchRequest
+ */
+export const vLibrarySearchRequest = v.strictObject({
+    limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(20)), 10),
+    query: v.pipe(v.string(), v.minLength(1), v.maxLength(200))
+});
+
+/**
+ * LibrarySearchResponse
+ */
+export const vLibrarySearchResponse = v.object({
+    results: v.array(vLibrarySearchHitResponse)
+});
+
+/**
+ * LibraryVersionResponse
+ */
+export const vLibraryVersionResponse = v.object({
+    chunk_count: v.pipe(v.number(), v.integer()),
+    created_at: v.pipe(v.string(), v.isoTimestamp()),
+    document_id: v.pipe(v.string(), v.uuid()),
+    id: v.pipe(v.string(), v.uuid()),
+    media_type: v.string(),
+    number: v.pipe(v.number(), v.integer()),
+    sha256: v.string(),
+    size: v.pipe(v.number(), v.integer())
+});
+
+/**
+ * LibraryVersionListResponse
+ */
+export const vLibraryVersionListResponse = v.object({
+    limit: v.pipe(v.number(), v.integer()),
+    offset: v.pipe(v.number(), v.integer()),
+    versions: v.array(vLibraryVersionResponse)
+});
 
 /**
  * LoginRequest
@@ -2553,6 +2683,130 @@ export const vGetVersionApiV1ComposerFillTemplatesTemplateIdVersionsVersionIdGet
 
 export const vDownloadVersionApiV1ComposerFillTemplatesTemplateIdVersionsVersionIdContentGetPath = v.object({
     template_id: v.pipe(v.string(), v.uuid()),
+    version_id: v.pipe(v.string(), v.uuid())
+});
+
+export const vListLibraryApiV1ComposerLibraryGetQuery = v.object({
+    limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100)), 50),
+    offset: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(2147483647)), 0),
+    query: v.nullish(v.pipe(v.string(), v.maxLength(200)))
+});
+
+/**
+ * Successful Response
+ */
+export const vListLibraryApiV1ComposerLibraryGetResponse = vLibraryDocumentListResponse;
+
+export const vCreateLibraryDocumentApiV1ComposerLibraryPostBody = vBodyCreateLibraryDocumentApiV1ComposerLibraryPost;
+
+export const vCreateLibraryDocumentApiV1ComposerLibraryPostHeaders = v.object({
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+/**
+ * Successful Response
+ */
+export const vCreateLibraryDocumentApiV1ComposerLibraryPostResponse = vLibraryDocumentResponse;
+
+export const vReadLibraryExcerptsApiV1ComposerLibraryExcerptsPostBody = vLibraryExcerptRequest;
+
+/**
+ * Successful Response
+ */
+export const vReadLibraryExcerptsApiV1ComposerLibraryExcerptsPostResponse = vLibraryExcerptListResponse;
+
+export const vSearchLibraryApiV1ComposerLibrarySearchPostBody = vLibrarySearchRequest;
+
+/**
+ * Successful Response
+ */
+export const vSearchLibraryApiV1ComposerLibrarySearchPostResponse = vLibrarySearchResponse;
+
+export const vDeleteLibraryDocumentApiV1ComposerLibraryDocumentIdDeleteHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vDeleteLibraryDocumentApiV1ComposerLibraryDocumentIdDeletePath = v.object({
+    document_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vDeleteLibraryDocumentApiV1ComposerLibraryDocumentIdDeleteResponse = v.void();
+
+export const vGetLibraryDocumentApiV1ComposerLibraryDocumentIdGetPath = v.object({
+    document_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vGetLibraryDocumentApiV1ComposerLibraryDocumentIdGetResponse = vLibraryDocumentResponse;
+
+export const vRevokeLibraryDocumentApiV1ComposerLibraryDocumentIdGrantsUserIdDeleteHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vRevokeLibraryDocumentApiV1ComposerLibraryDocumentIdGrantsUserIdDeletePath = v.object({
+    document_id: v.pipe(v.string(), v.uuid()),
+    user_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vRevokeLibraryDocumentApiV1ComposerLibraryDocumentIdGrantsUserIdDeleteResponse = vLibraryDocumentResponse;
+
+export const vGrantLibraryDocumentApiV1ComposerLibraryDocumentIdGrantsUserIdPutHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vGrantLibraryDocumentApiV1ComposerLibraryDocumentIdGrantsUserIdPutPath = v.object({
+    document_id: v.pipe(v.string(), v.uuid()),
+    user_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vGrantLibraryDocumentApiV1ComposerLibraryDocumentIdGrantsUserIdPutResponse = vLibraryDocumentResponse;
+
+export const vListLibraryVersionsApiV1ComposerLibraryDocumentIdVersionsGetPath = v.object({
+    document_id: v.pipe(v.string(), v.uuid())
+});
+
+export const vListLibraryVersionsApiV1ComposerLibraryDocumentIdVersionsGetQuery = v.object({
+    limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100)), 50),
+    offset: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(2147483647)), 0)
+});
+
+/**
+ * Successful Response
+ */
+export const vListLibraryVersionsApiV1ComposerLibraryDocumentIdVersionsGetResponse = vLibraryVersionListResponse;
+
+export const vReplaceLibraryDocumentApiV1ComposerLibraryDocumentIdVersionsPostBody = vBodyReplaceLibraryDocumentApiV1ComposerLibraryDocumentIdVersionsPost;
+
+export const vReplaceLibraryDocumentApiV1ComposerLibraryDocumentIdVersionsPostHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vReplaceLibraryDocumentApiV1ComposerLibraryDocumentIdVersionsPostPath = v.object({
+    document_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vReplaceLibraryDocumentApiV1ComposerLibraryDocumentIdVersionsPostResponse = vLibraryDocumentResponse;
+
+export const vDownloadLibraryVersionApiV1ComposerLibraryDocumentIdVersionsVersionIdContentGetPath = v.object({
+    document_id: v.pipe(v.string(), v.uuid()),
     version_id: v.pipe(v.string(), v.uuid())
 });
 

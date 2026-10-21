@@ -26,6 +26,7 @@ from markweave.persistence.migrations import (
 from markweave.persistence.sql import DatabaseReadinessProbe
 from markweave.storage import (
     FilesystemObjectStore,
+    ListableObjectStore,
     ObjectKey,
     ObjectNotFoundError,
     ObjectScope,
@@ -142,6 +143,93 @@ def test_filesystem_delete_syncs_after_unlink_and_reports_sync_failure(
         store.delete(ObjectKey(ObjectScope.UPLOAD, uuid4(), uuid4()))
 
     assert [call[0] for call in manager.mock_calls] == ["unlink", "sync"]
+
+
+@pytest.mark.unit
+def test_filesystem_lists_only_complete_objects_of_one_scope(tmp_path: Path) -> None:
+    store = FilesystemObjectStore(tmp_path)
+    owner, first, second = uuid4(), uuid4(), uuid4()
+    keys = [
+        ObjectKey(ObjectScope.COMPOSER_LIBRARY, owner, first),
+        ObjectKey(ObjectScope.COMPOSER_LIBRARY, owner, second),
+    ]
+    for key in keys:
+        store.put(key, b"source")
+    store.put(ObjectKey(ObjectScope.UPLOAD, owner, uuid4()), b"other scope")
+    scope = tmp_path / "objects" / ObjectScope.COMPOSER_LIBRARY.value
+    (scope / str(owner) / ".pending-partial").write_bytes(b"in flight")
+    (scope / str(owner) / str(uuid4()).upper()).write_bytes(b"not canonical")
+    (scope / "not-an-owner").mkdir()
+    (scope / str(uuid4())).write_bytes(b"not a directory")
+    (scope / str(owner) / str(uuid4())).mkdir()
+
+    assert isinstance(store, ListableObjectStore)
+    assert sorted(store.list_keys(ObjectScope.COMPOSER_LIBRARY), key=str) == sorted(
+        keys, key=str
+    )
+    assert (
+        list(FilesystemObjectStore(tmp_path / "empty").list_keys(ObjectScope.RESULT))
+        == []
+    )
+
+
+@pytest.mark.unit
+def test_filesystem_listing_failure_is_sanitized(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    store = FilesystemObjectStore(tmp_path)
+    store.put(ObjectKey(ObjectScope.COMPOSER_LIBRARY, uuid4(), uuid4()), b"source")
+    mocker.patch.object(Path, "iterdir", side_effect=PermissionError("private"))
+    with pytest.raises(ObjectStoreError, match=r"^Object storage operation failed$"):
+        list(store.list_keys(ObjectScope.COMPOSER_LIBRARY))
+
+
+@pytest.mark.unit
+def test_s3_lists_one_scope_across_pages(mocker: MockerFixture) -> None:
+    owner, first, second = uuid4(), uuid4(), uuid4()
+    prefix = ObjectScope.COMPOSER_LIBRARY.value
+    client = mocker.Mock()
+    client.list_objects_v2.side_effect = [
+        {
+            "Contents": [
+                {"Key": f"{prefix}/{owner}/{first}"},
+                {"Key": f"{prefix}/{owner}/not-a-uuid"},
+                {"Key": f"{prefix}/{owner}"},
+            ],
+            "IsTruncated": True,
+            "NextContinuationToken": "next",
+        },
+        {"Contents": [{"Key": f"{prefix}/{owner}/{second}"}], "IsTruncated": False},
+    ]
+    store = S3ObjectStore(client, "bucket")
+
+    assert list(store.list_keys(ObjectScope.COMPOSER_LIBRARY)) == [
+        ObjectKey(ObjectScope.COMPOSER_LIBRARY, owner, first),
+        ObjectKey(ObjectScope.COMPOSER_LIBRARY, owner, second),
+    ]
+    assert client.list_objects_v2.call_args_list == [
+        mocker.call(Bucket="bucket", Prefix=f"{prefix}/"),
+        mocker.call(Bucket="bucket", Prefix=f"{prefix}/", ContinuationToken="next"),
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "reply",
+    [
+        ClientError({"Error": {"Code": "AccessDenied"}}, "ListObjectsV2"),
+        {"Contents": [{}]},
+        {"IsTruncated": True},
+    ],
+)
+def test_s3_listing_failures_are_sanitized(
+    mocker: MockerFixture, reply: object
+) -> None:
+    client = mocker.Mock()
+    client.list_objects_v2.side_effect = [reply]
+    store = S3ObjectStore(client, "bucket")
+    with pytest.raises(ObjectStoreError, match=r"^Object storage operation failed$"):
+        list(store.list_keys(ObjectScope.COMPOSER_LIBRARY))
 
 
 @pytest.mark.unit

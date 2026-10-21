@@ -36,6 +36,8 @@ from markweave.persistence.composer.common import (
     validate_page,
     validate_page_order,
 )
+from markweave.persistence.composer.library import require_excerpt_access
+from markweave.persistence.composer.model_steps import step_library_refs
 from markweave.persistence.composer.typed_templates import SqlTypedTemplateRepository
 from markweave.persistence.errors import PersistenceError
 from markweave.persistence.schema import (
@@ -219,6 +221,15 @@ class _SqlComposerRevisions:
                 )
         except ValueError, TypeError, LookupError, RuntimeError:
             raise ComposerConflictError("Author access changed") from None
+        try:
+            cited = step_library_refs(step)
+        except ValueError, TypeError, KeyError:
+            raise ComposerConflictError("Library access changed") from None
+        if cited:
+            try:
+                require_excerpt_access(database, owner_id, cited, for_update=True)
+            except LookupError:
+                raise ComposerConflictError("Library access changed") from None
 
     @staticmethod
     def _validate_typed_fill(  # noqa: PLR0912, PLR0913, PLR0915, PLR0917 - publication fences

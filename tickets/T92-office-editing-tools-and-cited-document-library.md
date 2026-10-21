@@ -139,6 +139,53 @@ T91.
   Evidence: 19 new vitest cases for the API client and panel plus two workspace cases; the full
   web check passes with 90.04% branch coverage; 16 CLI unit tests; HTTP diff assertions for DOCX
   and PPTX in SQLite and PostgreSQL/S3.
+- 2026-10-21: Fifth increment on `feat/T92-composer-library`, stacked on the UI/CLI branch: the
+  permissioned cited library backend. Migration `20261021_27` adds library documents, grants,
+  immutable versions, and numbered chunks plus a nullable `composer_model_steps.library_refs`
+  column reserved for citations. Uploads (`.md`, `.txt`, `.docx`, `.pptx`) are bounded, scanned
+  before parsing, split into whole-paragraph chunks, and published in two phases (pending row,
+  verified object write, finalize) with immediate cleanup of a failed or losing publication and
+  startup recovery of interrupted ones; one live publication per document keeps version numbers
+  contiguous. Owner-only replace, grant, revoke, and delete use `If-Match` and content-free
+  audit events. Listing, search, download, and excerpts filter owner or active grantee in SQL
+  before any text is loaded, so hits and citations never grant access. Evidence: 100% coverage of
+  `composer/library.py`, 95% branch coverage of the repository, 97% of the router; SQLite and
+  PostgreSQL/S3 HTTP workflows for lifecycle and revocation, Office sources, rejected sources,
+  concurrent replacements, failed writes and recovery, and request validation. Citations in model
+  steps, the library UI and CLI, and their final-image E2E phase remain open.
+- 2026-10-21: Sixth increment on `feat/T92-composer-library`: citations, CLI, and browser support.
+  Model-step previews accept up to 20 `library_refs` and append the exact authorized excerpts,
+  after any author records, as JSON reference data with a `library:{version_id}#{chunk}`
+  identity; the start request repeats the references with the preview digest, and the step
+  records them (`library_refs` in the step response). Access to every cited chunk is rechecked,
+  with the cited documents locked, at admission, before egress, before the result is recorded, and
+  at proposal publication, so a revocation or deletion fails closed without transmission or
+  publication. `markweave composer library ...` manages and searches the library and
+  `model-steps start --cite VERSION_ID:CHUNK` cites excerpts after verifying the preview. The
+  browser gains a **Reference library** page (upload, search, excerpt, versions, download,
+  share, revoke, replace, delete) and excerpt selection in the model request. Evidence: SQLite
+  and PostgreSQL/S3 HTTP workflows for a cited step through publication with revocation before
+  publication, plus foreign, missing, duplicated, excessive, stale, unreviewed, revoked-before-start,
+  and revoked-during-call citations; combined author-and-citation prompt order; admission
+  validation; 23 CLI unit tests and an installed-CLI test against the real application over
+  loopback HTTP; 8 new vitest cases (full web check passes at 90.01% branches). The final-image
+  Composer browser phase now uploads and searches through the library page, proves sharing and
+  revocation, and runs one cited model step through the provider, whose expected successful chat
+  counts rise from 14 to 15 and from 19 to 20; that phase is verified only by hosted CI.
+- 2026-10-21: Review corrections on the library branch.
+  - **Late writes.** An upload paused past its lease can write its object after the deletion's
+    sweep has removed every cleanup record, then crash before discarding it. Maintenance now also
+    reconciles the `composer-library` object scope through a new optional `ListableObjectStore`
+    port (filesystem directory walk, S3 `ListObjectsV2` with a prefix) and removes any object that
+    no version row references; a version row always precedes its object and is never reused. The
+    shared SQLite and PostgreSQL/S3 scenario reproduces the pause, sweep, write and crash.
+    Operational limitation: every maintenance pass (startup and each retention cycle) lists the
+    whole `composer-library` scope and checks it against `composer_library_versions` in batches
+    of 500, so its cost grows with the number of stored library versions; deletions per pass are
+    bounded by the cleanup limit, but the listing is not. A persisted cursor or a sweep journal
+    keyed by in-flight uploads would bound it if the library grows large.
+  - **Cited admission race.** A cited retry that loses the race to an identical request now
+    replays the durable step after the precondition failure instead of returning 412.
 
 ## Synchronization
 

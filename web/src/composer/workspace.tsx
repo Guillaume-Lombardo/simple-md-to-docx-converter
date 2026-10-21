@@ -14,6 +14,11 @@ import { useAuth } from "../auth/context";
 import { type ComposerCapabilities, type ComposerConnection } from "./api";
 import { AuthorDirectoryApi, type AuthorEntry } from "./author-directory-api";
 import { ComposerFillPanel } from "./fill-panel";
+import {
+  type LibraryCitation,
+  type LibrarySearchHit,
+  MAXIMUM_CITATIONS,
+} from "./library-api";
 import { parseOfficeProposal } from "./office-edit-api";
 import { ComposerOfficeEditPanel } from "./office-edit-panel";
 import {
@@ -240,6 +245,13 @@ function ComposerWorkspaceInner({
   const [moreAuthors, setMoreAuthors] = useState(false);
   const [authorLoading, setAuthorLoading] = useState(false);
   const [modelAuthorIds, setModelAuthorIds] = useState<string[]>([]);
+  const [modelCitations, setModelCitations] = useState<LibrarySearchHit[]>([]);
+  const [citationQuery, setCitationQuery] = useState("");
+  const [citationHits, setCitationHits] = useState<LibrarySearchHit[] | null>(
+    null,
+  );
+  const [citationError, setCitationError] = useState("");
+  const [citationReload, setCitationReload] = useState(0);
   const [promptPreview, setPromptPreview] = useState<{
     fingerprint: string;
     result: ComposerPromptPreview;
@@ -364,7 +376,16 @@ function ComposerWorkspaceInner({
     content: modelContent.trim(),
     tokens: requestedTokens,
     authorIds: modelAuthorIds,
+    citations: modelCitations.map((item) => [item.version_id, item.chunk]),
   });
+  const libraryRefs = modelCitations.map((item) => ({
+    version_id: item.version_id,
+    chunk: item.chunk,
+  }));
+  const needsPromptPreview =
+    modelAuthorIds.length > 0 ||
+    modelCitations.length > 0 ||
+    Boolean(resumeQuestionId);
   const currentPromptPreview =
     promptPreview?.fingerprint === promptFingerprint
       ? promptPreview.result
@@ -380,6 +401,58 @@ function ComposerWorkspaceInner({
           modelAuthorIds.includes(id) &&
           availableAuthors.some((author) => author.id === id),
       ));
+  const resumeCitationKey = JSON.stringify(
+    resumeQuestion?.source_library_refs ?? [],
+  );
+  const resumeCitationsAvailable =
+    !resumeQuestionId ||
+    (resumeQuestion !== undefined &&
+      (resumeQuestion.source_library_refs ?? []).every((ref) =>
+        modelCitations.some(
+          (item) =>
+            item.version_id === ref.version_id && item.chunk === ref.chunk,
+        ),
+      ));
+  useEffect(() => {
+    // A resumed question must cite exactly what it cited before. Reload those
+    // excerpts so access is checked again and they appear in the new preview.
+    const refs = JSON.parse(resumeCitationKey) as LibraryCitation[];
+    if (!api.library || refs.length === 0) return;
+    const controller = new AbortController();
+    api.library
+      .excerpts(refs, controller.signal)
+      .then((excerpts) => {
+        const restored = excerpts.map((item) => ({
+          document_id: item.document_id,
+          title: item.title,
+          version_id: item.version_id,
+          version_number: item.version_number,
+          chunk: item.chunk,
+          score: 0,
+          snippet: item.text.slice(0, 320),
+        }));
+        setModelCitations((previous) => [
+          ...restored,
+          ...previous.filter(
+            (item) =>
+              !restored.some(
+                (match) =>
+                  match.version_id === item.version_id &&
+                  match.chunk === item.chunk,
+              ),
+          ),
+        ]);
+        setCitationError("");
+      })
+      .catch((failure: unknown) => {
+        if (controller.signal.aborted || expireIfUnauthorized(failure)) return;
+        setCitationError(
+          "An excerpt cited by the original question is no longer available. Restore access before resuming.",
+        );
+      });
+    return () => controller.abort();
+    // citationReload rechecks access whenever an answer is prepared again.
+  }, [api.library, citationReload, expireIfUnauthorized, resumeCitationKey]);
   useEffect(() => {
     const controller = new AbortController();
     if (view.draft?.id)
@@ -1204,6 +1277,7 @@ function ComposerWorkspaceInner({
     setStepIntent("proposal");
     setResumeQuestionId(question.id);
     setModelAuthorIds(question.source_author_ids ?? []);
+    setCitationReload((value) => value + 1);
     setPromptPreview(null);
     if (ownerId && view.draft) {
       remember(localKey("model", ownerId, view.draft.id), content);
@@ -1514,6 +1588,9 @@ function ComposerWorkspaceInner({
           </a>
           <a className="text-accent underline" href="/composer/fill-templates">
             Typed filling templates
+          </a>
+          <a className="text-accent underline" href="/composer/library">
+            Reference library
           </a>
           <a className="text-accent underline" href="/composer/connections">
             My connections
@@ -1944,6 +2021,92 @@ function ComposerWorkspaceInner({
                   </button>
                 )}
               </fieldset>
+              {api.library && (
+                <fieldset className="mt-3 space-y-2">
+                  <legend>Library excerpts to cite</legend>
+                  <p className="text-sm">
+                    Only selected excerpts you may read are added to the prompt
+                    as reference data. Preview the exact text before sending.
+                  </p>
+                  <div className="flex flex-wrap items-end gap-3">
+                    <label className="grid gap-1">
+                      Search the library
+                      <input
+                        maxLength={200}
+                        onChange={(event) =>
+                          setCitationQuery(event.target.value)
+                        }
+                        value={citationQuery}
+                      />
+                    </label>
+                    <button
+                      disabled={busy || !citationQuery.trim()}
+                      onClick={() => {
+                        setCitationError("");
+                        void api.library
+                          .search(citationQuery.trim())
+                          .then(setCitationHits)
+                          .catch((failure: unknown) => {
+                            if (expireIfUnauthorized(failure)) return;
+                            setCitationHits(null);
+                            setCitationError(safeError(failure));
+                          });
+                      }}
+                      type="button"
+                    >
+                      Search excerpts
+                    </button>
+                  </div>
+                  {citationError && (
+                    <Alert tone="danger">{citationError}</Alert>
+                  )}
+                  {citationHits?.length === 0 && <p>No matching excerpts.</p>}
+                  {[
+                    ...modelCitations,
+                    ...(citationHits ?? []).filter(
+                      (hit) =>
+                        !modelCitations.some(
+                          (item) =>
+                            item.version_id === hit.version_id &&
+                            item.chunk === hit.chunk,
+                        ),
+                    ),
+                  ].map((hit) => {
+                    const cited = modelCitations.some(
+                      (item) =>
+                        item.version_id === hit.version_id &&
+                        item.chunk === hit.chunk,
+                    );
+                    return (
+                      <label
+                        className="block"
+                        key={`${hit.version_id}#${hit.chunk}`}
+                      >
+                        <input
+                          checked={cited}
+                          disabled={
+                            !cited && modelCitations.length >= MAXIMUM_CITATIONS
+                          }
+                          onChange={(event) =>
+                            setModelCitations((previous) =>
+                              event.target.checked
+                                ? [...previous, hit]
+                                : previous.filter(
+                                    (item) =>
+                                      item.version_id !== hit.version_id ||
+                                      item.chunk !== hit.chunk,
+                                  ),
+                            )
+                          }
+                          type="checkbox"
+                        />{" "}
+                        Cite {hit.title}, version {hit.version_number}, excerpt{" "}
+                        {hit.chunk + 1}: {hit.snippet}
+                      </label>
+                    );
+                  })}
+                </fieldset>
+              )}
               {resumeQuestionId && !resumeAuthorsAvailable && (
                 <Alert tone="danger">
                   An author from the original question is no longer available or
@@ -1952,12 +2115,13 @@ function ComposerWorkspaceInner({
                 </Alert>
               )}
               {previewError && <Alert tone="danger">{previewError}</Alert>}
-              {(modelAuthorIds.length > 0 || Boolean(resumeQuestionId)) && (
+              {needsPromptPreview && (
                 <div className="mt-3 space-y-2">
                   <button
                     disabled={
                       previewPending ||
                       !resumeAuthorsAvailable ||
+                      !resumeCitationsAvailable ||
                       !modelReady ||
                       !modelContent.trim() ||
                       !Number.isSafeInteger(Number(requestedTokens)) ||
@@ -1978,6 +2142,9 @@ function ComposerWorkspaceInner({
                           content: modelContent.trim(),
                           author_ids: modelAuthorIds,
                           max_output_tokens: Number(requestedTokens),
+                          ...(libraryRefs.length
+                            ? { library_refs: libraryRefs }
+                            : {}),
                         })
                         .then((result) => {
                           if (
@@ -1992,7 +2159,7 @@ function ComposerWorkspaceInner({
                           setPreviewError(
                             failure instanceof ApiError &&
                               [403, 404, 409, 412].includes(failure.status)
-                              ? "An author entry changed or access was revoked. Refresh the preview and selection."
+                              ? "An author entry or cited excerpt changed or access was revoked. Refresh the preview and selection."
                               : safeError(failure),
                           );
                         })
@@ -2011,7 +2178,8 @@ function ComposerWorkspaceInner({
                     </div>
                   ) : (
                     <p>
-                      Preview the current prompt before sending author facts.
+                      Preview the current prompt before sending author facts or
+                      cited excerpts.
                     </p>
                   )}
                 </div>
@@ -2021,14 +2189,14 @@ function ComposerWorkspaceInner({
                 disabled={
                   busy ||
                   !resumeAuthorsAvailable ||
+                  !resumeCitationsAvailable ||
                   !modelReady ||
                   !modelContent.trim() ||
                   !Number.isSafeInteger(Number(requestedTokens)) ||
                   Number(requestedTokens) < 1 ||
                   Number(requestedTokens) >
                     (capabilities?.maximum_output_tokens ?? 0) ||
-                  ((modelAuthorIds.length > 0 || Boolean(resumeQuestionId)) &&
-                    !currentPromptPreview)
+                  (needsPromptPreview && !currentPromptPreview)
                 }
                 onClick={() =>
                   void mutate(async (stillSelected) => {
@@ -2042,8 +2210,15 @@ function ComposerWorkspaceInner({
                         max_output_tokens: Number(requestedTokens),
                         intent: stepIntent,
                         ...(currentPromptPreview?.author_refs.length
+                          ? { author_refs: currentPromptPreview.author_refs }
+                          : {}),
+                        ...(libraryRefs.length
+                          ? { library_refs: libraryRefs }
+                          : {}),
+                        ...(currentPromptPreview &&
+                        (currentPromptPreview.author_refs.length ||
+                          libraryRefs.length)
                           ? {
-                              author_refs: currentPromptPreview.author_refs,
                               author_preview_digest:
                                 currentPromptPreview.preview_digest,
                             }

@@ -2,7 +2,7 @@
 
 import hashlib
 import json
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -16,11 +16,19 @@ from markweave.composer.author_knowledge import (
 )
 from markweave.composer.author_prompt import AuthorPromptSnapshot, compose_author_prompt
 from markweave.composer.connections import ConnectionActor
+from markweave.composer.library_prompt import (
+    LibraryPromptExcerpt,
+    compose_library_prompt,
+)
 from markweave.composer.revisions import ComposerConflictError
 from markweave.http.composer_errors import (
     ComposerPreconditionRequiredError,
     ComposerRequestError,
     ComposerUnavailableError,
+)
+from markweave.http.composer_library_schemas import (
+    LibraryCitationReference,
+    LibraryExcerptResponse,
 )
 from markweave.http.composer_schemas import (
     ComposerModelStepCreateRequest,
@@ -38,6 +46,7 @@ from markweave.http.composer_t91_schemas import (
 from markweave.http.dependencies import HttpDependencies
 from markweave.http.errors import capacity_error_responses, error_responses
 from markweave.persistence.composer import ComposerModelStep
+from markweave.persistence.composer.library import LibraryNotFoundError
 from markweave.persistence.composer.questions import ComposerQuestion
 
 _MAXIMUM_IDEMPOTENCY_KEY_CHARACTERS = 128
@@ -60,11 +69,23 @@ def _response(step: ComposerModelStep) -> ComposerModelStepResponse:
         error_code=step.error_code,
         created_at=step.created_at,
         updated_at=step.updated_at,
+        library_refs=tuple(
+            LibraryCitationReference(version_id=version_id, chunk=chunk)
+            for version_id, chunk in step.library_refs
+        ),
     )
 
 
 def _question_response(question: ComposerQuestion) -> ComposerQuestionResponse:
-    return ComposerQuestionResponse.model_validate(asdict(question))
+    return ComposerQuestionResponse.model_validate(
+        {
+            **asdict(question),
+            "source_library_refs": [
+                {"version_id": version_id, "chunk": chunk}
+                for version_id, chunk in question.source_library_refs
+            ],
+        }
+    )
 
 
 def _require_headers(
@@ -110,6 +131,63 @@ def _actor(dependencies: HttpDependencies, user: User) -> ConnectionActor:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _Preview:
+    transmitted: str
+    digest: str
+    author_refs: tuple[tuple[UUID, int], ...]
+    excerpts: tuple[LibraryPromptExcerpt, ...]
+
+
+def _preview_context(  # noqa: PLR0913, PLR0917 - exact preview authorization inputs
+    dependencies: HttpDependencies,
+    user: User,
+    draft_id: UUID,
+    content: str,
+    author_ids: tuple[UUID, ...],
+    library_refs: tuple[tuple[UUID, int], ...],
+    if_match: str,
+) -> _Preview:
+    """Compose the exact outbound text from authorized authors and citations."""
+
+    if author_ids or not library_refs:
+        transmitted, digest, author_refs = _preview_authors(
+            dependencies, user, draft_id, content, author_ids, if_match
+        )
+        if not library_refs:
+            return _Preview(transmitted, digest, author_refs, ())
+    else:
+        store = dependencies.components.composer_store
+        if store is None:
+            raise ComposerUnavailableError
+        if store.get_draft(user.id, draft_id).etag != if_match:
+            raise ComposerConflictError("Composer draft changed")
+        transmitted, author_refs = content, ()
+    library = dependencies.components.composer_library
+    if library is None:
+        raise ComposerUnavailableError
+    if len(set(library_refs)) != len(library_refs):
+        raise ComposerRequestError("A library excerpt was cited more than once")
+    try:
+        records = library.excerpts(user.id, library_refs)
+    except LibraryNotFoundError:
+        raise ComposerConflictError("Library access changed") from None
+    excerpts = tuple(
+        LibraryPromptExcerpt(
+            document_id=item.document_id,
+            title=item.title,
+            version_id=item.version_id,
+            version_number=item.version_number,
+            version_sha256=item.version_sha256,
+            chunk=item.chunk,
+            text=item.text,
+        )
+        for item in records
+    )
+    transmitted, digest = compose_library_prompt(transmitted, excerpts)
+    return _Preview(transmitted, digest, author_refs, excerpts)
+
+
 def _preview_authors(  # noqa: PLR0913, PLR0917 - exact preview authorization inputs
     dependencies: HttpDependencies,
     user: User,
@@ -142,6 +220,68 @@ def _preview_authors(  # noqa: PLR0913, PLR0917 - exact preview authorization in
     )
     transmitted, digest = compose_author_prompt(content, snapshots)
     return transmitted, digest, tuple((item.id, item.version) for item in snapshots)
+
+
+def _replayed_step(  # noqa: PLR0913, PLR0917 - exact idempotency identity
+    dependencies: HttpDependencies,
+    user: User,
+    draft_id: UUID,
+    payload: ComposerModelStepCreateRequest,
+    if_match: str,
+    key: str,
+    digest: str,
+) -> ComposerModelStep | None:
+    """Answer a retried start from durable state, before the draft has moved on.
+
+    A replay transmits nothing, but it still requires current access to the
+    connection, the selected authors and every cited excerpt.
+    """
+
+    steps = dependencies.components.composer_model_step_repository
+    if steps is None:
+        # Without a readable step store the runner's own admission still
+        # deduplicates the key; it simply cannot answer before preconditions.
+        return None
+    library_refs = tuple((item.version_id, item.chunk) for item in payload.library_refs)
+    step = steps.replay_model_step(
+        user.id,
+        draft_id,
+        idempotency_key=key,
+        connection_id=payload.connection_id,
+        approved_endpoint=payload.approved_endpoint,
+        approved_model=payload.approved_model,
+        if_match=if_match,
+        payload_digest=digest,
+        intent=payload.intent,
+        answered_question_id=payload.answered_question_id,
+        author_refs=tuple((item.id, item.version) for item in payload.author_refs),
+        author_preview_digest=payload.author_preview_digest,
+        library_refs=library_refs,
+    )
+    if step is None:
+        return None
+    connections = dependencies.components.composer_connections
+    authors = dependencies.components.composer_authors
+    library = dependencies.components.composer_library
+    if (
+        connections is None
+        or (payload.author_refs and authors is None)
+        or (library_refs and library is None)
+    ):
+        raise ComposerUnavailableError
+    connections.get_visible(_actor(dependencies, user), payload.connection_id)
+    if authors is not None:
+        try:
+            for item in payload.author_refs:
+                authors.get(user.id, item.id)
+        except AuthorKnowledgeNotFoundError, AuthorKnowledgeConflictError:
+            raise ComposerConflictError("Author access changed") from None
+    if library is not None and library_refs:
+        try:
+            library.excerpts(user.id, library_refs)
+        except LibraryNotFoundError:
+            raise ComposerConflictError("Library access changed") from None
+    return step
 
 
 def build_router(dependencies: HttpDependencies) -> APIRouter:  # noqa: PLR0915
@@ -177,24 +317,38 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:  # noqa: PLR0915
             or payload.approved_model not in record.permitted_models
         ):
             raise ComposerConflictError("Connection changed before preview")
-        transmitted, digest, refs = _preview_authors(
+        preview = _preview_context(
             dependencies,
             user,
             draft_id,
             payload.content,
             payload.author_ids,
+            tuple((item.version_id, item.chunk) for item in payload.library_refs),
             if_match,
         )
         limit = dependencies.settings.composer_maximum_request_bytes
-        if limit is None or len(transmitted.encode("utf-8")) > limit:
+        if limit is None or len(preview.transmitted.encode("utf-8")) > limit:
             raise ComposerRequestError("Model prompt exceeds the configured limit")
         response.headers["Cache-Control"] = "private, no-store"
         return AuthorPromptPreviewResponse(
-            transmitted_content=transmitted,
+            transmitted_content=preview.transmitted,
             author_refs=tuple(
-                AuthorReference(id=ref[0], version=ref[1]) for ref in refs
+                AuthorReference(id=ref[0], version=ref[1])
+                for ref in preview.author_refs
             ),
-            preview_digest=digest,
+            preview_digest=preview.digest,
+            library_excerpts=tuple(
+                LibraryExcerptResponse(
+                    document_id=item.document_id,
+                    title=item.title,
+                    version_id=item.version_id,
+                    version_number=item.version_number,
+                    version_sha256=item.version_sha256,
+                    chunk=item.chunk,
+                    text=item.text,
+                )
+                for item in preview.excerpts
+            ),
         )
 
     @router.post(
@@ -222,44 +376,66 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:  # noqa: PLR0915
         etag, key = _require_headers(if_match, idempotency_key)
         digest = _payload_digest(payload, request_limit)
         author_refs = tuple((item.id, item.version) for item in payload.author_refs)
-        content = payload.content
-        if author_refs:
-            content, preview_digest, current_refs = _preview_authors(
-                dependencies,
-                user,
-                draft_id,
-                payload.content,
-                tuple(ref[0] for ref in author_refs),
-                etag,
-            )
-            if (
-                current_refs != author_refs
-                or payload.author_preview_digest != preview_digest
-            ):
-                raise ComposerConflictError("Author preview changed")
-        elif payload.author_preview_digest is not None:
-            raise ComposerRequestError("Author preview is invalid")
-        if len(content.encode("utf-8")) > request_limit:
-            raise ComposerRequestError("Model prompt exceeds the configured limit")
-        response.headers["Cache-Control"] = "private, no-store"
-        step = runner.start(
-            _actor(dependencies, user),
-            draft_id,
-            ModelStepInput(
-                connection_id=payload.connection_id,
-                if_match=etag,
-                idempotency_key=key,
-                approved_endpoint=payload.approved_endpoint,
-                approved_model=payload.approved_model,
-                content=content,
-                max_output_tokens=payload.max_output_tokens,
-                payload_digest=digest,
-                intent=payload.intent,
-                answered_question_id=payload.answered_question_id,
-                author_refs=author_refs,
-                author_preview_digest=payload.author_preview_digest,
-            ),
+        library_refs = tuple(
+            (item.version_id, item.chunk) for item in payload.library_refs
         )
+        response.headers["Cache-Control"] = "private, no-store"
+        replayed = _replayed_step(
+            dependencies, user, draft_id, payload, etag, key, digest
+        )
+        if replayed is not None:
+            return _response(replayed)
+        try:
+            content = payload.content
+            if author_refs or library_refs:
+                preview = _preview_context(
+                    dependencies,
+                    user,
+                    draft_id,
+                    payload.content,
+                    tuple(ref[0] for ref in author_refs),
+                    library_refs,
+                    etag,
+                )
+                content = preview.transmitted
+                if (
+                    preview.author_refs != author_refs
+                    or payload.author_preview_digest != preview.digest
+                ):
+                    raise ComposerConflictError("Author preview changed")
+            elif payload.author_preview_digest is not None:
+                raise ComposerRequestError("Author preview is invalid")
+            if len(content.encode("utf-8")) > request_limit:
+                raise ComposerRequestError("Model prompt exceeds the configured limit")
+            step = runner.start(
+                _actor(dependencies, user),
+                draft_id,
+                ModelStepInput(
+                    connection_id=payload.connection_id,
+                    if_match=etag,
+                    idempotency_key=key,
+                    approved_endpoint=payload.approved_endpoint,
+                    approved_model=payload.approved_model,
+                    content=content,
+                    max_output_tokens=payload.max_output_tokens,
+                    payload_digest=digest,
+                    intent=payload.intent,
+                    answered_question_id=payload.answered_question_id,
+                    author_refs=author_refs,
+                    author_preview_digest=payload.author_preview_digest,
+                    library_refs=library_refs,
+                ),
+            )
+        except ComposerConflictError:
+            # An identical request may have been admitted, and even completed,
+            # after the lookup above and moved the draft on. Answer from its
+            # durable step; a different request under this key still fails.
+            replayed = _replayed_step(
+                dependencies, user, draft_id, payload, etag, key, digest
+            )
+            if replayed is None:
+                raise
+            return _response(replayed)
         return _response(step)
 
     @router.get(

@@ -44,6 +44,7 @@ REFERENCE_COLUMNS: Mapping[str, tuple[str, ...]] = MappingProxyType(
         "composer_drafts": ("id", "owner_id"),
         "composer_revisions": ("id", "draft_id", "publication_state"),
         "composer_artifacts": ("id", "revision_id"),
+        "composer_library_versions": ("id", "object_owner_id", "publication_state"),
     }
 )
 

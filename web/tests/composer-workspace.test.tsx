@@ -178,6 +178,11 @@ function setup(
     recoveredPublicationFetchFails?: boolean;
     secondDraft?: boolean;
     officeProposal?: boolean;
+    library?: {
+      search: ReturnType<typeof vi.fn>;
+      excerpts?: ReturnType<typeof vi.fn>;
+    };
+    questionLibraryRefs?: { version_id: string; chunk: number }[];
   } = {},
 ) {
   if (!options.preserveStorage) sessionStorage.clear();
@@ -297,6 +302,7 @@ function setup(
             {
               ...question,
               source_author_ids: options.questionAuthorIds ?? [],
+              source_library_refs: options.questionLibraryRefs ?? [],
             },
           ]
         : [],
@@ -434,7 +440,11 @@ function setup(
     }),
     decide: vi.fn(),
     answerQuestion: vi.fn().mockResolvedValue({
-      data: { ...question, source_author_ids: options.questionAuthorIds ?? [] },
+      data: {
+        ...question,
+        source_author_ids: options.questionAuthorIds ?? [],
+        source_library_refs: options.questionLibraryRefs ?? [],
+      },
     }),
     publishProposal: vi.fn(),
     publishDraft: vi.fn().mockImplementation(async () => {
@@ -444,6 +454,7 @@ function setup(
     captureSource: vi.fn().mockResolvedValue({ data: revision }),
     restore: vi.fn().mockResolvedValue({ data: revision }),
     publishOfficeProposal: vi.fn().mockResolvedValue({ data: revision }),
+    ...(options.library ? { library: options.library } : {}),
     ...(options.officeProposal
       ? {
           office: {
@@ -1695,7 +1706,7 @@ test("revoked author prompt preview cannot be sent to a model", async () => {
     );
     expect(
       await screen.findByText(
-        "An author entry changed or access was revoked. Refresh the preview and selection.",
+        "An author entry or cited excerpt changed or access was revoked. Refresh the preview and selection.",
       ),
     ).toBeVisible();
     expect(
@@ -1936,4 +1947,202 @@ test("pending Office edit proposals are reviewed before any publication", async 
   expect(
     screen.queryByRole("button", { name: "Publish approved text edits" }),
   ).toBeNull();
+});
+
+test("cited library excerpts are previewed and sent with the reviewed digest", async () => {
+  const hit = {
+    document_id: "document-1",
+    title: "Field notes",
+    version_id: "00000000-0000-4000-8000-000000000a01",
+    version_number: 1,
+    chunk: 0,
+    score: 2,
+    snippet: "Turbine failed.",
+  };
+  const search = vi
+    .fn()
+    .mockRejectedValueOnce(new ApiError(503, "UNAVAILABLE", "Library down."))
+    .mockResolvedValueOnce([])
+    .mockResolvedValue([hit, { ...hit, chunk: 1, snippet: "Gearbox." }]);
+  const api = setup({ library: { search } });
+  fireEvent.change(
+    await screen.findByRole("textbox", {
+      name: "Exact approved text for transmission",
+    }),
+    { target: { value: "Summarize." } },
+  );
+  fireEvent.change(
+    screen.getByRole("spinbutton", { name: /Maximum output tokens/ }),
+    { target: { value: "100" } },
+  );
+  const query = screen.getByRole("textbox", { name: "Search the library" });
+  fireEvent.change(query, { target: { value: "turbine" } });
+  fireEvent.click(screen.getByRole("button", { name: "Search excerpts" }));
+  expect(await screen.findByText("Library down.")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Search excerpts" }));
+  expect(await screen.findByText("No matching excerpts.")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Search excerpts" }));
+  fireEvent.click(
+    await screen.findByRole("checkbox", {
+      name: /Cite Field notes.*excerpt 1/,
+    }),
+  );
+  fireEvent.click(screen.getByRole("checkbox", { name: /excerpt 2/ }));
+  fireEvent.click(screen.getByRole("checkbox", { name: /excerpt 2/ }));
+  expect(search).toHaveBeenCalledWith("turbine");
+  expect(
+    screen.getByRole("button", { name: "Send reviewed text" }),
+  ).toBeDisabled();
+  const previewStep = vi.fn().mockResolvedValue({
+    transmitted_content: "Summarize.\n\nCited library excerpts",
+    author_refs: [],
+    preview_digest: "cited-digest",
+    library_excerpts: [],
+  });
+  Object.assign(api, { previewStep });
+  fireEvent.click(screen.getByRole("button", { name: "Preview exact prompt" }));
+  await waitFor(() =>
+    expect(previewStep).toHaveBeenCalledWith(
+      expect.objectContaining({ id: draft.id }),
+      expect.objectContaining({
+        library_refs: [{ version_id: hit.version_id, chunk: 0 }],
+      }),
+    ),
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Send reviewed text" }),
+  );
+  await waitFor(() =>
+    expect(api.startStep).toHaveBeenCalledWith(
+      expect.objectContaining({ id: draft.id }),
+      expect.objectContaining({
+        library_refs: [{ version_id: hit.version_id, chunk: 0 }],
+        author_preview_digest: "cited-digest",
+      }),
+      expect.any(String),
+    ),
+  );
+  expect(api.startStep.mock.calls[0]![1]).not.toHaveProperty("author_refs");
+});
+
+test("a resumed cited question restores and revalidates its excerpts after reload", async () => {
+  const citation = {
+    version_id: "00000000-0000-4000-8000-000000000a01",
+    chunk: 0,
+  };
+  const excerpts = vi
+    .fn()
+    .mockRejectedValueOnce(new ApiError(404, "COMPOSER_LIBRARY_NOT_FOUND", "x"))
+    .mockResolvedValue([
+      {
+        document_id: "document-1",
+        title: "Field notes",
+        version_id: citation.version_id,
+        version_number: 1,
+        version_sha256: "a".repeat(64),
+        chunk: 0,
+        text: "Turbine failed.",
+      },
+    ]);
+  const library = { search: vi.fn().mockResolvedValue([]), excerpts };
+  sessionStorage.clear();
+  sessionStorage.setItem(`composer:resume:${user.id}:${draft.id}`, question.id);
+  const api = setup({
+    preserveStorage: true,
+    question: true,
+    library,
+    questionLibraryRefs: [citation],
+  });
+  expect(
+    await screen.findByText(
+      "An excerpt cited by the original question is no longer available. Restore access before resuming.",
+    ),
+  ).toBeVisible();
+  expect(
+    screen.getByRole("button", { name: "Send reviewed text" }),
+  ).toBeDisabled();
+
+  fireEvent.change(screen.getByRole("textbox", { name: "Your answer" }), {
+    target: { value: "Use the signed date." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save answer" }));
+  await waitFor(() => expect(api.answerQuestion).toHaveBeenCalledOnce());
+  expect(
+    await screen.findByRole("checkbox", { name: /Cite Field notes/ }),
+  ).toBeChecked();
+  fireEvent.change(
+    screen.getByRole("spinbutton", { name: /Maximum output tokens/ }),
+    { target: { value: "64" } },
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Preview exact prompt" }));
+  await waitFor(() =>
+    expect(api.previewStep).toHaveBeenCalledWith(
+      expect.objectContaining({ id: draft.id }),
+      expect.objectContaining({ library_refs: [citation] }),
+    ),
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Send reviewed text" }),
+  );
+  await waitFor(() =>
+    expect(api.startStep).toHaveBeenCalledWith(
+      expect.objectContaining({ id: draft.id }),
+      expect.objectContaining({
+        answered_question_id: question.id,
+        library_refs: [citation],
+        author_preview_digest: "reviewed-digest",
+      }),
+      expect.any(String),
+    ),
+  );
+});
+
+test("reloading a resumed citation keeps one entry and an ended session closes the workspace", async () => {
+  const citation = {
+    version_id: "00000000-0000-4000-8000-000000000a01",
+    chunk: 0,
+  };
+  const excerpt = {
+    document_id: "document-1",
+    title: "Field notes",
+    version_id: citation.version_id,
+    version_number: 1,
+    version_sha256: "a".repeat(64),
+    chunk: 0,
+    text: "Turbine failed.",
+  };
+  const excerpts = vi
+    .fn()
+    .mockResolvedValueOnce([excerpt])
+    .mockResolvedValueOnce([excerpt])
+    .mockRejectedValue(
+      new ApiError(401, "AUTHENTICATION_REQUIRED", "private excerpt"),
+    );
+  const library = { search: vi.fn().mockResolvedValue([]), excerpts };
+  sessionStorage.clear();
+  sessionStorage.setItem(`composer:resume:${user.id}:${draft.id}`, question.id);
+  const api = setup({
+    preserveStorage: true,
+    question: true,
+    library,
+    questionLibraryRefs: [citation],
+  });
+  expect(
+    await screen.findByRole("checkbox", { name: /Cite Field notes/ }),
+  ).toBeChecked();
+
+  const answer = screen.getByRole("textbox", { name: "Your answer" });
+  fireEvent.change(answer, { target: { value: "Use the signed date." } });
+  fireEvent.click(screen.getByRole("button", { name: "Save answer" }));
+  await waitFor(() => expect(excerpts).toHaveBeenCalledTimes(2));
+  expect(
+    screen.getAllByRole("checkbox", { name: /Cite Field notes/ }),
+  ).toHaveLength(1);
+
+  fireEvent.change(answer, { target: { value: "Use the final date." } });
+  fireEvent.click(screen.getByRole("button", { name: "Save answer" }));
+  await waitFor(() => expect(api.answerQuestion).toHaveBeenCalledTimes(2));
+  await waitFor(() =>
+    expect(screen.queryByRole("heading", { name: "Composer" })).toBeNull(),
+  );
 });

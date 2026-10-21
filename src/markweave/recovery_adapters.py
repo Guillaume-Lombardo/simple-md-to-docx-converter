@@ -928,10 +928,16 @@ def _load_database_payload(path: Path) -> Mapping[str, Any]:
 
 def _referenced_keys_from_rows(tables: Mapping[str, Any]) -> frozenset[str]:
     keys: set[str] = set()
-    versions = tables.get("template_versions", {}).get("rows", [])
-    for row in versions:
-        if row.get("publication_state") == "published":
-            keys.add(f"template-versions/{row['object_owner_id']}/{row['id']}")
+    for table, prefix, owner_column in (
+        ("template_versions", "template-versions", "object_owner_id"),
+        ("composer_sources", "composer-sources", "owner_id"),
+        ("composer_library_versions", "composer-library", "object_owner_id"),
+    ):
+        keys.update(
+            f"{prefix}/{row[owner_column]}/{row['id']}"
+            for row in tables.get(table, {}).get("rows", [])
+            if row.get("publication_state") == "published"
+        )
     jobs = tables.get("conversion_jobs", {}).get("rows", [])
     for row in jobs:
         owner = row["owner_id"]
@@ -946,9 +952,6 @@ def _referenced_keys_from_rows(tables: Mapping[str, Any]) -> frozenset[str]:
             keys.add(f"results/{owner}/{row['result_object_id']}")
         if row.get("result_manifest_object_id"):
             keys.add(f"result-manifests/{owner}/{row['result_manifest_object_id']}")
-    for row in tables.get("composer_sources", {}).get("rows", []):
-        if row.get("publication_state") == "published":
-            keys.add(f"composer-sources/{row['owner_id']}/{row['id']}")
     drafts = {
         row["id"]: row["owner_id"]
         for row in tables.get("composer_drafts", {}).get("rows", [])

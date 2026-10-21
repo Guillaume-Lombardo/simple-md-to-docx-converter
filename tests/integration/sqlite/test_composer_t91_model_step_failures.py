@@ -170,3 +170,52 @@ def test_question_answer_and_replayed_result_reject_changed_state(
             )
     finally:
         engine.dispose()
+
+
+def test_model_step_rejects_invalid_or_unavailable_library_citations(
+    tmp_path: Path,
+) -> None:
+    engine, drafts, steps, owner, _other, connection_id = _setup(tmp_path)
+    digest = hashlib.sha256(b"reviewed preview").hexdigest()
+    try:
+        draft = _draft(drafts, owner)
+        version = uuid4()
+        cases: tuple[tuple[tuple[tuple[UUID, int], ...], str | None], ...] = (
+            (((version, 0),), None),
+            (((version, 0), (version, 0)), digest),
+            (((version, -1),), digest),
+            (tuple((version, chunk) for chunk in range(21)), digest),
+        )
+        for refs, preview in cases:
+            with pytest.raises(ValueError, match="admission"):
+                steps.start_model_step(
+                    owner,
+                    draft.id,
+                    connection_id=connection_id,
+                    approved_endpoint=_ENDPOINT,
+                    approved_model=_MODEL,
+                    if_match=draft.etag,
+                    idempotency_key="citations",
+                    payload_digest=_PAYLOAD,
+                    max_active=2,
+                    lease=timedelta(minutes=5),
+                    author_preview_digest=preview,
+                    library_refs=refs,
+                )
+        with pytest.raises(ComposerConflictError, match="Library access changed"):
+            steps.start_model_step(
+                owner,
+                draft.id,
+                connection_id=connection_id,
+                approved_endpoint=_ENDPOINT,
+                approved_model=_MODEL,
+                if_match=draft.etag,
+                idempotency_key="citations",
+                payload_digest=_PAYLOAD,
+                max_active=2,
+                lease=timedelta(minutes=5),
+                author_preview_digest=digest,
+                library_refs=((version, 0),),
+            )
+    finally:
+        engine.dispose()

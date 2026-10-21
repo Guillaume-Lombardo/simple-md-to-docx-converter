@@ -54,6 +54,7 @@ The author directory and typed Word filling use separate Composer command famili
 
 ```text
 markweave composer authors {list,show,create,update,grant,revoke}
+markweave composer library {list,show,upload,replace,versions,download,grant,revoke,delete,search,excerpts}
 markweave composer fill-templates {list,show,create,replace,versions,version,download,grant,revoke}
 markweave composer fill-plans {list,show,create,update,approve,publish,regenerate}
 ```
@@ -76,6 +77,16 @@ and exact author versions; a changed or revoked entry fails before model transmi
 after answering a durable question, start a fresh step with `--answered-question-id QUESTION_ID`
 and a new ETag and idempotency key. Use `--intent question` to request another question; the
 default intent is a proposal. Model text still comes only from `--content-file` or `--stdin`.
+
+`composer library upload` sends a regular `.md`, `.txt`, `.docx`, or `.pptx` file within the
+service upload limit, with an optional `--title`; `replace`, `grant`, `revoke`, and `delete`
+take the document's current `--etag`. `search QUERY` lists matching readable excerpts as
+`VERSION_ID` and chunk number, and `excerpts --cite VERSION_ID:CHUNK` prints their exact text.
+`download` writes an exact version only after checking its response headers. To cite excerpts in
+a model step, repeat `--cite VERSION_ID:CHUNK` (at most 20, each once) on `model-steps start`.
+The CLI previews the prompt, checks that the returned excerpts match the citations and that the
+digest matches the exact transmitted text, and sends the same references with that digest. A
+revoked or deleted document fails before model transmission.
 
 Administrators can inspect and replace the Composer destination policy through the
 authenticated API:

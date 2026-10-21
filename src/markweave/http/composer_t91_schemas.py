@@ -9,6 +9,11 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from markweave.http.composer_library_schemas import (
+    LibraryCitationReference,
+    LibraryExcerptResponse,
+)
+
 
 class ValueProvenance(StrEnum):
     SUPPLIED = "supplied"
@@ -163,6 +168,9 @@ class AuthorPromptPreviewRequest(BaseModel):
     content: str = Field(min_length=1)
     author_ids: tuple[UUID, ...]
     max_output_tokens: int = Field(gt=0)
+    library_refs: tuple[LibraryCitationReference, ...] = Field(
+        default=(), max_length=20
+    )
 
 
 class AuthorReference(BaseModel):
@@ -174,3 +182,4 @@ class AuthorPromptPreviewResponse(BaseModel):
     transmitted_content: str
     author_refs: tuple[AuthorReference, ...]
     preview_digest: str
+    library_excerpts: tuple[LibraryExcerptResponse, ...] = ()

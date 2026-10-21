@@ -7,6 +7,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
+from markweave.http.composer_library_schemas import LibraryCitationReference
 from markweave.http.composer_t91_schemas import AuthorReference
 from markweave.presentations.models import PresentationDialect
 
@@ -265,6 +266,9 @@ class ComposerModelStepCreateRequest(BaseModel):
     answered_question_id: UUID | None = None
     author_refs: tuple[AuthorReference, ...] = ()
     author_preview_digest: str | None = None
+    library_refs: tuple[LibraryCitationReference, ...] = Field(
+        default=(), max_length=20
+    )
 
 
 class ComposerModelStepResponse(BaseModel):
@@ -281,6 +285,7 @@ class ComposerModelStepResponse(BaseModel):
     error_code: str | None
     created_at: datetime
     updated_at: datetime
+    library_refs: tuple[LibraryCitationReference, ...] = ()
 
 
 class ComposerQuestionResponse(BaseModel):
@@ -295,6 +300,7 @@ class ComposerQuestionResponse(BaseModel):
     created_at: datetime
     answered_at: datetime | None
     source_author_ids: tuple[UUID, ...] = ()
+    source_library_refs: tuple[LibraryCitationReference, ...] = ()
 
 
 class ComposerQuestionListResponse(BaseModel):

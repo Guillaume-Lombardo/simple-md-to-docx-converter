@@ -138,6 +138,10 @@ export type AuthorPromptPreviewRequest = {
      */
     content: string;
     /**
+     * Library Refs
+     */
+    library_refs?: Array<LibraryCitationReference>;
+    /**
      * Max Output Tokens
      */
     max_output_tokens: number;
@@ -151,6 +155,10 @@ export type AuthorPromptPreviewResponse = {
      * Author Refs
      */
     author_refs: Array<AuthorReference>;
+    /**
+     * Library Excerpts
+     */
+    library_excerpts?: Array<LibraryExcerptResponse>;
     /**
      * Preview Digest
      */
@@ -278,6 +286,20 @@ export type BodyCreateDraftApiV1ComposerDraftsPost = {
 };
 
 /**
+ * Body_create_library_document_api_v1_composer_library_post
+ */
+export type BodyCreateLibraryDocumentApiV1ComposerLibraryPost = {
+    /**
+     * File
+     */
+    file: Blob | File;
+    /**
+     * Title
+     */
+    title?: string | null;
+};
+
+/**
  * Body_create_reversion_api_v1_reversions_post
  */
 export type BodyCreateReversionApiV1ReversionsPost = {
@@ -350,6 +372,16 @@ export type BodyPreviewPresentationApiV1PresentationPlanPost = {
      * Source
      */
     source: Blob | File;
+};
+
+/**
+ * Body_replace_library_document_api_v1_composer_library__document_id__versions_post
+ */
+export type BodyReplaceLibraryDocumentApiV1ComposerLibraryDocumentIdVersionsPost = {
+    /**
+     * File
+     */
+    file: Blob | File;
 };
 
 /**
@@ -917,6 +949,10 @@ export type ComposerModelStepCreateRequest = {
      */
     intent?: 'proposal' | 'question';
     /**
+     * Library Refs
+     */
+    library_refs?: Array<LibraryCitationReference>;
+    /**
      * Max Output Tokens
      */
     max_output_tokens: number;
@@ -958,6 +994,10 @@ export type ComposerModelStepResponse = {
      * Intent
      */
     intent: 'proposal' | 'question';
+    /**
+     * Library Refs
+     */
+    library_refs?: Array<LibraryCitationReference>;
     /**
      * Model Identity
      */
@@ -1310,6 +1350,10 @@ export type ComposerQuestionResponse = {
      * Source Author Ids
      */
     source_author_ids?: Array<string>;
+    /**
+     * Source Library Refs
+     */
+    source_library_refs?: Array<LibraryCitationReference>;
     /**
      * State
      */
@@ -2129,6 +2173,248 @@ export type JobOutput = 'docx' | 'pptx' | 'pdf' | 'both' | 'pptx-bundle';
  * Stable conversion-list grouping shared by document and presentation UIs.
  */
 export type JobOutputFamily = 'document' | 'presentation';
+
+/**
+ * LibraryCitationReference
+ */
+export type LibraryCitationReference = {
+    /**
+     * Chunk
+     */
+    chunk: number;
+    /**
+     * Version Id
+     */
+    version_id: string;
+};
+
+/**
+ * LibraryDocumentListResponse
+ */
+export type LibraryDocumentListResponse = {
+    /**
+     * Documents
+     */
+    documents: Array<LibraryDocumentResponse>;
+    /**
+     * Limit
+     */
+    limit: number;
+    /**
+     * Offset
+     */
+    offset: number;
+};
+
+/**
+ * LibraryDocumentResponse
+ */
+export type LibraryDocumentResponse = {
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Current Version Id
+     */
+    current_version_id: string;
+    /**
+     * Etag
+     */
+    etag: string;
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Owner Id
+     */
+    owner_id: string;
+    /**
+     * Shared With
+     */
+    shared_with: Array<string>;
+    /**
+     * Title
+     */
+    title: string;
+    /**
+     * Updated At
+     */
+    updated_at: string;
+    /**
+     * Version
+     */
+    version: number;
+};
+
+/**
+ * LibraryExcerptListResponse
+ */
+export type LibraryExcerptListResponse = {
+    /**
+     * Excerpts
+     */
+    excerpts: Array<LibraryExcerptResponse>;
+};
+
+/**
+ * LibraryExcerptRequest
+ */
+export type LibraryExcerptRequest = {
+    /**
+     * References
+     */
+    references: Array<LibraryCitationReference>;
+};
+
+/**
+ * LibraryExcerptResponse
+ */
+export type LibraryExcerptResponse = {
+    /**
+     * Chunk
+     */
+    chunk: number;
+    /**
+     * Document Id
+     */
+    document_id: string;
+    /**
+     * Text
+     */
+    text: string;
+    /**
+     * Title
+     */
+    title: string;
+    /**
+     * Version Id
+     */
+    version_id: string;
+    /**
+     * Version Number
+     */
+    version_number: number;
+    /**
+     * Version Sha256
+     */
+    version_sha256: string;
+};
+
+/**
+ * LibrarySearchHitResponse
+ */
+export type LibrarySearchHitResponse = {
+    /**
+     * Chunk
+     */
+    chunk: number;
+    /**
+     * Document Id
+     */
+    document_id: string;
+    /**
+     * Score
+     */
+    score: number;
+    /**
+     * Snippet
+     */
+    snippet: string;
+    /**
+     * Title
+     */
+    title: string;
+    /**
+     * Version Id
+     */
+    version_id: string;
+    /**
+     * Version Number
+     */
+    version_number: number;
+};
+
+/**
+ * LibrarySearchRequest
+ */
+export type LibrarySearchRequest = {
+    /**
+     * Limit
+     */
+    limit?: number;
+    /**
+     * Query
+     */
+    query: string;
+};
+
+/**
+ * LibrarySearchResponse
+ */
+export type LibrarySearchResponse = {
+    /**
+     * Results
+     */
+    results: Array<LibrarySearchHitResponse>;
+};
+
+/**
+ * LibraryVersionListResponse
+ */
+export type LibraryVersionListResponse = {
+    /**
+     * Limit
+     */
+    limit: number;
+    /**
+     * Offset
+     */
+    offset: number;
+    /**
+     * Versions
+     */
+    versions: Array<LibraryVersionResponse>;
+};
+
+/**
+ * LibraryVersionResponse
+ */
+export type LibraryVersionResponse = {
+    /**
+     * Chunk Count
+     */
+    chunk_count: number;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Document Id
+     */
+    document_id: string;
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Media Type
+     */
+    media_type: string;
+    /**
+     * Number
+     */
+    number: number;
+    /**
+     * Sha256
+     */
+    sha256: string;
+    /**
+     * Size
+     */
+    size: number;
+};
 
 /**
  * LoginRequest
@@ -7511,6 +7797,554 @@ export type DownloadVersionApiV1ComposerFillTemplatesTemplateIdVersionsVersionId
 export type DownloadVersionApiV1ComposerFillTemplatesTemplateIdVersionsVersionIdContentGetError = DownloadVersionApiV1ComposerFillTemplatesTemplateIdVersionsVersionIdContentGetErrors[keyof DownloadVersionApiV1ComposerFillTemplatesTemplateIdVersionsVersionIdContentGetErrors];
 
 export type DownloadVersionApiV1ComposerFillTemplatesTemplateIdVersionsVersionIdContentGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: unknown;
+};
+
+export type ListLibraryApiV1ComposerLibraryGetData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Limit
+         */
+        limit?: number;
+        /**
+         * Offset
+         */
+        offset?: number;
+        /**
+         * Query
+         */
+        query?: string | null;
+    };
+    url: '/api/v1/composer/library';
+};
+
+export type ListLibraryApiV1ComposerLibraryGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type ListLibraryApiV1ComposerLibraryGetError = ListLibraryApiV1ComposerLibraryGetErrors[keyof ListLibraryApiV1ComposerLibraryGetErrors];
+
+export type ListLibraryApiV1ComposerLibraryGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: LibraryDocumentListResponse;
+};
+
+export type ListLibraryApiV1ComposerLibraryGetResponse = ListLibraryApiV1ComposerLibraryGetResponses[keyof ListLibraryApiV1ComposerLibraryGetResponses];
+
+export type CreateLibraryDocumentApiV1ComposerLibraryPostData = {
+    body: BodyCreateLibraryDocumentApiV1ComposerLibraryPost;
+    headers?: {
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/composer/library';
+};
+
+export type CreateLibraryDocumentApiV1ComposerLibraryPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type CreateLibraryDocumentApiV1ComposerLibraryPostError = CreateLibraryDocumentApiV1ComposerLibraryPostErrors[keyof CreateLibraryDocumentApiV1ComposerLibraryPostErrors];
+
+export type CreateLibraryDocumentApiV1ComposerLibraryPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: LibraryDocumentResponse;
+};
+
+export type CreateLibraryDocumentApiV1ComposerLibraryPostResponse = CreateLibraryDocumentApiV1ComposerLibraryPostResponses[keyof CreateLibraryDocumentApiV1ComposerLibraryPostResponses];
+
+export type ReadLibraryExcerptsApiV1ComposerLibraryExcerptsPostData = {
+    body: LibraryExcerptRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/composer/library/excerpts';
+};
+
+export type ReadLibraryExcerptsApiV1ComposerLibraryExcerptsPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type ReadLibraryExcerptsApiV1ComposerLibraryExcerptsPostError = ReadLibraryExcerptsApiV1ComposerLibraryExcerptsPostErrors[keyof ReadLibraryExcerptsApiV1ComposerLibraryExcerptsPostErrors];
+
+export type ReadLibraryExcerptsApiV1ComposerLibraryExcerptsPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: LibraryExcerptListResponse;
+};
+
+export type ReadLibraryExcerptsApiV1ComposerLibraryExcerptsPostResponse = ReadLibraryExcerptsApiV1ComposerLibraryExcerptsPostResponses[keyof ReadLibraryExcerptsApiV1ComposerLibraryExcerptsPostResponses];
+
+export type SearchLibraryApiV1ComposerLibrarySearchPostData = {
+    body: LibrarySearchRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/composer/library/search';
+};
+
+export type SearchLibraryApiV1ComposerLibrarySearchPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type SearchLibraryApiV1ComposerLibrarySearchPostError = SearchLibraryApiV1ComposerLibrarySearchPostErrors[keyof SearchLibraryApiV1ComposerLibrarySearchPostErrors];
+
+export type SearchLibraryApiV1ComposerLibrarySearchPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: LibrarySearchResponse;
+};
+
+export type SearchLibraryApiV1ComposerLibrarySearchPostResponse = SearchLibraryApiV1ComposerLibrarySearchPostResponses[keyof SearchLibraryApiV1ComposerLibrarySearchPostResponses];
+
+export type DeleteLibraryDocumentApiV1ComposerLibraryDocumentIdDeleteData = {
+    body?: never;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Document Id
+         */
+        document_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/library/{document_id}';
+};
+
+export type DeleteLibraryDocumentApiV1ComposerLibraryDocumentIdDeleteErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type DeleteLibraryDocumentApiV1ComposerLibraryDocumentIdDeleteError = DeleteLibraryDocumentApiV1ComposerLibraryDocumentIdDeleteErrors[keyof DeleteLibraryDocumentApiV1ComposerLibraryDocumentIdDeleteErrors];
+
+export type DeleteLibraryDocumentApiV1ComposerLibraryDocumentIdDeleteResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type DeleteLibraryDocumentApiV1ComposerLibraryDocumentIdDeleteResponse = DeleteLibraryDocumentApiV1ComposerLibraryDocumentIdDeleteResponses[keyof DeleteLibraryDocumentApiV1ComposerLibraryDocumentIdDeleteResponses];
+
+export type GetLibraryDocumentApiV1ComposerLibraryDocumentIdGetData = {
+    body?: never;
+    path: {
+        /**
+         * Document Id
+         */
+        document_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/library/{document_id}';
+};
+
+export type GetLibraryDocumentApiV1ComposerLibraryDocumentIdGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type GetLibraryDocumentApiV1ComposerLibraryDocumentIdGetError = GetLibraryDocumentApiV1ComposerLibraryDocumentIdGetErrors[keyof GetLibraryDocumentApiV1ComposerLibraryDocumentIdGetErrors];
+
+export type GetLibraryDocumentApiV1ComposerLibraryDocumentIdGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: LibraryDocumentResponse;
+};
+
+export type GetLibraryDocumentApiV1ComposerLibraryDocumentIdGetResponse = GetLibraryDocumentApiV1ComposerLibraryDocumentIdGetResponses[keyof GetLibraryDocumentApiV1ComposerLibraryDocumentIdGetResponses];
+
+export type RevokeLibraryDocumentApiV1ComposerLibraryDocumentIdGrantsUserIdDeleteData = {
+    body?: never;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Document Id
+         */
+        document_id: string;
+        /**
+         * User Id
+         */
+        user_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/library/{document_id}/grants/{user_id}';
+};
+
+export type RevokeLibraryDocumentApiV1ComposerLibraryDocumentIdGrantsUserIdDeleteErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type RevokeLibraryDocumentApiV1ComposerLibraryDocumentIdGrantsUserIdDeleteError = RevokeLibraryDocumentApiV1ComposerLibraryDocumentIdGrantsUserIdDeleteErrors[keyof RevokeLibraryDocumentApiV1ComposerLibraryDocumentIdGrantsUserIdDeleteErrors];
+
+export type RevokeLibraryDocumentApiV1ComposerLibraryDocumentIdGrantsUserIdDeleteResponses = {
+    /**
+     * Successful Response
+     */
+    200: LibraryDocumentResponse;
+};
+
+export type RevokeLibraryDocumentApiV1ComposerLibraryDocumentIdGrantsUserIdDeleteResponse = RevokeLibraryDocumentApiV1ComposerLibraryDocumentIdGrantsUserIdDeleteResponses[keyof RevokeLibraryDocumentApiV1ComposerLibraryDocumentIdGrantsUserIdDeleteResponses];
+
+export type GrantLibraryDocumentApiV1ComposerLibraryDocumentIdGrantsUserIdPutData = {
+    body?: never;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Document Id
+         */
+        document_id: string;
+        /**
+         * User Id
+         */
+        user_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/library/{document_id}/grants/{user_id}';
+};
+
+export type GrantLibraryDocumentApiV1ComposerLibraryDocumentIdGrantsUserIdPutErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type GrantLibraryDocumentApiV1ComposerLibraryDocumentIdGrantsUserIdPutError = GrantLibraryDocumentApiV1ComposerLibraryDocumentIdGrantsUserIdPutErrors[keyof GrantLibraryDocumentApiV1ComposerLibraryDocumentIdGrantsUserIdPutErrors];
+
+export type GrantLibraryDocumentApiV1ComposerLibraryDocumentIdGrantsUserIdPutResponses = {
+    /**
+     * Successful Response
+     */
+    200: LibraryDocumentResponse;
+};
+
+export type GrantLibraryDocumentApiV1ComposerLibraryDocumentIdGrantsUserIdPutResponse = GrantLibraryDocumentApiV1ComposerLibraryDocumentIdGrantsUserIdPutResponses[keyof GrantLibraryDocumentApiV1ComposerLibraryDocumentIdGrantsUserIdPutResponses];
+
+export type ListLibraryVersionsApiV1ComposerLibraryDocumentIdVersionsGetData = {
+    body?: never;
+    path: {
+        /**
+         * Document Id
+         */
+        document_id: string;
+    };
+    query?: {
+        /**
+         * Limit
+         */
+        limit?: number;
+        /**
+         * Offset
+         */
+        offset?: number;
+    };
+    url: '/api/v1/composer/library/{document_id}/versions';
+};
+
+export type ListLibraryVersionsApiV1ComposerLibraryDocumentIdVersionsGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type ListLibraryVersionsApiV1ComposerLibraryDocumentIdVersionsGetError = ListLibraryVersionsApiV1ComposerLibraryDocumentIdVersionsGetErrors[keyof ListLibraryVersionsApiV1ComposerLibraryDocumentIdVersionsGetErrors];
+
+export type ListLibraryVersionsApiV1ComposerLibraryDocumentIdVersionsGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: LibraryVersionListResponse;
+};
+
+export type ListLibraryVersionsApiV1ComposerLibraryDocumentIdVersionsGetResponse = ListLibraryVersionsApiV1ComposerLibraryDocumentIdVersionsGetResponses[keyof ListLibraryVersionsApiV1ComposerLibraryDocumentIdVersionsGetResponses];
+
+export type ReplaceLibraryDocumentApiV1ComposerLibraryDocumentIdVersionsPostData = {
+    body: BodyReplaceLibraryDocumentApiV1ComposerLibraryDocumentIdVersionsPost;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Document Id
+         */
+        document_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/library/{document_id}/versions';
+};
+
+export type ReplaceLibraryDocumentApiV1ComposerLibraryDocumentIdVersionsPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type ReplaceLibraryDocumentApiV1ComposerLibraryDocumentIdVersionsPostError = ReplaceLibraryDocumentApiV1ComposerLibraryDocumentIdVersionsPostErrors[keyof ReplaceLibraryDocumentApiV1ComposerLibraryDocumentIdVersionsPostErrors];
+
+export type ReplaceLibraryDocumentApiV1ComposerLibraryDocumentIdVersionsPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: LibraryDocumentResponse;
+};
+
+export type ReplaceLibraryDocumentApiV1ComposerLibraryDocumentIdVersionsPostResponse = ReplaceLibraryDocumentApiV1ComposerLibraryDocumentIdVersionsPostResponses[keyof ReplaceLibraryDocumentApiV1ComposerLibraryDocumentIdVersionsPostResponses];
+
+export type DownloadLibraryVersionApiV1ComposerLibraryDocumentIdVersionsVersionIdContentGetData = {
+    body?: never;
+    path: {
+        /**
+         * Document Id
+         */
+        document_id: string;
+        /**
+         * Version Id
+         */
+        version_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/library/{document_id}/versions/{version_id}/content';
+};
+
+export type DownloadLibraryVersionApiV1ComposerLibraryDocumentIdVersionsVersionIdContentGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type DownloadLibraryVersionApiV1ComposerLibraryDocumentIdVersionsVersionIdContentGetError = DownloadLibraryVersionApiV1ComposerLibraryDocumentIdVersionsVersionIdContentGetErrors[keyof DownloadLibraryVersionApiV1ComposerLibraryDocumentIdVersionsVersionIdContentGetErrors];
+
+export type DownloadLibraryVersionApiV1ComposerLibraryDocumentIdVersionsVersionIdContentGetResponses = {
     /**
      * Successful Response
      */

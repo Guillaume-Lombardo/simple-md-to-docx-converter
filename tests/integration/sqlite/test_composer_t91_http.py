@@ -10,6 +10,7 @@ from zipfile import ZipFile
 import pytest
 from fastapi.testclient import TestClient
 from pytest_mock import MockerFixture
+from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
 from markweave.app import AppComponents, create_app
@@ -23,6 +24,11 @@ from markweave.malware import MalwareScannerUnavailableError
 from markweave.persistence.composer import SqlComposerRepository
 from markweave.persistence.composer.author_knowledge import SqlAuthorKnowledgeRepository
 from markweave.persistence.composer.fill_plans import SqlFillPlanRepository
+from markweave.persistence.composer.library import (
+    LibrarySource,
+    SqlComposerLibraryRepository,
+)
+from markweave.persistence.composer.model_steps import ComposerCapacityError
 from markweave.persistence.composer.typed_templates import SqlTypedTemplateRepository
 from markweave.persistence.errors import PersistenceError
 from markweave.persistence.migrations import upgrade_database
@@ -33,6 +39,17 @@ from tests.integration.composer.test_typed_docx_fill import _schema, _template
 from tests.settings import template_settings
 
 pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
+
+
+def _library(
+    engine: Engine, objects: FilesystemObjectStore
+) -> SqlComposerLibraryRepository:
+    return SqlComposerLibraryRepository(
+        engine,
+        objects,
+        publication_lease=timedelta(seconds=30),
+        maximum_scanned_chunks=100,
+    )
 
 
 def _client(tmp_path: Path, mocker: MockerFixture):
@@ -104,6 +121,7 @@ def _client(tmp_path: Path, mocker: MockerFixture):
             composer_fill_plans=SqlFillPlanRepository(engine),
             composer_connections=connections,
             composer_steps=runner,
+            composer_library=_library(engine, objects),
         ),
     )
     return (
@@ -514,4 +532,82 @@ def test_authored_schema_default_is_attributed_and_frozen(
         frozen = json.loads(published.json()["typed_fill_snapshot"])
         assert frozen["approved_values"]["finding.count"] == 1
         assert frozen["provenance"]["finding.count"]["kind"] == "human_approved"
+    engine.dispose()
+
+
+def test_author_records_precede_cited_library_excerpts_in_one_reviewed_prompt(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    engine, client, composer, _scanner, owner, _authors, connections, runner = _client(
+        tmp_path, mocker
+    )
+    draft = composer.create_draft_with_source(
+        owner.id,
+        b"# Input\n",
+        "scanner-approved",
+        title="Input",
+        content="# Input\n",
+        media_type="text/markdown",
+    )
+    connection = mocker.Mock()
+    connection.enabled = True
+    connection.endpoint = "https://llm.example.test/v1"
+    connection.selected_model = "approved"
+    connection.permitted_models = ("approved",)
+    connections.get_visible.return_value = connection
+    document = _library(engine, FilesystemObjectStore(tmp_path)).create(
+        owner.id,
+        "Notes",
+        LibrarySource(
+            b"Gearbox corrosion.", "text/markdown", "test", ("Gearbox corrosion.",)
+        ),
+    )
+    # The runner double refuses admission; only its reviewed input matters here.
+    runner.start.side_effect = ComposerCapacityError("busy")
+    with client:
+        author = client.post(
+            "/api/v1/composer/authors",
+            json={"name": "Ada", "fields": {}},
+            headers={"X-CSRF-Token": "csrf"},
+        )
+        assert author.status_code == 201, author.text
+        request = {
+            "connection_id": str(UUID(int=17)),
+            "approved_endpoint": connection.endpoint,
+            "approved_model": connection.selected_model,
+            "content": "Write a summary.",
+            "max_output_tokens": 8,
+        }
+        citation = {"version_id": str(document.current_version_id), "chunk": 0}
+        preview = client.post(
+            f"/api/v1/composer/drafts/{draft.id}/model-steps/preview",
+            json={
+                **request,
+                "author_ids": [author.json()["id"]],
+                "library_refs": [citation],
+            },
+            headers={"X-CSRF-Token": "csrf", "If-Match": draft.etag},
+        )
+        assert preview.status_code == 200, preview.text
+        transmitted = preview.json()["transmitted_content"]
+        assert transmitted.index("Ada") < transmitted.index("Gearbox corrosion.")
+        assert [item["chunk"] for item in preview.json()["library_excerpts"]] == [0]
+        started = client.post(
+            f"/api/v1/composer/drafts/{draft.id}/model-steps",
+            json={
+                **request,
+                "author_refs": preview.json()["author_refs"],
+                "library_refs": [citation],
+                "author_preview_digest": preview.json()["preview_digest"],
+            },
+            headers={
+                "X-CSRF-Token": "csrf",
+                "If-Match": draft.etag,
+                "Idempotency-Key": "combined",
+            },
+        )
+        assert started.status_code == 503, started.text
+        model_input = runner.start.call_args.args[2]
+        assert model_input.content == transmitted
+        assert model_input.library_refs == ((document.current_version_id, 0),)
     engine.dispose()

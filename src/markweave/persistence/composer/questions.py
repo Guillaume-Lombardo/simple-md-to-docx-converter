@@ -68,6 +68,7 @@ class ComposerQuestion:
     created_at: datetime
     answered_at: datetime | None
     source_author_ids: tuple[UUID, ...] = ()
+    source_library_refs: tuple[tuple[UUID, int], ...] = ()
 
 
 def question_from_row(
@@ -75,6 +76,7 @@ def question_from_row(
     *,
     answer_content: str | None,
     source_author_ids: tuple[UUID, ...] = (),
+    source_library_refs: tuple[tuple[UUID, int], ...] = (),
 ) -> ComposerQuestion:
     return ComposerQuestion(
         id=UUID(row.id),
@@ -90,4 +92,5 @@ def question_from_row(
         created_at=utc(row.created_at),
         answered_at=utc(row.answered_at) if row.answered_at else None,
         source_author_ids=source_author_ids,
+        source_library_refs=source_library_refs,
     )

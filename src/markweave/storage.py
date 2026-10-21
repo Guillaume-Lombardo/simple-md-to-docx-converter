@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import StrEnum
 from importlib import import_module
 from pathlib import Path
 from tempfile import mkstemp
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 from uuid import UUID
 
 
@@ -24,6 +25,7 @@ class ObjectScope(StrEnum):
     COMPOSER_ARTIFACT = "composer-artifacts"
     COMPOSER_SOURCE = "composer-sources"
     TYPED_TEMPLATE = "typed-templates"
+    COMPOSER_LIBRARY = "composer-library"
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +64,23 @@ class ObjectStore(Protocol):
     def exists(self, key: ObjectKey) -> bool: ...
 
     def is_ready(self) -> bool: ...
+
+
+@runtime_checkable
+class ListableObjectStore(ObjectStore, Protocol):
+    """Object storage that can enumerate one scope for orphan reconciliation."""
+
+    def list_keys(self, scope: ObjectScope) -> Iterator[ObjectKey]: ...
+
+
+def _scoped_key(scope: ObjectScope, owner: str, name: str) -> ObjectKey | None:
+    """Parse one stored name; anything not written by this adapter is skipped."""
+
+    try:
+        key = ObjectKey(scope, UUID(owner), UUID(name))
+    except ValueError:
+        return None
+    return key if key.as_posix() == f"{scope.value}/{owner}/{name}" else None
 
 
 class BoundedObjectStore(ObjectStore, Protocol):
@@ -136,6 +155,22 @@ class FilesystemObjectStore:
     def exists(self, key: ObjectKey) -> bool:
         try:
             return self._path(key).is_file()
+        except OSError:
+            raise ObjectStoreError("Object storage operation failed") from None
+
+    def list_keys(self, scope: ObjectScope) -> Iterator[ObjectKey]:
+        """Yield every complete object in ``scope``; in-flight temporaries are skipped."""
+
+        directory = self._root / scope.value
+        try:
+            owners = sorted(directory.iterdir()) if directory.is_dir() else []
+            for owner in owners:
+                if owner.is_symlink() or not owner.is_dir():
+                    continue
+                for item in sorted(owner.iterdir()):
+                    key = _scoped_key(scope, owner.name, item.name)
+                    if key is not None and not item.is_symlink() and item.is_file():
+                        yield key
         except OSError:
             raise ObjectStoreError("Object storage operation failed") from None
 
@@ -267,6 +302,29 @@ class S3ObjectStore:
         except self._boto_core_error as error:
             raise ObjectStoreError("Object storage operation failed") from error
         return True
+
+    def list_keys(self, scope: ObjectScope) -> Iterator[ObjectKey]:
+        """Yield every object below ``scope``'s prefix, one listing page at a time."""
+
+        prefix = f"{scope.value}/"
+        arguments: dict[str, Any] = {"Bucket": self._bucket, "Prefix": prefix}
+        while True:
+            try:
+                response = self._client.list_objects_v2(**arguments)
+                names = [str(item["Key"]) for item in response.get("Contents", [])]
+            except (*self._boto_errors, KeyError, TypeError) as error:
+                raise ObjectStoreError("Object storage operation failed") from error
+            for name in names:
+                owner, _, object_id = name.removeprefix(prefix).partition("/")
+                key = _scoped_key(scope, owner, object_id)
+                if key is not None:
+                    yield key
+            if not response.get("IsTruncated"):
+                return
+            token = response.get("NextContinuationToken")
+            if not isinstance(token, str):
+                raise ObjectStoreError("Object storage operation failed")
+            arguments["ContinuationToken"] = token
 
     def is_ready(self) -> bool:
         try:

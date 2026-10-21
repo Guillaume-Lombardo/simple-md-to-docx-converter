@@ -294,6 +294,47 @@ the step's model identity, `provenance` `human:{decision}:model-step:{step_id}`,
 Markdown proposal publication route refuses Office proposals, and a plain Markdown step's text can
 never be published as an Office edit.
 
+The cited reference library stores private source documents that a user may search and quote.
+`POST /api/v1/composer/library` accepts multipart `file` (`.md`, `.txt`, `.docx`, or `.pptx`) and an
+optional `title` (at most 200 characters; the file stem by default). The upload is bounded by the
+Composer upload limit and malware-scanned before any parsing; Office packages pass the same
+admission rules as Office editing. Its readable text is split into immutable numbered chunks of
+whole paragraphs. A rejected, infected, empty, or unreadable source stores nothing. `GET
+/api/v1/composer/library?limit=50&offset=0&query=` lists documents the caller owns or was granted,
+and `GET .../library/{document_id}` returns one with its `ETag`. Only the owner sees
+`shared_with`. `POST .../library/{document_id}/versions` with `If-Match` publishes the next
+immutable version; earlier versions stay available to cite, list through `GET .../versions`, and
+download exactly through `GET .../versions/{version_id}/content`. `PUT` and `DELETE
+.../library/{document_id}/grants/{user_id}` share with or revoke one named active user, and `DELETE
+.../library/{document_id}` removes the document; all three require the current `If-Match`, are
+owner-only, and are audited without content. Another user's document, an inactive account, or an
+unknown identity returns `404 COMPOSER_LIBRARY_NOT_FOUND`; a stale `If-Match` or concurrent change
+returns `412 COMPOSER_LIBRARY_CHANGED`. Deletion records a cleanup obligation for every version's
+stored source in the same transaction, and each maintenance pass (at startup and on the retention
+cadence) sweeps those obligations, then lists the library's object scope and removes any source
+that no version references, such as a late write from an upload interrupted by the deletion. The
+distributed profile therefore needs permission to list the bucket. Each pass lists the whole
+library scope, so its cost grows with the number of stored library versions.
+
+`POST /api/v1/composer/library/search` takes `{ "query": "...", "limit": 10 }` with one to eight
+terms of at least two characters. It ranks chunks of current versions that contain every term and
+returns each hit's document, exact version, chunk number, score, and a bounded snippet.
+`POST /api/v1/composer/library/excerpts` takes up to 20 distinct `{ "version_id", "chunk" }`
+references and returns each exact chunk with its version number and SHA-256. Authorization is
+checked before any text is read: a search returns only authorized chunks, and an excerpt of an
+unauthorized, revoked, or deleted document returns `404` with no text. A search hit or a stored
+citation never grants access by itself. Responses are `private, no-store`.
+
+A model step may cite library excerpts. The model-step preview also accepts `library_refs`, up to 20
+distinct `{ "version_id", "chunk" }` references the caller may read. Its `transmitted_content`
+appends those exact chunks, after any author records, as JSON reference data with a
+`library:{version_id}#{chunk}` citation, title, version, and SHA-256, and `library_excerpts`
+lists them. Starting the step requires the same `library_refs` with the preview digest in
+`author_preview_digest`; the step response returns its `library_refs`. Access to every cited
+chunk is rechecked at admission, immediately before transmission, before the result is
+recorded, and when the proposal is published. If the document was revoked or deleted at any of
+those points, the step fails or the publication returns `412` without transmitting or publishing.
+
 `POST /api/v1/composer/drafts/{id}/revisions/{approved_revision_id}/generations` accepts
 `{ "output": "docx"|"pdf"|"pptx", "template_id": null,
 "template_version_id": null, "presentation_dialect": null, "slide_level": null }`

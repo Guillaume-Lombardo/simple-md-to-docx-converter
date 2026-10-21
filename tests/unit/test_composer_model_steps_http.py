@@ -68,6 +68,7 @@ def _client(
     authentication.authenticate.return_value = owner
     runner = mocker.Mock(spec=ComposerStepRunner)
     repository = mocker.Mock(spec=SqlComposerModelStepRepository)
+    repository.replay_model_step.return_value = None
     app = create_app(
         settings,
         components=AppComponents(
