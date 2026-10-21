@@ -178,6 +178,7 @@ function setup(
     recoveredPublicationFetchFails?: boolean;
     secondDraft?: boolean;
     officeProposal?: boolean;
+    officeStructure?: Record<string, unknown>;
     library?: {
       search: ReturnType<typeof vi.fn>;
       excerpts?: ReturnType<typeof vi.fn>;
@@ -455,6 +456,9 @@ function setup(
     restore: vi.fn().mockResolvedValue({ data: revision }),
     publishOfficeProposal: vi.fn().mockResolvedValue({ data: revision }),
     ...(options.library ? { library: options.library } : {}),
+    ...(options.officeStructure
+      ? { officeStructure: options.officeStructure }
+      : {}),
     ...(options.officeProposal
       ? {
           office: {
@@ -1934,6 +1938,61 @@ test("approved Office edit proposals show their exact changes and publish as Off
       "Approved text edits published as an immutable revision.",
     ),
   ).toBeVisible();
+});
+
+test("structure edits publish from the workspace and reload the new revision", async () => {
+  const officeStructure = {
+    structure: vi.fn().mockResolvedValue({
+      format: "docx",
+      revision_id: revision.id,
+      download_sha256: "a".repeat(64),
+      engine_version: 1,
+      paragraphs: [
+        {
+          target: "word/document.xml#p0",
+          paragraph: 0,
+          in_table: false,
+          style: null,
+          text: "Old title",
+        },
+      ],
+      paragraph_styles: [{ style_id: "Heading1", name: "heading 1" }],
+      slides: [],
+      images: [],
+    }),
+    edit: vi.fn().mockResolvedValue({
+      data: { ...revision, number: 3, operation: "docx_structure_edit:x" },
+    }),
+  };
+  const api = setup({ officeProposal: true, officeStructure });
+  fireEvent.change(
+    await screen.findByLabelText("Style of paragraph 1: Old title"),
+    { target: { value: "Heading1" } },
+  );
+  const loads = api.draft.mock.calls.length;
+  fireEvent.click(
+    screen.getByRole("button", { name: "Publish structure edits (1)" }),
+  );
+  await waitFor(() =>
+    expect(officeStructure.edit).toHaveBeenCalledWith(
+      draft.id,
+      revision.id,
+      "docx",
+      draft.etag,
+      expect.any(String),
+      [
+        {
+          op: "set_paragraph_style",
+          target: "word/document.xml#p0",
+          expected_style: null,
+          style: "Heading1",
+        },
+      ],
+    ),
+  );
+  await waitFor(() =>
+    expect(api.draft.mock.calls.length).toBeGreaterThan(loads),
+  );
 });
 
 test("pending Office edit proposals are reviewed before any publication", async () => {

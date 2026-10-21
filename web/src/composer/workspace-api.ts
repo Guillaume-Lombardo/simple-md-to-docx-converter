@@ -8,6 +8,7 @@ import {
   libraryExcerptSchema,
 } from "./library-api";
 import { OfficeEditApi } from "./office-edit-api";
+import { OfficeStructureApi } from "./office-structure-api";
 
 const draftSchema = v.object({
   id: v.string(),
@@ -181,11 +182,13 @@ const page = <T extends v.BaseSchema<unknown, unknown, v.BaseIssue<unknown>>>(
 export class ComposerWorkspaceApi {
   readonly connections: ComposerConnectionsApi;
   readonly office: OfficeEditApi;
+  readonly officeStructure: OfficeStructureApi;
   readonly library: LibraryApi;
 
   constructor(private readonly transport = new ApiTransport()) {
     this.connections = new ComposerConnectionsApi(transport);
     this.office = new OfficeEditApi(transport);
+    this.officeStructure = new OfficeStructureApi(transport);
     this.library = new LibraryApi(transport);
   }
 

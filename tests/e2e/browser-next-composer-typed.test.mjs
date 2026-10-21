@@ -1356,6 +1356,146 @@ async function officeStructureJourney(alice, bob, suffix) {
   ]);
 }
 
+/** Wait until the draft's current revision moves past `previous`. */
+async function nextOfficeRevision(page, path, previous) {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const current = await currentOfficeRevision(page, path);
+    if (current.id !== previous) return current;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error("The structure edit did not publish a revision.");
+}
+
+/** Restyle and replace an image through the panel, then through the CLI. */
+async function officeStructureSurfaces(alice, bob, suffix) {
+  const { draft, path, base } = await officeDraft(
+    alice,
+    "structure-panel",
+    suffix,
+  );
+  const before = expectStatus(
+    await api(alice, "GET", `${path}/revisions/${base.id}/docx-structure`),
+    200,
+  );
+  const paragraph = before.paragraphs[1];
+  const image = before.images.find(
+    (item) => item.target === "word/media/image1.png",
+  );
+  await alice.goto(`${baseURL}/composer?draft=${draft.id}`, {
+    waitUntil: "networkidle",
+  });
+  const panel = alice.getByRole("region", { name: "Office structure editing" });
+  await panel
+    .getByLabel(`Style of paragraph ${paragraph.paragraph + 1}: ${paragraph.text}`)
+    .selectOption("Heading2");
+  await panel.getByLabel(`Replacement for ${image.target}`).setInputFiles({
+    name: "pixel.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(pixelPng, "base64"),
+  });
+  await panel
+    .getByRole("button", { name: "Publish structure edits (2)" })
+    .click();
+  const panelEdited = await nextOfficeRevision(alice, path, base.id);
+  assert.equal(panelEdited.operation, `docx_structure_edit:${base.id}`);
+  await exactOfficeBytes(alice, path, panelEdited);
+  const afterPanel = expectStatus(
+    await api(alice, "GET", `${path}/revisions/${panelEdited.id}/docx-structure`),
+    200,
+  );
+  assert.equal(afterPanel.paragraphs[1].style, "Heading2");
+  assert.notEqual(
+    afterPanel.images.find((item) => item.target === image.target).sha256,
+    image.sha256,
+  );
+
+  const aliceCli = await cliProfile(alice, `structure-alice-${profile}`);
+  const bobCli = await cliProfile(bob, `structure-bob-${profile}`);
+  const listed = expectCli(
+    await cli(
+      aliceCli,
+      "composer",
+      "office",
+      "structure",
+      draft.id,
+      panelEdited.id,
+      "--format",
+      "docx",
+    ),
+  );
+  assert.deepEqual(listed.paragraphs, afterPanel.paragraphs);
+  const foreign = await cli(
+    bobCli,
+    "composer",
+    "office",
+    "structure",
+    draft.id,
+    panelEdited.id,
+    "--format",
+    "docx",
+  );
+  assert.notEqual(foreign.code, 0);
+  assert.match(foreign.error?.code ?? "", /not_found/);
+  const replacement = await privateFile(
+    `structure-${suffix}.png`,
+    Buffer.from(pixelPng, "base64"),
+  );
+  const operations = await privateFile(
+    `structure-${suffix}.json`,
+    JSON.stringify([
+      {
+        op: "set_paragraph_style",
+        target: paragraph.target,
+        expected_style: "Heading2",
+        style: "Normal",
+      },
+      {
+        op: "replace_image",
+        target: image.target,
+        expected_sha256: afterPanel.images.find(
+          (item) => item.target === image.target,
+        ).sha256,
+        image_file: replacement,
+      },
+    ]),
+  );
+  const ready = expectStatus(await api(alice, "GET", path), 200);
+  const restructure = (etag, key) =>
+    cli(
+      aliceCli,
+      "composer",
+      "office",
+      "restructure",
+      draft.id,
+      panelEdited.id,
+      "--format",
+      "docx",
+      "--operations-file",
+      operations,
+      "--etag",
+      etag,
+      "--idempotency-key",
+      key,
+    );
+  const cliEdited = expectCli(
+    await restructure(ready.etag, `cli-structure-${suffix}`),
+  ).revision;
+  assert.equal(cliEdited.operation, `docx_structure_edit:${panelEdited.id}`);
+  const stale = await restructure(ready.etag, `cli-structure-stale-${suffix}`);
+  assert.notEqual(stale.code, 0);
+  assert.match(stale.error?.code ?? "", /precondition/);
+  const current = await currentOfficeRevision(alice, path);
+  assert.equal(current.id, cliEdited.id);
+  await exactOfficeBytes(alice, path, current);
+  assert.equal(
+    expectStatus(
+      await api(alice, "GET", `${path}/revisions/${cliEdited.id}/docx-structure`),
+      200,
+    ).paragraphs[1].style,
+    "Normal",
+  );
+}
+
 test(`typed Composer shares, human decisions, and exact regeneration in ${profile}`, async () => {
   const suffix = `${profile}-${Date.now()}`;
   const [templateBytes, schema] = await Promise.all([
@@ -1985,6 +2125,7 @@ test(`typed Composer shares, human decisions, and exact regeneration in ${profil
     await citedLibrary(alice, bob, bobUser, connection, suffix);
     await libraryRecoveryState(admin, suffix);
     await officeStructureJourney(alice, bob, suffix);
+    await officeStructureSurfaces(alice, bob, suffix);
   } finally {
     await Promise.all(contexts.map((context) => context.close()));
     await browser.close();

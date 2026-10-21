@@ -128,10 +128,12 @@ Targets are listed slide by slide in presentation order with each slide's notes.
 other fields, and layout or master text are not editable; slide order, shapes, and images are
 unchanged.
 
-Through the [Composer API](api-guide.md), the current revision's structure can also change: a
-Word paragraph can take another existing paragraph style, a slide can move within a deck, and a
-PNG or JPEG image can be replaced. Uploaded images are scanned and re-encoded, and nothing else in
-the file changes. These structural edits are human-only and not yet in the browser panel.
+The **Edit document structure** panel changes the current revision's structure: give a Word
+paragraph another existing paragraph style, move slides up or down within a deck, or choose a PNG
+or JPEG to replace an image. **Publish structure edits** creates one new revision. Uploaded images
+are scanned and re-encoded, and nothing else in the file changes. The same edits are available
+through the [Composer API](api-guide.md) and `markweave composer office restructure`; the model
+cannot propose structural edits.
 
 You can also ask the model to propose text changes. Tick **Share with the model** for the exact
 text to send, write an instruction, and choose **Preview model request** to review the outgoing
