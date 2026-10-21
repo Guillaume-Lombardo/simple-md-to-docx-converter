@@ -14,6 +14,8 @@ import { useAuth } from "../auth/context";
 import { type ComposerCapabilities, type ComposerConnection } from "./api";
 import { AuthorDirectoryApi, type AuthorEntry } from "./author-directory-api";
 import { ComposerFillPanel } from "./fill-panel";
+import { parseOfficeProposal } from "./office-edit-api";
+import { ComposerOfficeEditPanel } from "./office-edit-panel";
 import {
   ComposerPreview,
   type ActivePreviewRevision,
@@ -1471,6 +1473,25 @@ function ComposerWorkspaceInner({
   const format = previewArtifact
     ? fileFormat(previewArtifact.media_type)
     : null;
+  const officeTokens = Number(requestedTokens);
+  const officeModel =
+    modelReady &&
+    chosen &&
+    Number.isSafeInteger(officeTokens) &&
+    officeTokens > 0
+      ? {
+          connectionId: chosen.id,
+          endpoint: chosen.endpoint,
+          model,
+          maxOutputTokens: officeTokens,
+        }
+      : null;
+  const officeChanges = (proposal: ComposerProposal) => {
+    const value = parseOfficeProposal(
+      proposal.decided_value ?? proposal.proposed_value,
+    );
+    return value ? value.operations : null;
+  };
 
   return (
     <AppShell
@@ -2294,7 +2315,39 @@ function ComposerWorkspaceInner({
                         </div>
                       </>
                     )}
+                    {officeChanges(proposal) && (
+                      <ul aria-label="Proposed text changes">
+                        {officeChanges(proposal)?.map((change) => (
+                          <li key={change.target}>
+                            {change.target}: “{change.expected_text}” → “
+                            {change.text}”
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {officeChanges(proposal) &&
+                      (proposal.state === "accepted" ||
+                        proposal.state === "edited") && (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() =>
+                            void mutate(
+                              () =>
+                                api.publishOfficeProposal(
+                                  draft,
+                                  proposal.id,
+                                  crypto.randomUUID(),
+                                ),
+                              "Approved text edits published as an immutable revision.",
+                            )
+                          }
+                        >
+                          Publish approved text edits
+                        </button>
+                      )}
                     {publishableMarkdown &&
+                      !officeChanges(proposal) &&
                       (proposal.state === "accepted" ||
                         proposal.state === "edited") && (
                         <button
@@ -2321,6 +2374,28 @@ function ComposerWorkspaceInner({
             </section>
           </section>
           <section aria-label="Revision preview" className="min-w-0 space-y-4">
+            {api.office &&
+              revision &&
+              revision.id === draft.current_revision_id &&
+              (format === "docx" || format === "pptx") && (
+                <ComposerOfficeEditPanel
+                  api={api.office}
+                  draftEtag={draft.etag}
+                  draftId={draft.id}
+                  expire={expireSession}
+                  format={format}
+                  key={revision.id}
+                  model={officeModel}
+                  onProposalReady={() => {
+                    if (selectedId.current === draft.id) void load(draft.id);
+                  }}
+                  onPublished={(revisionId) => {
+                    if (selectedId.current === draft.id)
+                      void load(draft.id, revisionId);
+                  }}
+                  revisionId={revision.id}
+                />
+              )}
             {ownerId && (
               <ComposerFillPanel
                 draft={draft}

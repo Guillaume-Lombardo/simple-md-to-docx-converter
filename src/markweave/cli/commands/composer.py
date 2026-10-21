@@ -136,6 +136,7 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     _register_model_steps(commands)
     _register_proposals(commands)
     _register_revisions(commands)
+    _register_office(commands)
     _register_authors(commands)
     _register_fill_templates(commands)
     _register_fill_plans(commands)
@@ -500,6 +501,84 @@ def _register_revisions(
     _idempotency_key(restore)
     _profile(restore)
     _bind(restore, "revisions restore", _restore_revision)
+
+
+def _register_office(
+    commands: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
+    office = commands.add_parser(
+        "office", help="Edit the text of exact DOCX and PPTX revisions."
+    )
+    actions = office.add_subparsers(dest="office_command", metavar="COMMAND")
+
+    targets = actions.add_parser("targets", help="List a revision's editable text.")
+    _draft_id(targets)
+    _revision_id(targets)
+    _office_format(targets)
+    _pagination(targets)
+    _profile(targets)
+    _bind(targets, "office targets", _office_targets, offset=0, limit=50)
+
+    edit = actions.add_parser(
+        "edit", help="Publish reviewed text replacements as a new revision."
+    )
+    _draft_id(edit)
+    _revision_id(edit)
+    _office_format(edit)
+    edit.add_argument(
+        "--operations-file",
+        required=True,
+        action=_Store,
+        metavar="PATH",
+        help="JSON list of {target, expected_text, text} replacements.",
+    )
+    _etag(edit)
+    _idempotency_key(edit)
+    _profile(edit)
+    _bind(edit, "office edit", _office_edit)
+
+    propose = actions.add_parser(
+        "propose", help="Ask an approved model to propose text replacements."
+    )
+    _draft_id(propose)
+    _revision_id(propose)
+    _connection_id(propose)
+    propose.add_argument(
+        "--target",
+        action=_Append,
+        required=True,
+        metavar="TARGET",
+        help="Share one editable text target with the model.",
+    )
+    source = propose.add_mutually_exclusive_group(required=True)
+    source.add_argument(
+        "--instruction-file", dest="content_file", action=_Store, metavar="PATH"
+    )
+    source.add_argument(
+        "--stdin", action=_Flag, help="Read the instruction from stdin."
+    )
+    propose.add_argument("--max-output-tokens", type=int, required=True, action=_Store)
+    _etag(propose)
+    _idempotency_key(propose)
+    _force(propose)
+    _profile(propose)
+    _bind(propose, "office propose", _office_propose, target=[])
+
+    publish = actions.add_parser(
+        "publish", help="Publish an approved model text proposal."
+    )
+    _draft_id(publish)
+    _proposal_id(publish)
+    _etag(publish)
+    _idempotency_key(publish)
+    _profile(publish)
+    _bind(publish, "office publish", _office_publish)
+
+
+def _office_format(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--format", choices=("docx", "pptx"), required=True, action=_Store
+    )
 
 
 def _register_policy(
@@ -1902,6 +1981,182 @@ def _restore_revision(
     writer.success("Composer revision restored.", {"revision": revision})
 
 
+def _office_targets(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    draft_id, revision_id = _draft(command), _revision(command)
+    office_format = _required_string(command, "format")
+    payload = _paginated_get(
+        context,
+        command,
+        f"/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/"
+        f"{office_format}-text-targets",
+        "targets",
+    )
+    writer.success(
+        _human_items(payload["targets"], ("target", "text"), "No editable text."),
+        payload,
+    )
+
+
+def _office_operations(command: _Command, maximum_bytes: int) -> list[dict[str, str]]:
+    raw = _read_model_content_file(
+        Path(_required_string(command, "operations_file")),
+        maximum_bytes=maximum_bytes,
+        label="Office edit",
+    )
+    if len(raw) > maximum_bytes:
+        raise CliError(
+            "content_too_large", "The edit request exceeds the service limit."
+        )
+    try:
+        operations = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as error:
+        raise CliError(
+            "invalid_operations", "The edit operations are invalid."
+        ) from error
+    if (
+        not isinstance(operations, list)
+        or not operations
+        or any(
+            not isinstance(item, dict)
+            or set(item) != {"target", "expected_text", "text"}
+            or not all(isinstance(value, str) for value in item.values())
+            for item in operations
+        )
+    ):
+        raise CliError("invalid_operations", "The edit operations are invalid.")
+    return [{"op": "replace_text", **item} for item in operations]
+
+
+def _office_edit(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    draft_id, revision_id = _draft(command), _revision(command)
+    office_format = _required_string(command, "format")
+    limit = _capability_value(
+        _composer_capabilities(context, command), "maximum_model_request_bytes"
+    )
+    revision = _object(
+        _request(
+            context,
+            command,
+            "POST",
+            f"/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/"
+            f"{office_format}-edits",
+            body={"operations": _office_operations(command, limit)},
+            csrf=True,
+            etag=_required_string(command, "etag"),
+            idempotency_key=_required_string(command, "idempotency_key"),
+        ),
+        _CREATED,
+        "office_edit_failed",
+    )
+    writer.success("Composer text edits published.", {"revision": revision})
+
+
+def _office_propose(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    draft_id, revision_id = _draft(command), _revision(command)
+    connection_id = _id(command)
+    connection = _object(
+        _request(
+            context, command, "GET", f"/api/v1/composer/connections/{connection_id}"
+        ),
+        _OK,
+        "connection_read_failed",
+    )
+    endpoint, model = _approved_connection(connection, connection_id)
+    capabilities = _composer_capabilities(context, command)
+    request_limit = _capability_value(capabilities, "maximum_model_request_bytes")
+    output_limit = _capability_value(capabilities, "maximum_output_tokens")
+    output_tokens = command.values.get("max_output_tokens")
+    if (
+        not isinstance(output_tokens, int)
+        or isinstance(output_tokens, bool)
+        or not 1 <= output_tokens <= output_limit
+    ):
+        raise CliError(
+            "invalid_output_tokens", "Output tokens exceed the service limit."
+        )
+    targets = command.values["target"]
+    if len(set(targets)) != len(targets) or not 1 <= len(targets) <= _MAXIMUM_PAGE_SIZE:
+        raise CliError("invalid_request", "The command arguments are invalid.")
+    body: dict[str, Any] = {
+        "connection_id": connection_id,
+        "approved_endpoint": endpoint,
+        "approved_model": model,
+        "instruction": _model_content(command, maximum_bytes=request_limit),
+        "targets": list(targets),
+        "max_output_tokens": output_tokens,
+    }
+    _bounded_model_body(body, request_limit)
+    path = (
+        f"/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/office-edit-steps"
+    )
+    etag = _required_string(command, "etag")
+    preview = _object(
+        _request(
+            context, command, "POST", f"{path}/preview", body=body, csrf=True, etag=etag
+        ),
+        _OK,
+        "office_preview_failed",
+    )
+    transmitted, digest = (
+        preview.get("transmitted_content"),
+        preview.get("preview_digest"),
+    )
+    if (
+        not isinstance(transmitted, str)
+        or not isinstance(digest, str)
+        or len(digest) != _SHA256_HEX_CHARACTERS
+        or preview.get("base_revision_id") != revision_id
+    ):
+        raise CliError("response_invalid", "The service returned an invalid response.")
+    _confirm_model_step(
+        context, command, endpoint=endpoint, model=model, content=transmitted
+    )
+    try:
+        response = _request(
+            context,
+            command,
+            "POST",
+            path,
+            body={**body, "preview_digest": digest},
+            csrf=True,
+            etag=etag,
+            idempotency_key=_required_string(command, "idempotency_key"),
+        )
+    except CliError as error:
+        raise CliError(
+            "model_step_start_failed", "The model step could not be started."
+        ) from error
+    step = _model_step_record(
+        _safe_model_step_response(response, 202, "model_step_start_failed"),
+        draft_id=draft_id,
+    )
+    if step["connection_id"] != connection_id or step["model_identity"] != model:
+        raise CliError("response_invalid", "The service returned an invalid response.")
+    writer.success(
+        f"Started Composer text proposal step {_human(step['id'])}.",
+        {"model_step": step},
+    )
+
+
+def _office_publish(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    draft_id, proposal_id = _draft(command), _proposal(command)
+    revision = _revision_mutation(
+        context,
+        command,
+        f"/api/v1/composer/drafts/{draft_id}/proposals/{proposal_id}/office-edits",
+        "office_proposal_publication_failed",
+    )
+    writer.success("Composer text proposal published.", {"revision": revision})
+
+
 def _revision_mutation(
     context: CommandContext, command: _Command, path: str, fallback: str
 ) -> dict[str, Any]:
@@ -2087,7 +2342,9 @@ def _model_content(command: _Command, *, maximum_bytes: int) -> str:
         ) from error
 
 
-def _read_model_content_file(path: Path, *, maximum_bytes: int) -> bytes:
+def _read_model_content_file(
+    path: Path, *, maximum_bytes: int, label: str = "Model text"
+) -> bytes:
     try:
         initial = path.lstat()
         if (
@@ -2097,7 +2354,7 @@ def _read_model_content_file(path: Path, *, maximum_bytes: int) -> bytes:
         ):
             raise CliError(
                 "content_file_unsafe",
-                "Model text files must be regular and accessible only by the current user.",
+                f"{label} files must be regular and accessible only by the current user.",
             )
         descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
         with os.fdopen(descriptor, "rb") as stream:
@@ -2110,14 +2367,14 @@ def _read_model_content_file(path: Path, *, maximum_bytes: int) -> bytes:
             ):
                 raise CliError(
                     "content_file_unsafe",
-                    "Model text files must be regular and accessible only by the current user.",
+                    f"{label} files must be regular and accessible only by the current user.",
                 )
             return _read_limited_bytes(stream, maximum_bytes)
     except CliError:
         raise
     except OSError as error:
         raise CliError(
-            "content_unreadable", "The model text could not be read."
+            "content_unreadable", f"The {label.lower()} could not be read."
         ) from error
 
 

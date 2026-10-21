@@ -125,6 +125,20 @@ T91.
   injected undisclosed target and publishes an accepted model proposal; the provider's expected
   successful chat counts rise from 12 to 14 and from 17 to 19. That phase is verified only by
   hosted CI.
+- 2026-10-21: Fourth increment on `feat/T92-office-ui-cli`, stacked on the model-edit branch:
+  browser, CLI, and diff support for Office text edits. The Composer workspace shows an **Edit
+  document text** panel for a current DOCX or PPTX revision with labelled targets (paragraph,
+  table, slide, notes), publication of changed runs with their loaded text as precondition, and
+  a model section that shares only ticked targets, shows the exact preview, sends it with the
+  reviewed digest, polls the step, and hands the proposal to the existing review list. Office
+  proposals there show each `expected → new` change and publish through the Office route; the
+  Markdown publish button is withheld for them. `markweave composer office targets|edit|propose|
+  publish` mirror the API, read operations or instructions only from private files or stdin,
+  and confirm the exact transmitted text before a model call. Revision diff now compares two
+  DOCX or two PPTX downloads as per-paragraph text (`scope` `artifact`, no contract enum change).
+  Evidence: 19 new vitest cases for the API client and panel plus two workspace cases; the full
+  web check passes with 90.04% branch coverage; 16 CLI unit tests; HTTP diff assertions for DOCX
+  and PPTX in SQLite and PostgreSQL/S3.
 
 ## Synchronization
 
