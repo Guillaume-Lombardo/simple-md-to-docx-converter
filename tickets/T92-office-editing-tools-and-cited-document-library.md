@@ -64,6 +64,18 @@ T91.
   the permissioned cited library with scanned uploads; PostgreSQL/S3 and final-rootless-image
   E2E proof in both profiles; independent review and docker-box deployment. No acceptance
   criterion is claimed complete.
+- 2026-10-21: Implementation-host verification of the first DOCX text-edit increment: `uv sync
+  --all-groups`, Ruff format/lint, and `ty` pass. The canonical engine-excluded suite ran 6,294
+  passed, 8 failed, and 78 errors in 10m40s. All 78 errors are PostgreSQL, S3, and local-service
+  tests that could not start because Docker is unavailable on this host; the 8 failures (engine
+  `/proc` isolation, read-only doctor, subreaper harness, and four broker factory tests) fail
+  identically on `main` `95bc188` here. Because the Docker-backed suites did not run, the
+  aggregate 89.79% branch coverage is not representative; the new executor, schemas, and router
+  reach 96–100% in that run, and the executor reaches 100% branch coverage in its focused run.
+  The web format, lint, typegen, typecheck, binding, and structure checks pass; the coverage run
+  passed 843 of 844 tests, and the remaining existing author-pagination test timed out at 5 s
+  under CPU contention and passed 47/47 when its file was rerun alone. Hosted CI remains the
+  required proof for the Docker-backed and engine-marked suites.
 
 ## Synchronization
 
