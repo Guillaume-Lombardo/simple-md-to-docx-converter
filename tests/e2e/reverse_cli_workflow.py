@@ -16,7 +16,8 @@ import sys
 import tempfile
 import time
 import zipfile
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
@@ -50,6 +51,10 @@ _SCANNED_CORPUS_SOURCE = Path("spikes/anydoc/corpus/pdf/handmade-scanned.pdf")
 _STRUCTURED_CORPUS_SOURCE = Path("spikes/anydoc/corpus/pptx/pres.pptx")
 _PROFILE_STATE_HOME = "/tmp/markweave-cli-state"  # noqa: S108 - container tmpfs
 _UNAVAILABLE_HOLDER_PID = "/tmp/markweave-t73-unavailable-holder.pid"  # noqa: S108
+_EXPIRY_SCHEMA = "t146-reverse-expiry-v1"
+# Retention cleanup runs every second in the E2E runtime; this bounds how late after
+# its deadline a retained reverse result may still be observed unexpired.
+_EXPIRY_GRACE_SECONDS = 30.0
 _EICAR = b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
 
 
@@ -65,17 +70,28 @@ def main() -> int:
     )
     parser.add_argument(
         "--phase",
-        choices=("primary", "structured-pptx", "expiry", "unavailable"),
+        choices=(
+            "primary",
+            "structured-pptx",
+            "expiry-submit",
+            "expiry-verify",
+            "unavailable",
+        ),
         default="primary",
     )
+    parser.add_argument("--state-file", type=Path)
     arguments = parser.parse_args()
+    if arguments.phase.startswith("expiry-") and arguments.state_file is None:
+        parser.error("--state-file is required for the expiry phases")
     try:
         if arguments.phase == "primary":
             _exercise_primary_success(arguments.container, arguments.profile)
         elif arguments.phase == "structured-pptx":
             _exercise_structured_pptx(arguments.container, arguments.profile)
-        elif arguments.phase == "expiry":
-            _exercise_expiry(arguments.container, arguments.profile)
+        elif arguments.phase == "expiry-submit":
+            _submit_expiry(arguments.container, arguments.profile, arguments.state_file)
+        elif arguments.phase == "expiry-verify":
+            _verify_expiry(arguments.container, arguments.profile, arguments.state_file)
         else:
             _exercise_unavailable(arguments.container, arguments.profile)
     except (OSError, subprocess.TimeoutExpired, WorkflowFailure) as error:
@@ -349,8 +365,8 @@ def _exercise_structured_pptx(container: str, profile: str) -> None:
     _cleanup_structured_result(container)
 
 
-def _exercise_expiry(container: str, profile: str) -> None:
-    """Require a retained reverse result to become unavailable within its live TTL."""
+def _submit_expiry(container: str, profile: str, state_file: Path) -> None:
+    """Retain one reverse result whose expiry `_verify_expiry` proves later (T146)."""
     _copy_source(container)
     _create_users(container)
     _login(container, _ALICE_PROFILE, _ALICE, _ALICE_PASSWORD)
@@ -387,19 +403,98 @@ def _exercise_expiry(container: str, profile: str) -> None:
         ),
         timeout=40,
     )
-    if completed.get("state") != "succeeded":
+    if completed.get("state") != "succeeded" or completed.get("id") != job_id:
         raise WorkflowFailure("expiry source job did not succeed")
-    deadline = time.monotonic() + 90
-    while time.monotonic() < deadline:
+    expires_at = completed.get("expires_at")
+    correlation_id = completed.get("correlation_id")
+    if not isinstance(expires_at, str) or not isinstance(correlation_id, str):
+        raise WorkflowFailure("expiry source job has no retention identity")
+    _expiry_timestamp(expires_at)
+    state = {
+        "schema": _EXPIRY_SCHEMA,
+        "profile": profile,
+        "job_id": job_id,
+        "correlation_id": correlation_id,
+        "expires_at": expires_at,
+    }
+    state_file.write_text(json.dumps(state, sort_keys=True) + "\n", encoding="utf-8")
+    state_file.chmod(0o600)
+
+
+def _read_expiry_state(state_file: Path, profile: str) -> dict[str, str]:
+    try:
+        state = json.loads(state_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise WorkflowFailure("expiry state is unreadable") from error
+    keys = {"schema", "profile", "job_id", "correlation_id", "expires_at"}
+    if (
+        not isinstance(state, dict)
+        or set(state) != keys
+        or not all(isinstance(state[key], str) and state[key] for key in keys)
+        or state["schema"] != _EXPIRY_SCHEMA
+        or state["profile"] != profile
+    ):
+        raise WorkflowFailure("expiry state is invalid")
+    try:
+        UUID(state["job_id"])
+        UUID(state["correlation_id"])
+    except ValueError as error:
+        raise WorkflowFailure("expiry state identity is invalid") from error
+    _expiry_timestamp(state["expires_at"])
+    return state
+
+
+def _expiry_timestamp(value: object) -> datetime:
+    if not isinstance(value, str):
+        raise WorkflowFailure("reverse expiry timestamp is missing")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as error:
+        raise WorkflowFailure("reverse expiry timestamp is invalid") from error
+    if parsed.tzinfo is None:
+        raise WorkflowFailure("reverse expiry timestamp has no time zone")
+    return parsed
+
+
+def _verify_expiry(
+    container: str,
+    profile: str,
+    state_file: Path,
+    *,
+    now: Callable[[], datetime] = lambda: datetime.now(UTC),
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    """Require the retained reverse result to expire in place within its grace bound."""
+    state = _read_expiry_state(state_file, profile)
+    job_id = state["job_id"]
+    expires_at = _expiry_timestamp(state["expires_at"])
+    # Log in again: the journeys run since submission own no part of this session.
+    _login(container, _ALICE_PROFILE, _ALICE, _ALICE_PASSWORD)
+    plain = _exec_prefix(container, tty=False)
+    started = now()
+    while True:
         shown = _json(
             plain,
             ("--json", "jobs", "reverse", "show", job_id, "--profile", _ALICE_PROFILE),
         )
         if shown.get("state") == "expired":
             break
-        time.sleep(1)
-    else:
-        raise WorkflowFailure("reverse result did not expire within retention bound")
+        if shown.get("state") != "succeeded":
+            raise WorkflowFailure("retained reverse result left succeeded state")
+        if (now() - expires_at).total_seconds() > _EXPIRY_GRACE_SECONDS:
+            raise WorkflowFailure(
+                "reverse result did not expire within retention bound"
+            )
+        sleep(1)
+    if (
+        shown.get("id") != job_id
+        or shown.get("correlation_id") != state["correlation_id"]
+    ):
+        raise WorkflowFailure("reverse result did not expire in place")
+    if _expiry_timestamp(shown.get("expires_at")) != expires_at:
+        raise WorkflowFailure("reverse retention deadline changed")
+    if _expiry_timestamp(shown.get("updated_at")) < expires_at:
+        raise WorkflowFailure("reverse result expired before its retention deadline")
     destination = f"{_DENIED_RESULT}-expiry"
     download = (
         "jobs",
@@ -415,6 +510,8 @@ def _exercise_expiry(container: str, profile: str) -> None:
     if _container_path_exists(container, destination):
         raise WorkflowFailure("expired result download created a destination")
     _cleanup(container)
+    waited = (now() - started).total_seconds()
+    print(f"T73 reverse expiry verified after waiting {waited:.1f} s.", flush=True)
 
 
 def _exercise_unavailable(container: str, profile: str) -> None:

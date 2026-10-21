@@ -167,6 +167,8 @@ data_directory="$temporary_directory/data"
 evidence_directory="$temporary_directory/evidence"
 state_file="$temporary_directory/state.json"
 recovery_state_file="$temporary_directory/recovery-state.json"
+expiration_state_file="$temporary_directory/expiration-state.json"
+reverse_expiration_state_file="$temporary_directory/reverse-expiration-state.json"
 clamav_script="$temporary_directory/fake-clamav.py"
 browser_runtime_directory="$temporary_directory/e2e"
 node_runtime_directory="$temporary_directory/node_modules"
@@ -1937,9 +1939,12 @@ e2e_phase_service() {
     worker_metrics+=(--worker-metrics-url "http://127.0.0.1:$(podman port "$worker_two_name" 9464/tcp | sed 's/.*://')/metrics")
   fi
 
+  # `exercise` leaves one retained result for `verify-expiration`, which runs
+  # after the CLI and recovery journeys have used its 60-second retention (T146).
   uv run python -m tests.e2e.service_workflow exercise \
     --base-url "$base_url" --profile "$profile" \
     --template "$evidence_directory/template.docx" --state-file "$state_file" \
+    --expiration-state-file "$expiration_state_file" \
     --artifact-dir "$temporary_directory/browser-artifacts" \
     --api-metrics-url "$base_url/metrics" "${worker_metrics[@]}"
 
@@ -1982,6 +1987,10 @@ e2e_phase_service() {
   uv run python -m tests.e2e.service_workflow verify-recovery \
     --base-url "$base_url" --profile "$profile" \
     --state-file "$recovery_state_file" \
+    --artifact-dir "$temporary_directory/browser-artifacts"
+  uv run python -m tests.e2e.service_workflow verify-expiration \
+    --base-url "$base_url" --profile "$profile" \
+    --state-file "$expiration_state_file" \
     --artifact-dir "$temporary_directory/browser-artifacts"
 
   require_http_status "$base_url/health/live" 200
@@ -2199,12 +2208,17 @@ e2e_phase_reverse_lifecycle() {
 }
 
 # Conversion, reversion, presentation, local-image, and workspace journeys, then
-# reverse expiry and unavailability through the CLI.
+# reverse expiry and unavailability through the CLI. The retained reverse result
+# is submitted first so that the browser journeys use its 60-second retention
+# instead of a wait (T146).
 e2e_phase_browser_workspaces() {
   if ! e2e_selects_phase service; then
     e2e_seed_browser_prerequisites
   fi
   use_browser_runtime
+  uv run python -m tests.e2e.reverse_cli_workflow \
+    --container "$application_name" --profile "$profile" --phase expiry-submit \
+    --state-file "$reverse_expiration_state_file"
   run_browser_test "$application_name" /e2e/browser-next-conversion.test.mjs \
     --env MARKWEAVE_E2E_PROFILE="$profile" \
     --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts \
@@ -2220,7 +2234,8 @@ e2e_phase_browser_workspaces() {
   run_browser_test "$application_name" /e2e/browser-workspace-ui.test.mjs
 
   uv run python -m tests.e2e.reverse_cli_workflow \
-    --container "$application_name" --profile "$profile" --phase expiry
+    --container "$application_name" --profile "$profile" --phase expiry-verify \
+    --state-file "$reverse_expiration_state_file"
   uv run python -m tests.e2e.reverse_cli_workflow \
     --container "$application_name" --profile "$profile" --phase unavailable
 }

@@ -19,6 +19,7 @@ import sys
 import time
 import uuid
 import zipfile
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -38,6 +39,10 @@ from scripts.container.api_workflow_smoke import (  # noqa: E402 - executable pa
 )
 
 TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled", "expired"})
+EXPIRATION_SCHEMA = "t21-service-expiration-v1"
+# Cleanup runs every second in the E2E runtime; this bounds how late after its
+# retention deadline a retained result may still be observed unexpired.
+EXPIRATION_GRACE_SECONDS = 30.0
 REQUIRED_METRICS = frozenset(
     {
         "md_converter_queue_depth",
@@ -1448,25 +1453,119 @@ def exercise(arguments: argparse.Namespace) -> None:  # noqa: PLR0912, PLR0915
     expiring_job, expiring_location = submit_conversion(
         expiring, template, "docx", b"# Expiration boundary"
     )
-    if wait_for_job(expiring, expiring_location).get("state") != "succeeded":
+    expiring_completed = wait_for_job(expiring, expiring_location)
+    if expiring_completed.get("state") != "succeeded":
         raise WorkflowFailure("expiration: prerequisite conversion did not succeed")
-    time.sleep(61)
+    if expiring_completed.get("id") != expiring_job.get("id") or expiring_completed.get(
+        "correlation_id"
+    ) != expiring_job.get("correlation_id"):
+        raise WorkflowFailure("expiration: durable identity changed")
+    # verify-expiration proves the expiry after later journeys have used the
+    # retention window, instead of sleeping through it here (T146).
+    write_state(
+        arguments.expiration_state_file,
+        expiration_payload(
+            profile=arguments.profile,
+            location=expiring_location,
+            job=expiring_completed,
+        ),
+    )
+
+
+def _aware_timestamp(value: object, operation: str) -> datetime:
+    if not isinstance(value, str):
+        raise WorkflowFailure(f"{operation}: timestamp missing")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as error:
+        raise WorkflowFailure(f"{operation}: invalid timestamp") from error
+    if parsed.tzinfo is None:
+        raise WorkflowFailure(f"{operation}: timestamp has no time zone")
+    return parsed
+
+
+def expiration_payload(
+    *, profile: str, location: str, job: dict[str, Any]
+) -> dict[str, str]:
+    """Return content-free evidence for a retained result awaiting expiry."""
+
+    expires_at = required_string(job, "expires_at", "expiration")
+    _aware_timestamp(expires_at, "expiration")
+    return {
+        "schema": EXPIRATION_SCHEMA,
+        "profile": profile,
+        "location": location,
+        "job_id": required_string(job, "id", "expiration"),
+        "correlation_id": required_string(job, "correlation_id", "expiration"),
+        "expires_at": expires_at,
+    }
+
+
+def read_expiration_state(path: Path, *, expected_profile: str) -> dict[str, str]:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise WorkflowFailure("expiration: unreadable state") from error
+    keys = {"schema", "profile", "location", "job_id", "correlation_id", "expires_at"}
+    if not isinstance(raw, dict) or set(raw) != keys:
+        raise WorkflowFailure("expiration: invalid schema")
+    if not all(isinstance(raw[key], str) and raw[key] for key in keys):
+        raise WorkflowFailure("expiration: invalid values")
+    if raw["schema"] != EXPIRATION_SCHEMA or raw["profile"] != expected_profile:
+        raise WorkflowFailure("expiration: profile or version mismatch")
+    if raw["location"] != f"/api/v1/conversions/{raw['job_id']}":
+        raise WorkflowFailure("expiration: job location mismatch")
+    try:
+        uuid.UUID(raw["job_id"])
+        uuid.UUID(raw["correlation_id"])
+    except ValueError as error:
+        raise WorkflowFailure("expiration: invalid durable identity") from error
+    _aware_timestamp(raw["expires_at"], "expiration")
+    return {key: raw[key] for key in keys}
+
+
+def verify_expiration(
+    arguments: argparse.Namespace,
+    *,
+    now: Callable[[], datetime] = lambda: datetime.now(UTC),
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    """Require a retained result to expire in place no later than its grace bound."""
+
+    state = read_expiration_state(
+        arguments.state_file, expected_profile=arguments.profile
+    )
+    expires_at = _aware_timestamp(state["expires_at"], "expiration")
     observer = ServiceClient(arguments.base_url)
     observer.login(arguments.admin_username, arguments.admin_password)
-    expired = observer.request("GET", expiring_location)
-    expect(expired, 200, "expired conversion read")
-    expired_job = decode_object(expired, "expired conversion read")
+    started = now()
+    while True:
+        response = observer.request("GET", state["location"])
+        expect(response, 200, "expired conversion read")
+        job = decode_object(response, "expired conversion read")
+        if job.get("state") == "expired":
+            break
+        if job.get("state") != "succeeded":
+            raise WorkflowFailure("expiration: retained job left succeeded state")
+        if (now() - expires_at).total_seconds() > EXPIRATION_GRACE_SECONDS:
+            raise WorkflowFailure("expiration: durable job did not expire in time")
+        sleep(0.5)
     if (
-        expired_job.get("id") != expiring_job.get("id")
-        or expired_job.get("correlation_id") != expiring_job.get("correlation_id")
-        or expired_job.get("state") != "expired"
+        job.get("id") != state["job_id"]
+        or job.get("correlation_id") != state["correlation_id"]
     ):
         raise WorkflowFailure("expiration: durable job did not expire in place")
+    if _aware_timestamp(job.get("expires_at"), "expiration") != expires_at:
+        raise WorkflowFailure("expiration: retention deadline changed")
+    if _aware_timestamp(job.get("updated_at"), "expiration") < expires_at:
+        raise WorkflowFailure("expiration: job expired before its retention deadline")
     expect(
-        observer.request("GET", f"{expiring_location}/result"),
+        observer.request("GET", f"{state['location']}/result"),
         409,
         "expired result denial",
     )
+    waited = (now() - started).total_seconds()
+    print(f"expiration verified after waiting {waited:.1f} s", flush=True)
 
 
 def result_digest(client: ServiceClient, job: dict[str, Any]) -> str:
@@ -1871,6 +1970,7 @@ def build_parser() -> argparse.ArgumentParser:
             "verify-checkpoint",
             "submit-recovery",
             "verify-recovery",
+            "verify-expiration",
             "seed-browser-prerequisites",
         ),
     )
@@ -1883,6 +1983,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--api-metrics-url")
     parser.add_argument("--worker-metrics-url", action="append")
     parser.add_argument("--state-file", type=Path)
+    parser.add_argument("--expiration-state-file", type=Path)
     parser.add_argument("--artifact-dir", type=Path)
     parser.add_argument("--output", choices=("docx", "pdf", "both"), default="docx")
     parser.add_argument(
@@ -1930,11 +2031,14 @@ def validate_arguments(
             "verify-checkpoint",
             "submit-recovery",
             "verify-recovery",
+            "verify-expiration",
             "seed-browser-prerequisites",
         }
         and arguments.state_file is None
     ):
         parser.error("--state-file is required for checkpoint and recovery commands")
+    if arguments.command == "exercise" and arguments.expiration_state_file is None:
+        parser.error("--expiration-state-file is required for exercise")
     if arguments.timeout_seconds <= 0:
         parser.error("--timeout-seconds must be positive")
     if arguments.command == "verify-login-origin" and arguments.login_origin is None:
@@ -1984,6 +2088,7 @@ def main(argv: list[str] | None = None) -> int:
         "verify-checkpoint": verify_checkpoint,
         "submit-recovery": submit_recovery,
         "verify-recovery": verify_recovery,
+        "verify-expiration": verify_expiration,
         "seed-browser-prerequisites": seed_browser_prerequisites,
     }
     try:

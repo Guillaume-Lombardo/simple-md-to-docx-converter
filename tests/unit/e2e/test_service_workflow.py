@@ -11,6 +11,7 @@ import stat
 import uuid
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -767,3 +768,193 @@ def test_browser_seed_command_requires_template_and_state_file(
         == 0
     )
     seed.assert_called_once()
+
+
+def _expiration_state(tmp_path: Path) -> tuple[Path, dict[str, str]]:
+    job_id = identifier()
+    state = workflow.expiration_payload(
+        profile="distributed",
+        location=f"/api/v1/conversions/{job_id}",
+        job={
+            "id": job_id,
+            "correlation_id": identifier(),
+            "expires_at": "2026-10-21T10:01:00+00:00",
+        },
+    )
+    path = tmp_path / "expiration.json"
+    workflow.write_state(path, state)
+    return path, state
+
+
+def _job_result(recorded: dict[str, str], /, **changes: str) -> workflow.HttpResult:
+    job = {
+        "id": recorded["job_id"],
+        "correlation_id": recorded["correlation_id"],
+        "state": "expired",
+        "expires_at": recorded["expires_at"],
+        "updated_at": "2026-10-21T10:01:01+00:00",
+    } | changes
+    return workflow.HttpResult(200, {}, json.dumps(job).encode(), ())
+
+
+def _clock(*seconds_after_deadline: float) -> Any:
+    deadline = datetime.fromisoformat("2026-10-21T10:01:00+00:00")
+    values = iter(seconds_after_deadline)
+    last = [0.0]
+
+    def now() -> datetime:
+        last[0] = next(values, last[0])
+        return deadline + timedelta(seconds=last[0])
+
+    return now
+
+
+@pytest.mark.unit
+def test_expiration_state_round_trip_is_content_free_and_strict(
+    tmp_path: Path,
+) -> None:
+    path, state = _expiration_state(tmp_path)
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert workflow.read_expiration_state(path, expected_profile="distributed") == (
+        state
+    )
+    with pytest.raises(workflow.WorkflowFailure, match="profile or version"):
+        workflow.read_expiration_state(path, expected_profile="standalone")
+    for key, value, message in (
+        ("location", "/api/v1/conversions/other", "location mismatch"),
+        ("expires_at", "2026-10-21T10:01:00", "no time zone"),
+        ("correlation_id", "not-a-uuid", "invalid durable identity"),
+    ):
+        workflow.write_state(path, state | {key: value})
+        with pytest.raises(workflow.WorkflowFailure, match=message):
+            workflow.read_expiration_state(path, expected_profile="distributed")
+    workflow.write_state(path, state | {"extra": "value"})
+    with pytest.raises(workflow.WorkflowFailure, match="invalid schema"):
+        workflow.read_expiration_state(path, expected_profile="distributed")
+
+
+@pytest.mark.unit
+def test_verify_expiration_polls_until_expired_in_place_and_denies_the_result(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    path, state = _expiration_state(tmp_path)
+    client = mocker.patch("tests.e2e.service_workflow.ServiceClient").return_value
+    client.request.side_effect = [
+        _job_result(state, state="succeeded"),
+        _job_result(state),
+        workflow.HttpResult(409, {}, b'{"error":{"code":"JOB_EXPIRED"}}', ()),
+    ]
+    sleep = mocker.Mock()
+
+    workflow.verify_expiration(
+        argparse.Namespace(
+            base_url="http://service",
+            profile="distributed",
+            state_file=path,
+            admin_username="e2e-admin",
+            admin_password=identifier(),
+        ),
+        now=_clock(-5, -5, 2, 2),
+        sleep=sleep,
+    )
+
+    sleep.assert_called_once_with(0.5)
+    assert [call.args for call in client.request.call_args_list] == [
+        ("GET", state["location"]),
+        ("GET", state["location"]),
+        ("GET", f"{state['location']}/result"),
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("responses", "clock", "message"),
+    [
+        (
+            [{"state": "succeeded"}],
+            (0, workflow.EXPIRATION_GRACE_SECONDS + 1),
+            "did not expire in time",
+        ),
+        ([{"state": "failed"}], (0, 0), "left succeeded state"),
+        ([{"correlation_id": str(uuid.UUID(int=1))}], (0, 0), "expire in place"),
+        (
+            [{"expires_at": "2026-10-21T10:02:00+00:00"}],
+            (0, 0),
+            "retention deadline changed",
+        ),
+        (
+            [{"updated_at": "2026-10-21T10:00:59+00:00"}],
+            (0, 0),
+            "before its retention deadline",
+        ),
+    ],
+)
+def test_verify_expiration_rejects_late_early_or_substituted_expiry(
+    tmp_path: Path,
+    mocker: MockerFixture,
+    responses: list[dict[str, str]],
+    clock: tuple[float, ...],
+    message: str,
+) -> None:
+    path, state = _expiration_state(tmp_path)
+    client = mocker.patch("tests.e2e.service_workflow.ServiceClient").return_value
+    client.request.side_effect = [
+        _job_result(state, **changes) for changes in responses
+    ]
+
+    with pytest.raises(workflow.WorkflowFailure, match=message):
+        workflow.verify_expiration(
+            argparse.Namespace(
+                base_url="http://service",
+                profile="distributed",
+                state_file=path,
+                admin_username="e2e-admin",
+                admin_password=identifier(),
+            ),
+            now=_clock(*clock),
+            sleep=mocker.Mock(),
+        )
+
+
+@pytest.mark.unit
+def test_expiration_commands_require_their_state_files(tmp_path: Path) -> None:
+    parser = workflow.build_parser()
+    template = tmp_path / "template.docx"
+    template.write_bytes(b"template")
+    exercise = parser.parse_args(
+        [
+            "exercise",
+            "--base-url",
+            "http://service",
+            "--profile",
+            "standalone",
+            "--template",
+            str(template),
+        ]
+    )
+    with pytest.raises(SystemExit):
+        workflow.validate_arguments(parser, exercise)
+    verify = parser.parse_args(
+        ["verify-expiration", "--base-url", "http://service", "--profile", "standalone"]
+    )
+    with pytest.raises(SystemExit):
+        workflow.validate_arguments(parser, verify)
+
+
+@pytest.mark.unit
+def test_runner_verifies_service_expiry_after_the_recovery_journeys() -> None:
+    runner = Path("scripts/e2e/run.sh").read_text(encoding="utf-8")
+    service = runner[
+        runner.index("e2e_phase_service() {") : runner.index(
+            "\n}\n", runner.index("e2e_phase_service() {")
+        )
+    ]
+    assert '--expiration-state-file "$expiration_state_file"' in service
+    assert (
+        service.index("service_workflow exercise \\")
+        < service.index("service_workflow verify-recovery")
+        < service.index("service_workflow verify-expiration")
+    )
+    assert "time.sleep(61)" not in Path("tests/e2e/service_workflow.py").read_text(
+        encoding="utf-8"
+    )
