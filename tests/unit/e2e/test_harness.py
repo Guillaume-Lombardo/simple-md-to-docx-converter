@@ -1577,23 +1577,112 @@ def test_reverse_fault_window_starts_after_the_worker_broker_path_is_proven() ->
     )
 
 
+_REVERSE_GATE_STUBS = """
+calls="$1"
+profile="$2"
+application_name=final-app
+worker_one_name=final-worker-1
+worker_two_name=final-worker-2
+broker_directory=/broker
+podman() {
+  printf 'podman %s\\n' "$*" >>"$calls"
+  case "$2" in
+    final-app) echo 127.0.0.1:41000 ;;
+    final-worker-1) echo 127.0.0.1:41001 ;;
+    *) echo 127.0.0.1:41002 ;;
+  esac
+}
+uv() { printf 'uv %s\\n' "$*" >>"$calls"; }
+"""
+
+
+def _run_shell_functions(
+    tmp_path: Path, profile: str, functions: str, invocation: str
+) -> list[str]:
+    calls = tmp_path / f"{profile}-calls.txt"
+    calls.touch()
+    subprocess.run(
+        [
+            "bash",
+            "-c",
+            _REVERSE_GATE_STUBS + functions + invocation,
+            "reverse-gate",
+            str(calls),
+            profile,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return calls.read_text().splitlines()
+
+
 @pytest.mark.unit
-def test_reverse_expiry_waits_for_every_worker_broker_path_after_the_browser_switch() -> (
-    None
-):
+@pytest.mark.container_runtime_guard_exempt(
+    reason="runs harness functions against a stubbed podman shell function"
+)
+@pytest.mark.parametrize(
+    ("profile", "runtime", "port", "metrics_port"),
+    [
+        ("standalone", "final-app", "8080", "41000"),
+        ("distributed", "final-worker-1", "9464", "41001"),
+    ],
+)
+def test_reverse_broker_gate_queries_only_the_reverse_worker(
+    tmp_path: Path, profile: str, runtime: str, port: str, metrics_port: str
+) -> None:
     runner = _runner_text()
-    workspaces = _function(runner, "e2e_phase_browser_workspaces")
-    switch = workspaces.index("use_browser_runtime")
-    gate = workspaces.index("wait_for_reverse_workers_broker")
-    # The first reverse job after the switch waits for the broker path (T142).
-    assert switch < gate < workspaces.index("--phase expiry-submit")
-    readiness = _function(runner, "wait_for_reverse_workers_broker")
-    assert "scripts.e2e.reverse_broker wait-worker-broker" in readiness
-    assert '--metrics-url "$metrics_url"' in readiness
-    assert 'for worker in "$worker_one_name" "$worker_two_name"; do' in readiness
-    assert 'podman port "$worker" 9464/tcp' in readiness
-    assert 'podman port "$application_name" 8080/tcp' in readiness
-    assert '"${metrics_urls[@]}"' in readiness
+    gate = (
+        "wait_for_reverse_worker_broker() {\n"
+        + _function(runner, "wait_for_reverse_worker_broker")
+        + "\n}\n"
+    )
+
+    calls = _run_shell_functions(
+        tmp_path, profile, gate, "wait_for_reverse_worker_broker\n"
+    )
+
+    # The forward-only second worker never holds broker credentials (T142).
+    assert calls == [
+        f"podman port {runtime} {port}/tcp",
+        "uv run python -m scripts.e2e.reverse_broker wait-worker-broker "
+        f"--root /broker --metrics-url http://127.0.0.1:{metrics_port}/metrics",
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.container_runtime_guard_exempt(
+    reason="runs harness functions against a stubbed podman shell function"
+)
+def test_reverse_expiry_submission_waits_for_the_broker_after_the_browser_switch(
+    tmp_path: Path,
+) -> None:
+    runner = _runner_text()
+    phase = (
+        "e2e_phase_browser_workspaces() {\n"
+        + _function(runner, "e2e_phase_browser_workspaces")
+        + "\n}\n"
+    )
+    stubs = "".join(
+        f'{name}() {{ printf "{name}\\n" >>"$calls"; }}\n'
+        for name in (
+            "e2e_seed_browser_prerequisites",
+            "use_browser_runtime",
+            "wait_for_reverse_worker_broker",
+            "run_browser_test",
+        )
+    )
+    stubs += "e2e_selects_phase() { return 1; }\n"
+
+    calls = _run_shell_functions(
+        tmp_path, "distributed", stubs + phase, "e2e_phase_browser_workspaces\n"
+    )
+
+    switch = calls.index("use_browser_runtime")
+    submit = next(
+        index for index, call in enumerate(calls) if "--phase expiry-submit" in call
+    )
+    assert calls[switch + 1 : submit] == ["wait_for_reverse_worker_broker"]
 
 
 @pytest.mark.unit

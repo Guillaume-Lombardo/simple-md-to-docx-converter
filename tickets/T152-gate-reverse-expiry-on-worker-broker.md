@@ -31,16 +31,19 @@ PR #326 run 39643689513, `e2e-distributed-2` job 119378076059 (artifact 12366952
 
 ## Scope
 
-- Add `wait_for_reverse_workers_broker` to `scripts/e2e/run.sh`. It runs the success-only
-  `reverse_broker wait-worker-broker` gate from T142 against every reverse worker: the
-  application in standalone, both workers in distributed.
+- Add `wait_for_reverse_worker_broker` to `scripts/e2e/run.sh`. It runs the success-only
+  `reverse_broker wait-worker-broker` gate from T142 against the reverse worker: the application
+  in standalone, the first worker in distributed. The second distributed worker is forward-only
+  and never receives broker credentials, so it is not gated.
 - Run it in `e2e_phase_browser_workspaces` after `use_browser_runtime` and before
   `expiry-submit`.
 - Do not raise the CLI timeout and do not weaken any expiry or retention assertion.
 
 ## Acceptance criteria
 
-- A harness unit test proves the ordering and the per-worker gate, and fails without the change.
+- Execution-based harness tests run the real shell functions with stubbed commands. They prove
+  the gate queries only the reverse worker's metrics endpoint, and that it runs between
+  `use_browser_runtime` and `expiry-submit`. Each test fails without its mechanism.
 - The canonical checks pass.
 - Both E2E profiles pass on the final rootless images.
 
@@ -60,6 +63,16 @@ PR #326 run 39643689513, `e2e-distributed-2` job 119378076059 (artifact 12366952
     standalone. It fails without the change.
   - `ruff`, `ty`, the CI validator and the E2E unit tests (312) pass.
   - Not run locally: the final-image E2E, because this container has no Podman.
+
+- 2026-10-21: Review of PR #329 (P1): the first version also gated the forward-only second
+  distributed worker. That worker has no reverse broker runtime, so its gate could never pass.
+  - The gate now queries the application (standalone, port 8080) or the first worker
+    (distributed, port 9464). The principal-exclusive broker configuration is unchanged.
+  - The text-matching test is replaced by two tests that execute the real shell functions with
+    stubbed `podman`, `uv` and phase helpers. The first fails when the gate queries the second
+    worker; the second fails when the gate is missing between the runtime switch and
+    `expiry-submit`.
+  - `ruff`, `ty` and the E2E unit tests (314) pass.
 
 ## Synchronization
 
