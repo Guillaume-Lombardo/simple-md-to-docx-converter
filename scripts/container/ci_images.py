@@ -48,6 +48,13 @@ LOADED_REFERENCE = re.compile(r"(?:sha256:)?([0-9a-f]{64})")
 
 DEFAULT_IMAGE_COPY_TMP_DIR = Path("/var/tmp")  # noqa: S108 - Podman's documented default
 DISKSTATS = Path("/proc/diskstats")
+CPUSTATS = Path("/proc/stat")
+CPU_IDLE_FIELDS = (3, 4)  # idle and iowait in the aggregate `cpu` line
+CPU_IOWAIT_FIELD = 4
+# The largest archive bounds the domain's load time. Concurrent loads slowed it by
+# up to 17 s on hosted runners while the disk stayed under 70 percent busy, so the
+# other loads run at a lower CPU priority and use spare time instead (T147).
+LOW_PRIORITY = ("nice", "-n", "10")
 # Each `podman load` extracts its oci-archive and stages the layer blobs in the
 # image-copy directory before committing layers, so this directory receives about
 # twice the archive bytes. Hosted runners cap disk writes at about 165 MB/s, so a
@@ -61,6 +68,7 @@ MIB = 1024 * 1024
 
 type Runner = Callable[..., subprocess.CompletedProcess[str]]
 type DiskStats = Mapping[str, tuple[int, int, int]]
+type CpuStats = tuple[int, int, int]
 
 
 class ImageTransferError(RuntimeError):
@@ -257,6 +265,13 @@ def read_diskstats(path: Path = DISKSTATS) -> dict[str, tuple[int, int, int]]:
     return stats
 
 
+def read_cpustats(path: Path = CPUSTATS) -> CpuStats:
+    """Return busy, iowait and total jiffies of the aggregate CPU line."""
+    fields = [int(field) for field in path.read_text(encoding="ascii").split()[1:9]]
+    idle = sum(fields[index] for index in CPU_IDLE_FIELDS)
+    return sum(fields) - idle, fields[CPU_IOWAIT_FIELD], sum(fields)
+
+
 def _device(path: Path) -> str:
     try:
         device = path.stat().st_dev
@@ -335,6 +350,28 @@ def _print_disk_delta(
         )
 
 
+def _print_cpu_delta(before: CpuStats, after: CpuStats) -> None:
+    busy, iowait, total = (
+        later - earlier for earlier, later in zip(before, after, strict=True)
+    )
+    total = max(total, 1)
+    print(
+        f"cpu busy_percent={100 * busy / total:.0f} "
+        f"iowait_percent={100 * iowait / total:.0f} cpus={os.cpu_count()}",
+        flush=True,
+    )
+
+
+def _print_traffic(
+    devices: Sequence[str],
+    before: tuple[DiskStats, CpuStats],
+    after: tuple[DiskStats, CpuStats],
+    seconds: float,
+) -> None:
+    _print_disk_delta(devices, before[0], after[0], seconds)
+    _print_cpu_delta(before[1], after[1])
+
+
 def load(  # noqa: PLR0913 - explicit expected-identity and test seams
     domain: str,
     archive_directory: Path,
@@ -344,14 +381,15 @@ def load(  # noqa: PLR0913 - explicit expected-identity and test seams
     runner: Runner = subprocess.run,
     clock: Callable[[], float] = time.monotonic,
     diskstats: Callable[[], DiskStats] = read_diskstats,
+    cpustats: Callable[[], CpuStats] = read_cpustats,
     memory_root: Path | None = None,
 ) -> dict[str, str]:
     """Load only a domain's archives and tag them after exact ID checks.
 
     Every role passes its preconditions before any archive is loaded. The
     `podman load` commands then run concurrently, with their image-copy
-    directory in memory when it has room (T147), and every loaded ID is checked
-    before its tag.
+    directory in memory when it has room and every load but the largest at a
+    lower CPU priority (T147). Every loaded ID is checked before its tag.
     """
     try:
         roles = IMAGE_DOMAIN_ROLES[domain]
@@ -372,14 +410,17 @@ def load(  # noqa: PLR0913 - explicit expected-identity and test seams
     env = None if copy_dir is None else {**os.environ, "TMPDIR": str(copy_dir)}
     try:
         devices = _storage_report(runner, archive_directory, copy_dir)
-        before = diskstats()
+        before = (diskstats(), cpustats())
     except (ImageTransferError, OSError, ValueError, AttributeError) as error:
         print(f"storage diagnostics unavailable: {error}", flush=True)
-        devices, before = (), {}
+        devices, before = (), None
+    largest = max(pending, key=lambda item: item[2].stat().st_size)[2]
 
     def load_archive(archive: Path) -> tuple[str, float]:
+        priority = () if archive == largest else LOW_PRIORITY
+        command = [*priority, "podman", "load", "--input", str(archive)]
         started = clock()
-        output = _run(runner, ["podman", "load", "--input", str(archive)], env)
+        output = _run(runner, command, env)
         return output, clock() - started
 
     started = clock()
@@ -392,9 +433,11 @@ def load(  # noqa: PLR0913 - explicit expected-identity and test seams
     finally:
         if copy_dir is not None:
             shutil.rmtree(copy_dir, ignore_errors=True)
-    if devices:
+    if devices and before is not None:
         try:
-            _print_disk_delta(devices, before, diskstats(), clock() - started)
+            _print_traffic(
+                devices, before, (diskstats(), cpustats()), clock() - started
+            )
         except (OSError, ValueError) as error:
             print(f"storage diagnostics unavailable: {error}", flush=True)
     loaded: dict[str, str] = {}
@@ -422,6 +465,7 @@ def load(  # noqa: PLR0913 - explicit expected-identity and test seams
         print(
             f"loaded role={role} image={name} image_id=sha256:{image_id} "
             f"archive_bytes={archive.stat().st_size} "
+            f"priority={'normal' if archive == largest else 'low'} "
             f"load_seconds={seconds:.1f}",
             flush=True,
         )

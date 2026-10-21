@@ -112,7 +112,29 @@ sequential archive downloads.
   downloads stay sequential, and no workflow or runner setting changes. New unit tests cover the
   memory directory passed to every load and removed afterwards, the fallback when space is short
   or cannot be read, and removal after a failed load; the first two fail without their mechanism.
-  The hosted before/after runs follow.
+- 2026-10-21: Hosted result of the memory copy directory, run 39638120034 (`fdb5299`, all E2E
+  jobs green), against the sequential loader of #322 run 39637450555 on the same `main`
+  `b13fae9`, a few minutes apart. Both runs already use the smaller images of T151.
+
+  | Shard | Sequential step | Concurrent step | Backend load, sequential → concurrent |
+  |---|---|---|---|
+  | e2e-standalone-1 | 83 s | 57 s | 51.2 → 55.3 s |
+  | e2e-standalone-2 | 93 s | 67 s | 55.7 → 64.4 s |
+  | e2e-distributed-1 | 94 s | 78 s | 58.1 → 75.5 s |
+  | e2e-distributed-2 | 72 s | 69 s | 44.9 s → not captured |
+  | mean | 85.5 s | 67.8 s | |
+
+  Every job used `/dev/shm` (about 7.99 GiB free, 4.83 GiB required). Disk writes fell from 10.7–14.0
+  GB to 6.9–8.5 GB, and the disk was 20 to 66 percent busy instead of saturated. The step now ends
+  with the backend load, which takes 4 to 17 s longer than alone because the frontend and
+  reverse-attempt loads compete with it (frontend 16–21 s alone, 35–40 s concurrently). The mean
+  misses the under-65-second target by about 3 s.
+- 2026-10-21: Second correction. The largest archive of the domain (the backend) keeps normal
+  priority, and the other loads run under `nice -n 10`, so they use the CPU the backend leaves idle
+  instead of slowing it down. Each `loaded role` line reports its priority. The loader also prints
+  the CPU busy and iowait shares from `/proc/stat` over the loads, to confirm the CPU contention.
+  The new unit tests check that only the largest archive runs at normal priority and that the
+  CPU shares are reported; they fail without their mechanism. The hosted before/after runs follow.
 
 ## Synchronization
 

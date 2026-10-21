@@ -36,6 +36,12 @@ def _image_id(role: str) -> str:
     return hashlib.sha256(_config(role)).hexdigest()
 
 
+def _command(arguments: list[str]) -> list[str]:
+    """Return a command without its low CPU priority prefix."""
+    prefix = list(ci_images.LOW_PRIORITY)
+    return arguments[len(prefix) :] if arguments[: len(prefix)] == prefix else arguments
+
+
 def _add(archive: tarfile.TarFile, name: str, payload: bytes) -> None:
     member = tarfile.TarInfo(name)
     member.size = len(payload)
@@ -76,10 +82,16 @@ class FakeRuntime:
         self.tag_override: str | None = None
         self.failing: tuple[str, ...] | None = None
         self.info_json: str | None = None
+        self.low_priority: list[list[str]] = []
 
     def __call__(
         self, arguments: list[str], **_options: Any
     ) -> subprocess.CompletedProcess[str]:
+        if _command(arguments) != arguments:
+            self.low_priority.append(_command(arguments))
+        return self._respond(_command(arguments))
+
+    def _respond(self, arguments: list[str]) -> subprocess.CompletedProcess[str]:
         self.calls.append(arguments)
         if self.failing is not None and tuple(arguments[: len(self.failing)]) == (
             self.failing
@@ -505,7 +517,7 @@ def test_load_runs_every_domain_archive_concurrently(tmp_path: Path) -> None:
     def runner(
         arguments: list[str], **options: Any
     ) -> subprocess.CompletedProcess[str]:
-        if arguments[:2] == ["podman", "load"]:
+        if _command(arguments)[:2] == ["podman", "load"]:
             barrier.wait()
         return runtime(arguments, **options)
 
@@ -687,7 +699,7 @@ class EnvRecorder:
     def __call__(
         self, arguments: list[str], **options: Any
     ) -> subprocess.CompletedProcess[str]:
-        if arguments[:2] == ["podman", "load"]:
+        if _command(arguments)[:2] == ["podman", "load"]:
             env = options.get("env")
             self.environments.append(env)
             self.present.append(env is not None and Path(env["TMPDIR"]).is_dir())
@@ -809,3 +821,66 @@ def test_load_failure_removes_the_memory_copy_directory(tmp_path: Path) -> None:
 
     assert recorder.present == [True] * len(roles)
     assert list(memory.iterdir()) == []
+
+
+def test_load_lowers_the_priority_of_all_but_the_largest_archive(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    roles = IMAGE_DOMAIN_ROLES["e2e-standalone-1"]
+    directory = _archives(tmp_path, roles)
+    with tarfile.open(directory / ci_images.archive_name("frontend"), "a:") as archive:
+        _add(archive, "padding", b"\0" * 65536)
+    runtime = FakeRuntime()
+
+    ci_images.load(
+        "e2e-standalone-1", directory, _expected(*roles), runner=runtime, clock=_clock
+    )
+
+    assert sorted(Path(call[-1]).name for call in runtime.low_priority) == [
+        ci_images.archive_name("backend"),
+        ci_images.archive_name("reverse-attempt"),
+    ]
+    assert all(call[:2] == ["podman", "load"] for call in runtime.low_priority)
+    output = capsys.readouterr().out
+    assert "loaded role=frontend " in output
+    assert "priority=normal" in next(
+        line for line in output.splitlines() if "loaded role=frontend " in line
+    )
+    for role in ("backend", "reverse-attempt"):
+        assert "priority=low" in next(
+            line for line in output.splitlines() if f"loaded role={role} " in line
+        )
+
+
+def test_read_cpustats_keeps_busy_iowait_and_total_jiffies(tmp_path: Path) -> None:
+    stats = tmp_path / "stat"
+    stats.write_text(
+        "cpu  100 5 50 800 40 3 2 0 0 0\ncpu0 1 2 3 4 5 6 7 8 9 10\n",
+        encoding="ascii",
+    )
+
+    assert ci_images.read_cpustats(stats) == (160, 40, 1000)
+
+
+def test_load_reports_cpu_busy_and_iowait_shares(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    roles = IMAGE_DOMAIN_ROLES["e2e-standalone-2"]
+    directory = _archives(tmp_path, roles)
+    runtime = FakeRuntime()
+    runtime.info_json = json.dumps({"store": {"graphRoot": str(tmp_path)}})
+    device = ci_images._device(directory)
+    disks = iter([{device: (0, 0, 0)}, {device: (0, 0, 0)}])
+    cpus = iter([(100, 10, 1000), (850, 60, 2000)])
+
+    ci_images.load(
+        "e2e-standalone-2",
+        directory,
+        _expected(*roles),
+        runner=runtime,
+        clock=_clock,
+        diskstats=lambda: next(disks),
+        cpustats=lambda: next(cpus),
+    )
+
+    assert "cpu busy_percent=75 iowait_percent=5 cpus=" in capsys.readouterr().out
