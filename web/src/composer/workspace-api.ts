@@ -73,6 +73,7 @@ const questionSchema = v.object({
   answer_message_id: v.nullable(v.string()),
   answer_content: v.nullable(v.string()),
   source_author_ids: v.optional(v.array(v.string())),
+  source_library_refs: v.optional(v.array(libraryCitationSchema)),
   created_at: v.string(),
   answered_at: v.nullable(v.string()),
 });

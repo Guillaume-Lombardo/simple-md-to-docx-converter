@@ -409,32 +409,6 @@ export const vComposerQuestionAnswerRequest = v.object({
 });
 
 /**
- * ComposerQuestionResponse
- */
-export const vComposerQuestionResponse = v.object({
-    answer_content: v.nullable(v.string()),
-    answer_message_id: v.nullable(v.pipe(v.string(), v.uuid())),
-    answered_at: v.nullable(v.pipe(v.string(), v.isoTimestamp())),
-    base_version: v.pipe(v.number(), v.integer()),
-    created_at: v.pipe(v.string(), v.isoTimestamp()),
-    draft_id: v.pipe(v.string(), v.uuid()),
-    id: v.pipe(v.string(), v.uuid()),
-    model_step_id: v.pipe(v.string(), v.uuid()),
-    source_author_ids: v.optional(v.array(v.pipe(v.string(), v.uuid())), []),
-    state: v.picklist(['pending', 'answered']),
-    text: v.string()
-});
-
-/**
- * ComposerQuestionListResponse
- */
-export const vComposerQuestionListResponse = v.object({
-    limit: v.pipe(v.number(), v.integer()),
-    offset: v.pipe(v.number(), v.integer()),
-    questions: v.array(vComposerQuestionResponse)
-});
-
-/**
  * ComposerRevisionDiffChange
  */
 export const vComposerRevisionDiffChange = v.object({
@@ -830,6 +804,33 @@ export const vComposerModelStepResponse = v.object({
     question_id: v.nullable(v.pipe(v.string(), v.uuid())),
     status: v.string(),
     updated_at: v.pipe(v.string(), v.isoTimestamp())
+});
+
+/**
+ * ComposerQuestionResponse
+ */
+export const vComposerQuestionResponse = v.object({
+    answer_content: v.nullable(v.string()),
+    answer_message_id: v.nullable(v.pipe(v.string(), v.uuid())),
+    answered_at: v.nullable(v.pipe(v.string(), v.isoTimestamp())),
+    base_version: v.pipe(v.number(), v.integer()),
+    created_at: v.pipe(v.string(), v.isoTimestamp()),
+    draft_id: v.pipe(v.string(), v.uuid()),
+    id: v.pipe(v.string(), v.uuid()),
+    model_step_id: v.pipe(v.string(), v.uuid()),
+    source_author_ids: v.optional(v.array(v.pipe(v.string(), v.uuid())), []),
+    source_library_refs: v.optional(v.array(vLibraryCitationReference), []),
+    state: v.picklist(['pending', 'answered']),
+    text: v.string()
+});
+
+/**
+ * ComposerQuestionListResponse
+ */
+export const vComposerQuestionListResponse = v.object({
+    limit: v.pipe(v.number(), v.integer()),
+    offset: v.pipe(v.number(), v.integer()),
+    questions: v.array(vComposerQuestionResponse)
 });
 
 /**

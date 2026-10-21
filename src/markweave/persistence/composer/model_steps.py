@@ -690,6 +690,7 @@ class SqlComposerModelStepRepository:
                     source
                 )
             ),
+            source_library_refs=step_library_refs(source),
         )
 
     def cancel_model_step(
@@ -761,6 +762,7 @@ class SqlComposerModelStepRepository:
                             source_author_ids=tuple(
                                 author_id for author_id, _ in self._author_refs(row)
                             ),
+                            source_library_refs=step_library_refs(row),
                         )
                     raise ComposerConflictError("Model step result changed")
                 if row.state != "running" or utc(row.expires_at) <= utc(now):
@@ -823,6 +825,7 @@ class SqlComposerModelStepRepository:
                         source_author_ids=tuple(
                             author_id for author_id, _ in self._author_refs(row)
                         ),
+                        source_library_refs=step_library_refs(row),
                     )
                 proposal = ComposerProposalRow(
                     id=str(self._new_id()),

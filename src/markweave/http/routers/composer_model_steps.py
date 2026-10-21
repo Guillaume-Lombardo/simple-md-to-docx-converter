@@ -77,7 +77,15 @@ def _response(step: ComposerModelStep) -> ComposerModelStepResponse:
 
 
 def _question_response(question: ComposerQuestion) -> ComposerQuestionResponse:
-    return ComposerQuestionResponse.model_validate(asdict(question))
+    return ComposerQuestionResponse.model_validate(
+        {
+            **asdict(question),
+            "source_library_refs": [
+                {"version_id": version_id, "chunk": chunk}
+                for version_id, chunk in question.source_library_refs
+            ],
+        }
+    )
 
 
 def _require_headers(

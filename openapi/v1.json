@@ -2266,6 +2266,14 @@
             "title": "Source Author Ids",
             "type": "array"
           },
+          "source_library_refs": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/LibraryCitationReference"
+            },
+            "title": "Source Library Refs",
+            "type": "array"
+          },
           "state": {
             "enum": [
               "pending",

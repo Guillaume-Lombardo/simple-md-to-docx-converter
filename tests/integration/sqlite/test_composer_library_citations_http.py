@@ -254,3 +254,76 @@ def exercise_citation_access_is_rechecked(harness: OfficeStepHarness) -> None:
 
 def test_citation_access_is_rechecked_before_egress(harness: OfficeStepHarness) -> None:
     exercise_citation_access_is_rechecked(harness)
+
+
+def exercise_cited_question_resume(harness: OfficeStepHarness) -> None:
+    """A cited question keeps its citations, and resuming must cite them again."""
+
+    own = _document(harness, harness.owner, _OWN)
+    path, etag = _draft(harness)
+    refs = _cite(own)
+    preview = _preview(harness, path, etag, refs).json()
+    harness.replies.append("Which turbine should the summary cover?")
+    started = harness.client.post(
+        f"{path}/model-steps",
+        json={
+            **_base(harness),
+            "intent": "question",
+            "library_refs": refs,
+            "author_preview_digest": preview["preview_digest"],
+        },
+        headers=_headers(etag, "question"),
+    )
+    assert started.status_code == 202, started.text
+    step = _settled(harness, path, started.json()["id"])
+    assert step["status"] == "completed", step
+    question = harness.client.get(f"{path}/questions/{step['question_id']}").json()
+    assert question["source_library_refs"] == refs
+    listed = harness.client.get(f"{path}/questions").json()["questions"]
+    assert listed[0]["source_library_refs"] == refs
+
+    answered = harness.client.post(
+        f"{path}/questions/{question['id']}/answer",
+        json={"content": "The northern one."},
+        headers=_headers(harness.client.get(path).json()["etag"], "answer"),
+    )
+    assert answered.status_code == 200, answered.text
+    current = harness.client.get(path).json()["etag"]
+    resume = {
+        **_base(harness),
+        "content": "Question: Which turbine?\nAnswer: The northern one.",
+        "answered_question_id": question["id"],
+    }
+    uncited = harness.client.post(
+        f"{path}/model-steps", json=resume, headers=_headers(current, "uncited")
+    )
+    assert uncited.status_code == 412
+    cited_preview = harness.client.post(
+        f"{path}/model-steps/preview",
+        json={
+            **_base(harness),
+            "content": resume["content"],
+            "author_ids": [],
+            "library_refs": refs,
+        },
+        headers={"X-CSRF-Token": "csrf", "If-Match": current},
+    )
+    assert cited_preview.status_code == 200, cited_preview.text
+    harness.replies.append("# Report\n")
+    resumed = harness.client.post(
+        f"{path}/model-steps",
+        json={
+            **resume,
+            "library_refs": refs,
+            "author_preview_digest": cited_preview.json()["preview_digest"],
+        },
+        headers=_headers(current, "resumed"),
+    )
+    assert resumed.status_code == 202, resumed.text
+    assert _settled(harness, path, resumed.json()["id"])["status"] == "completed"
+
+
+def test_cited_question_resume_requires_its_citations(
+    harness: OfficeStepHarness,
+) -> None:
+    exercise_cited_question_resume(harness)

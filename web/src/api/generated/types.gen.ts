@@ -1351,6 +1351,10 @@ export type ComposerQuestionResponse = {
      */
     source_author_ids?: Array<string>;
     /**
+     * Source Library Refs
+     */
+    source_library_refs?: Array<LibraryCitationReference>;
+    /**
      * State
      */
     state: 'pending' | 'answered';

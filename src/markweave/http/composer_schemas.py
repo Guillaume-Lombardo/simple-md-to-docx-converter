@@ -300,6 +300,7 @@ class ComposerQuestionResponse(BaseModel):
     created_at: datetime
     answered_at: datetime | None
     source_author_ids: tuple[UUID, ...] = ()
+    source_library_refs: tuple[LibraryCitationReference, ...] = ()
 
 
 class ComposerQuestionListResponse(BaseModel):
