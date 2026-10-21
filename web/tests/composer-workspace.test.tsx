@@ -2096,3 +2096,53 @@ test("a resumed cited question restores and revalidates its excerpts after reloa
     ),
   );
 });
+
+test("reloading a resumed citation keeps one entry and an ended session closes the workspace", async () => {
+  const citation = {
+    version_id: "00000000-0000-4000-8000-000000000a01",
+    chunk: 0,
+  };
+  const excerpt = {
+    document_id: "document-1",
+    title: "Field notes",
+    version_id: citation.version_id,
+    version_number: 1,
+    version_sha256: "a".repeat(64),
+    chunk: 0,
+    text: "Turbine failed.",
+  };
+  const excerpts = vi
+    .fn()
+    .mockResolvedValueOnce([excerpt])
+    .mockResolvedValueOnce([excerpt])
+    .mockRejectedValue(
+      new ApiError(401, "AUTHENTICATION_REQUIRED", "private excerpt"),
+    );
+  const library = { search: vi.fn().mockResolvedValue([]), excerpts };
+  sessionStorage.clear();
+  sessionStorage.setItem(`composer:resume:${user.id}:${draft.id}`, question.id);
+  const api = setup({
+    preserveStorage: true,
+    question: true,
+    library,
+    questionLibraryRefs: [citation],
+  });
+  expect(
+    await screen.findByRole("checkbox", { name: /Cite Field notes/ }),
+  ).toBeChecked();
+
+  const answer = screen.getByRole("textbox", { name: "Your answer" });
+  fireEvent.change(answer, { target: { value: "Use the signed date." } });
+  fireEvent.click(screen.getByRole("button", { name: "Save answer" }));
+  await waitFor(() => expect(excerpts).toHaveBeenCalledTimes(2));
+  expect(
+    screen.getAllByRole("checkbox", { name: /Cite Field notes/ }),
+  ).toHaveLength(1);
+
+  fireEvent.change(answer, { target: { value: "Use the final date." } });
+  fireEvent.click(screen.getByRole("button", { name: "Save answer" }));
+  await waitFor(() => expect(api.answerQuestion).toHaveBeenCalledTimes(2));
+  await waitFor(() =>
+    expect(screen.queryByRole("heading", { name: "Composer" })).toBeNull(),
+  );
+});

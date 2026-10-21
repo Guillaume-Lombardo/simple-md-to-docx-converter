@@ -112,4 +112,11 @@ test("library downloads require exact media, filename and nosniff", async () => 
     await expect(readLibraryDownload(headers(overrides))).rejects.toThrow(
       "Unexpected library download response.",
     );
+  for (const missing of ["content-type", "content-disposition"]) {
+    const response = headers({});
+    response.headers.delete(missing);
+    await expect(readLibraryDownload(response)).rejects.toThrow(
+      "Unexpected library download response.",
+    );
+  }
 });

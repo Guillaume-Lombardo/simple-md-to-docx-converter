@@ -253,3 +253,68 @@ test("a stale owner change asks for a review", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Upload document" }));
   expect(await screen.findByText("No text.")).toBeInTheDocument();
 });
+
+test("cleared files, missing excerpts and vanished documents stay safe", async () => {
+  const api = library({
+    list: vi.fn().mockResolvedValueOnce([owned]).mockResolvedValue([]),
+    excerpts: vi.fn().mockResolvedValue([]),
+  });
+  renderLibrary(api);
+  const source = await screen.findByLabelText(
+    "Source (.md, .txt, .docx, .pptx)",
+  );
+  fireEvent.change(source, { target: { files: [] } });
+  fireEvent.submit(source.closest("form")!);
+  expect(api.upload).not.toHaveBeenCalled();
+
+  fireEvent.change(screen.getByLabelText("Search terms"), {
+    target: { value: "turbine" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Search library" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Show excerpt" }));
+  await waitFor(() => expect(api.excerpts).toHaveBeenCalledOnce());
+  expect(
+    screen.queryByText("The northern turbine failed after the storm."),
+  ).not.toBeInTheDocument();
+
+  fireEvent.click(await screen.findByRole("button", { name: "Field notes" }));
+  const replacement = await screen.findByLabelText("Replacement source");
+  fireEvent.change(replacement, { target: { files: [] } });
+  fireEvent.submit(replacement.closest("form")!);
+  expect(api.replace).not.toHaveBeenCalled();
+
+  fireEvent.change(replacement, {
+    target: { files: [new File(["# New"], "notes.md")] },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Publish new version" }));
+  expect(
+    await screen.findByText("New library version published."),
+  ).toBeInTheDocument();
+  expect(api.versions).toHaveBeenLastCalledWith(owned.id);
+});
+
+test("an abandoned initial load does not report its failure", async () => {
+  let reject: (reason: unknown) => void = () => undefined;
+  const api = library({
+    list: vi.fn(
+      () =>
+        new Promise((_, failed) => {
+          reject = failed;
+        }),
+    ),
+  });
+  const { unmount } = render(
+    <LibraryWorkspace
+      api={api as unknown as LibraryApi}
+      expire={vi.fn()}
+      save={vi.fn()}
+      user={user}
+    />,
+  );
+  unmount();
+  reject(new Error("aborted"));
+  await Promise.resolve();
+  expect(
+    screen.queryByText("The reference library is unavailable. Try again."),
+  ).not.toBeInTheDocument();
+});
