@@ -460,7 +460,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
             ),
             ("mutation", "Retain mutation evidence"): "${{ always() }}",
         },
-        canonical_digest="a62045f95e7a2e62e5c435a36b95db740cf37ca09403f2740642cdd89a02a2e9",
+        canonical_digest="e54c0a1f1367745b6c8425b5945cea01821dee6a4db1be781389d7414f3c835a",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -1307,7 +1307,7 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
         ("build-images", "Build, export and verify each selected final image once"): (
             "uv run python -m scripts.container.ci_images build "
             '--roles "$IMAGE_ROLES" --output-directory "$RUNNER_TEMP/final-images" '
-            '--github-output "$GITHUB_OUTPUT"'
+            '--github-output "$GITHUB_OUTPUT" --layer-compression zstd'
         ),
         ("final-image", "Load verified final images"): (
             "uv run python -m scripts.container.ci_images load "
