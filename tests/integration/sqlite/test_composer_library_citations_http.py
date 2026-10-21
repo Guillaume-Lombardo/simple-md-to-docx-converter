@@ -133,6 +133,12 @@ def exercise_cited_step_is_reviewed_and_published(harness: OfficeStepHarness) ->
     assert step["status"] == "completed", step
     assert step["library_refs"] == refs
     assert harness.prompts == [reviewed["transmitted_content"]]
+    replayed = _start(harness, path, etag, refs, reviewed["preview_digest"], "cited")
+    assert replayed.status_code == 202, replayed.text
+    assert replayed.json() == step
+    reused = _start(harness, path, etag, refs[:1], reviewed["preview_digest"], "cited")
+    assert reused.status_code == 412
+    assert len(harness.prompts) == 1
 
     current = harness.client.get(path).json()
     proposal = step["proposal_id"]
@@ -151,6 +157,10 @@ def exercise_cited_step_is_reviewed_and_published(harness: OfficeStepHarness) ->
         f"{path}/proposals/{proposal}/publish", headers=_headers(decided, "publish")
     )
     assert refused.status_code == 412
+    revoked_retry = _start(
+        harness, path, etag, refs, reviewed["preview_digest"], "cited"
+    )
+    assert revoked_retry.status_code == 412
     assert harness.client.get(path).json()["etag"] == decided
 
     restored = harness.library.get(harness.other.id, shared.id)

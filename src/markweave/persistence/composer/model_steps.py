@@ -433,6 +433,7 @@ class SqlComposerModelStepRepository:
         answered_question_id: UUID | None = None,
         author_refs: tuple[tuple[UUID, int], ...] = (),
         author_preview_digest: str | None = None,
+        library_refs: tuple[tuple[UUID, int], ...] = (),
     ) -> ComposerModelStep | None:
         """Return the owner's step already admitted for this exact request, if any.
 
@@ -464,6 +465,7 @@ class SqlComposerModelStepRepository:
                     answered_question_id=answered_question_id,
                     author_refs=author_refs,
                     author_preview_digest=author_preview_digest,
+                    library_refs=library_refs,
                 ):
                     raise ComposerConflictError("Model step idempotency key was reused")
                 step_id = UUID(row.id)

@@ -214,6 +214,68 @@ def _preview_authors(  # noqa: PLR0913, PLR0917 - exact preview authorization in
     return transmitted, digest, tuple((item.id, item.version) for item in snapshots)
 
 
+def _replayed_step(  # noqa: PLR0913, PLR0917 - exact idempotency identity
+    dependencies: HttpDependencies,
+    user: User,
+    draft_id: UUID,
+    payload: ComposerModelStepCreateRequest,
+    if_match: str,
+    key: str,
+    digest: str,
+) -> ComposerModelStep | None:
+    """Answer a retried start from durable state, before the draft has moved on.
+
+    A replay transmits nothing, but it still requires current access to the
+    connection, the selected authors and every cited excerpt.
+    """
+
+    steps = dependencies.components.composer_model_step_repository
+    if steps is None:
+        # Without a readable step store the runner's own admission still
+        # deduplicates the key; it simply cannot answer before preconditions.
+        return None
+    library_refs = tuple((item.version_id, item.chunk) for item in payload.library_refs)
+    step = steps.replay_model_step(
+        user.id,
+        draft_id,
+        idempotency_key=key,
+        connection_id=payload.connection_id,
+        approved_endpoint=payload.approved_endpoint,
+        approved_model=payload.approved_model,
+        if_match=if_match,
+        payload_digest=digest,
+        intent=payload.intent,
+        answered_question_id=payload.answered_question_id,
+        author_refs=tuple((item.id, item.version) for item in payload.author_refs),
+        author_preview_digest=payload.author_preview_digest,
+        library_refs=library_refs,
+    )
+    if step is None:
+        return None
+    connections = dependencies.components.composer_connections
+    authors = dependencies.components.composer_authors
+    library = dependencies.components.composer_library
+    if (
+        connections is None
+        or (payload.author_refs and authors is None)
+        or (library_refs and library is None)
+    ):
+        raise ComposerUnavailableError
+    connections.get_visible(_actor(dependencies, user), payload.connection_id)
+    if authors is not None:
+        try:
+            for item in payload.author_refs:
+                authors.get(user.id, item.id)
+        except AuthorKnowledgeNotFoundError, AuthorKnowledgeConflictError:
+            raise ComposerConflictError("Author access changed") from None
+    if library is not None and library_refs:
+        try:
+            library.excerpts(user.id, library_refs)
+        except LibraryNotFoundError:
+            raise ComposerConflictError("Library access changed") from None
+    return step
+
+
 def build_router(dependencies: HttpDependencies) -> APIRouter:  # noqa: PLR0915
     """Expose explicit model-step transmission and owner-scoped cancellation."""
 
@@ -309,6 +371,12 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:  # noqa: PLR0915
         library_refs = tuple(
             (item.version_id, item.chunk) for item in payload.library_refs
         )
+        response.headers["Cache-Control"] = "private, no-store"
+        replayed = _replayed_step(
+            dependencies, user, draft_id, payload, etag, key, digest
+        )
+        if replayed is not None:
+            return _response(replayed)
         content = payload.content
         if author_refs or library_refs:
             preview = _preview_context(
@@ -330,7 +398,6 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:  # noqa: PLR0915
             raise ComposerRequestError("Author preview is invalid")
         if len(content.encode("utf-8")) > request_limit:
             raise ComposerRequestError("Model prompt exceeds the configured limit")
-        response.headers["Cache-Control"] = "private, no-store"
         step = runner.start(
             _actor(dependencies, user),
             draft_id,
