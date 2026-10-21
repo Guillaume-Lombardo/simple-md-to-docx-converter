@@ -1242,6 +1242,23 @@ use_browser_runtime() {
   application_runtime=browser
 }
 
+# T142: the container-to-host broker path can stall after containers restart, and
+# use_browser_runtime proves only API readiness. Before a step depends on reverse
+# execution, wait until the reverse worker completes consecutive authenticated
+# broker reconciliations. Only the application (standalone) or the first worker
+# (distributed) holds the principal-exclusive reverse runtime; the second worker
+# is forward-only and has no broker credentials.
+wait_for_reverse_worker_broker() {
+  local runtime="$application_name"
+  local port=8080
+  if [[ "$profile" == distributed ]]; then
+    runtime="$worker_one_name"
+    port=9464
+  fi
+  uv run python -m scripts.e2e.reverse_broker wait-worker-broker --root "$broker_directory" \
+    --metrics-url "http://127.0.0.1:$(podman port "$runtime" "$port/tcp" | sed 's/.*://')/metrics"
+}
+
 # Hold job execution while exercising exact admission boundaries through the
 # real final-image API and Next.js UI. Distributed workers can be stopped
 # independently. Standalone is recreated with a long idle poll only for this
@@ -2216,6 +2233,7 @@ e2e_phase_browser_workspaces() {
     e2e_seed_browser_prerequisites
   fi
   use_browser_runtime
+  wait_for_reverse_worker_broker
   uv run python -m tests.e2e.reverse_cli_workflow \
     --container "$application_name" --profile "$profile" --phase expiry-submit \
     --state-file "$reverse_expiration_state_file"
