@@ -179,8 +179,11 @@ def parse_proposal(value: str, max_text_characters: int) -> OfficeEditProposal:
         not isinstance(data, dict)
         or set(data) != _PROPOSAL_KEYS
         or data["kind"] != OFFICE_EDIT_INTENT
+        or type(data["format"]) is not str
         or data["format"] not in _FORMATS
+        or type(data["engine_version"]) is not int
         or data["engine_version"] != OFFICE_EDIT_ENGINE_VERSION
+        or type(data["base_revision_id"]) is not str
         or type(data["base_sha256"]) is not str
         or _SHA256.fullmatch(data["base_sha256"]) is None
         or not isinstance(data["allowed_targets"], list)
@@ -191,7 +194,7 @@ def parse_proposal(value: str, max_text_characters: int) -> OfficeEditProposal:
     ):
         raise OfficeEditProposalError("Office edit proposal has an invalid shape")
     try:
-        base_revision_id = UUID(str(data["base_revision_id"]))
+        base_revision_id = UUID(data["base_revision_id"])
     except ValueError as exc:
         raise OfficeEditProposalError("Office edit proposal is invalid") from exc
     allowed = tuple(data["allowed_targets"])
@@ -202,6 +205,7 @@ def parse_proposal(value: str, max_text_characters: int) -> OfficeEditProposal:
             not isinstance(item, dict)
             or set(item) != _DECIDED_OPERATION_KEYS
             or item["op"] != "replace_text"
+            or type(item["target"]) is not str
             or item["target"] not in allowed
             or item["target"] in seen
         ):

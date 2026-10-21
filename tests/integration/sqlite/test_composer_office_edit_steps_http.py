@@ -29,7 +29,11 @@ from markweave.auth.models import Role, User
 from markweave.auth.service import AuthenticationService
 from markweave.composer.connections import ConnectionService
 from markweave.config import Settings
+from markweave.http.composer_docx_edit_schemas import (
+    ComposerOfficeEditStepCreateRequest,
+)
 from markweave.http.composer_step_runner import ComposerStepRunner
+from markweave.http.routers.composer_model_steps import _payload_digest
 from markweave.persistence.composer import (
     SqlComposerModelStepRepository,
     SqlComposerRepository,
@@ -67,6 +71,7 @@ class OfficeStepHarness:
     connection_id: UUID
     replies: list[str] = field(default_factory=list)
     prompts: list[str] = field(default_factory=list)
+    steps: SqlComposerModelStepRepository | None = None
 
 
 def _members(content: bytes) -> dict[str, bytes]:
@@ -196,7 +201,7 @@ def office_step_harness(
     try:
         with TestClient(app, base_url="https://testserver") as client:
             harness = OfficeStepHarness(
-                client, store, authentication, owner, other, connection_id
+                client, store, authentication, owner, other, connection_id, steps=steps
             )
             harness_box.append(harness)
             yield harness
@@ -304,6 +309,46 @@ def _reply(*operations: tuple[str, str]) -> str:
     )
 
 
+def _refuse_decisions(
+    harness: OfficeStepHarness,
+    path: str,
+    proposal_id: str,
+    proposed: dict[str, Any],
+    etag: str,
+) -> None:
+    """Malformed or scope-changing human decisions change nothing."""
+
+    client = harness.client
+    for bad in (
+        {**proposed, "allowed_targets": [_TITLE, _BOLD, "word/document.xml#t5"]},
+        {
+            **proposed,
+            "operations": [
+                {**proposed["operations"][0], "target": "word/document.xml#t5"}
+            ],
+        },
+        {**proposed, "base_revision_id": str(uuid4())},
+        {**proposed, "operations": [{**proposed["operations"][0], "op": "delete"}]},
+        {**proposed, "format": []},
+        {**proposed, "format": {}},
+        {**proposed, "engine_version": True},
+        {**proposed, "base_revision_id": {}},
+        {**proposed, "operations": [{**proposed["operations"][0], "target": []}]},
+        [],
+        None,
+    ):
+        refused = client.post(
+            f"{path}/proposals/{proposal_id}/decision",
+            json={"state": "edited", "decided_value": json.dumps(bad)},
+            headers={"X-CSRF-Token": "csrf", "If-Match": etag},
+        )
+        assert refused.status_code == 422, bad
+        assert refused.json()["error"]["code"] == "COMPOSER_REQUEST_INVALID"
+    assert client.get(path).json()["etag"] == etag
+    unchanged = client.get(f"{path}/proposals/{proposal_id}").json()
+    assert (unchanged["state"], unchanged["decided_value"]) == ("pending", None)
+
+
 def exercise_model_proposed_edit(harness: OfficeStepHarness) -> None:
     """Preview, transmit, review and publish one exact model-proposed edit."""
 
@@ -359,23 +404,7 @@ def exercise_model_proposed_edit(harness: OfficeStepHarness) -> None:
         == 422
     )
 
-    for bad in (
-        {**proposed, "allowed_targets": [_TITLE, _BOLD, "word/document.xml#t5"]},
-        {
-            **proposed,
-            "operations": [
-                {**proposed["operations"][0], "target": "word/document.xml#t5"}
-            ],
-        },
-        {**proposed, "base_revision_id": str(uuid4())},
-        {**proposed, "operations": [{**proposed["operations"][0], "op": "delete"}]},
-    ):
-        refused = client.post(
-            f"{path}/proposals/{proposal['id']}/decision",
-            json={"state": "edited", "decided_value": json.dumps(bad)},
-            headers={"X-CSRF-Token": "csrf", "If-Match": current["etag"]},
-        )
-        assert refused.status_code == 422
+    _refuse_decisions(harness, path, proposal["id"], proposed, current["etag"])
     edited_value = {
         **proposed,
         "operations": [{**proposed["operations"][0], "text": "Human Title"}],
@@ -786,3 +815,85 @@ def exercise_request_edges(harness: OfficeStepHarness) -> None:
 
 def test_request_edges_fail_closed(harness: OfficeStepHarness) -> None:
     exercise_request_edges(harness)
+
+
+def exercise_retried_steps(harness: OfficeStepHarness) -> None:
+    """Retries return the admitted step without another call; key reuse fails."""
+
+    client = harness.client
+    path, revision_id, etag, _source = _office_draft(harness)
+    step_path = f"{path}/revisions/{revision_id}/office-edit-steps"
+    preview = client.post(
+        f"{step_path}/preview",
+        json=_request(harness, (_TITLE,)),
+        headers={"If-Match": etag},
+    ).json()
+    body = _request(harness, (_TITLE,), preview_digest=preview["preview_digest"])
+    harness.replies.append(_reply((_TITLE, "Formal Title")))
+    started = client.post(step_path, json=body, headers=_headers(etag, "retry"))
+    assert started.status_code == 202
+    step = _settled(harness, path, started.json()["id"])
+    assert step["status"] == "completed"
+    prompts = len(harness.prompts)
+
+    replayed = client.post(step_path, json=body, headers=_headers(etag, "retry"))
+    assert replayed.status_code == 202, replayed.text
+    assert replayed.json() == step
+    decided = client.post(
+        f"{path}/proposals/{step['proposal_id']}/decision",
+        json={"state": "rejected"},
+        headers={"X-CSRF-Token": "csrf", "If-Match": client.get(path).json()["etag"]},
+    )
+    assert decided.status_code == 200
+    later = client.post(step_path, json=body, headers=_headers(etag, "retry"))
+    assert later.status_code == 202
+    assert later.json()["id"] == step["id"]
+    for reused, headers in (
+        ({**body, "instruction": "Another instruction."}, _headers(etag, "retry")),
+        (body, _headers('"999"', "retry")),
+    ):
+        refused = client.post(step_path, json=reused, headers=headers)
+        assert refused.status_code == 412, refused.text
+    harness.authentication.authenticate.return_value = harness.other
+    try:
+        foreign = client.post(step_path, json=body, headers=_headers(etag, "retry"))
+        assert foreign.status_code == 404
+    finally:
+        harness.authentication.authenticate.return_value = harness.owner
+
+    current = client.get(path).json()
+    assert harness.steps is not None
+    running_body = ComposerOfficeEditStepCreateRequest.model_validate(
+        {**body, "instruction": "Still running."}
+    )
+    running, created = harness.steps.start_model_step(
+        harness.owner.id,
+        UUID(current["id"]),
+        connection_id=harness.connection_id,
+        approved_endpoint=_ENDPOINT,
+        approved_model=_MODEL,
+        if_match=current["etag"],
+        idempotency_key="running",
+        payload_digest=_payload_digest(running_body, 4096),
+        max_active=4,
+        lease=timedelta(minutes=5),
+        intent="office_edit",
+    )
+    assert created
+    in_flight = client.post(
+        step_path,
+        json=running_body.model_dump(mode="json"),
+        headers=_headers(current["etag"], "running"),
+    )
+    assert in_flight.status_code == 202, in_flight.text
+    assert (in_flight.json()["id"], in_flight.json()["status"]) == (
+        str(running.id),
+        "running",
+    )
+    assert len(harness.prompts) == prompts
+
+
+def test_retried_steps_replay_without_another_model_call(
+    harness: OfficeStepHarness,
+) -> None:
+    exercise_retried_steps(harness)

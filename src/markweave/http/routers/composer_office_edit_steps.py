@@ -158,6 +158,39 @@ def _office_context(  # noqa: PLR0913, PLR0917 - exact disclosure inputs
     )
 
 
+def _replayed_step(  # noqa: PLR0913, PLR0917 - exact idempotency identity
+    dependencies: HttpDependencies,
+    user: User,
+    draft_id: UUID,
+    payload: ComposerOfficeEditStepCreateRequest,
+    if_match: str,
+    key: str,
+    digest: str,
+) -> ComposerModelStep | None:
+    """Answer a retried start from durable state, before the draft has moved on."""
+
+    steps = dependencies.components.composer_model_step_repository
+    if steps is None:
+        raise ComposerUnavailableError
+    step = steps.replay_model_step(
+        user.id,
+        draft_id,
+        idempotency_key=key,
+        connection_id=payload.connection_id,
+        approved_endpoint=payload.approved_endpoint,
+        approved_model=payload.approved_model,
+        if_match=if_match,
+        payload_digest=digest,
+        intent=OFFICE_EDIT_INTENT,
+    )
+    if step is not None:
+        connections = dependencies.components.composer_connections
+        if connections is None:
+            raise ComposerUnavailableError
+        connections.get_visible(_actor(dependencies, user), payload.connection_id)
+    return step
+
+
 def _authorized_connection(
     dependencies: HttpDependencies,
     user: User,
@@ -275,6 +308,12 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:  # noqa: PLR0915 
             raise ComposerRequestError
         etag, key = _step_headers(if_match, idempotency_key)
         digest = _payload_digest(payload, request_limit)
+        response.headers["Cache-Control"] = "private, no-store"
+        replayed = _replayed_step(
+            dependencies, user, draft_id, payload, etag, key, digest
+        )
+        if replayed is not None:
+            return _step_response(replayed)
         _authorized_connection(dependencies, user, payload)
         context = _office_context(
             dependencies, user, draft_id, revision_id, payload.targets, etag
@@ -284,7 +323,6 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:  # noqa: PLR0915 
         )
         if payload.preview_digest != preview_digest:
             raise ComposerConflictError("Office edit preview changed")
-        response.headers["Cache-Control"] = "private, no-store"
         step = runner.start(
             _actor(dependencies, user),
             draft_id,

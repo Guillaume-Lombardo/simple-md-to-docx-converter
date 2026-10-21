@@ -16,6 +16,7 @@ from tests.integration.sqlite.test_composer_office_edit_steps_http import (
     exercise_model_proposed_edit,
     exercise_pptx_proposal,
     exercise_request_edges,
+    exercise_retried_steps,
     exercise_stale_and_invalid_requests,
     exercise_superseded_proposal,
     exercise_tool_misuse,
@@ -80,3 +81,9 @@ def test_postgres_s3_markdown_steps_cannot_masquerade(
 
 def test_postgres_s3_request_edges_fail_closed(harness: OfficeStepHarness) -> None:
     exercise_request_edges(harness)
+
+
+def test_postgres_s3_retried_steps_replay_without_another_model_call(
+    harness: OfficeStepHarness,
+) -> None:
+    exercise_retried_steps(harness)

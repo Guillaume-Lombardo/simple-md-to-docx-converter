@@ -106,8 +106,16 @@ def test_replies_outside_the_tool_contract_are_rejected(reply: str) -> None:
     "change",
     [
         {"kind": "markdown"},
+        {"kind": []},
         {"format": "xlsx"},
+        {"format": []},
+        {"format": {}},
         {"engine_version": 2},
+        {"engine_version": True},
+        {"engine_version": []},
+        {"base_revision_id": 1},
+        {"base_revision_id": {}},
+        {"base_sha256": []},
         {"base_sha256": "short"},
         {"base_revision_id": "not-a-uuid"},
         {"allowed_targets": "all"},
@@ -130,6 +138,37 @@ def test_replies_outside_the_tool_contract_are_rejected(reply: str) -> None:
                 {
                     "op": "replace_text",
                     "target": "word/document.xml#t0",
+                    "text": "y",
+                }
+            ]
+        },
+        {"operations": [[]]},
+        {
+            "operations": [
+                {
+                    "op": [],
+                    "target": "word/document.xml#t0",
+                    "expected_text": "x",
+                    "text": "y",
+                }
+            ]
+        },
+        {
+            "operations": [
+                {
+                    "op": "replace_text",
+                    "target": ["word/document.xml#t0"],
+                    "expected_text": "x",
+                    "text": "y",
+                }
+            ]
+        },
+        {
+            "operations": [
+                {
+                    "op": "replace_text",
+                    "target": "word/document.xml#t0",
+                    "expected_text": {},
                     "text": "y",
                 }
             ]
