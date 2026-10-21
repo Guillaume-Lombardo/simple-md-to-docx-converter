@@ -63,3 +63,32 @@ class ComposerPptxEditRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     operations: tuple[ComposerDocxReplaceTextOperation, ...] = Field(min_length=1)
+
+
+class ComposerOfficeEditStepPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+    connection_id: UUID
+    approved_endpoint: str = Field(min_length=1)
+    approved_model: str = Field(min_length=1)
+    instruction: str = Field(min_length=1)
+    targets: tuple[str, ...] = Field(min_length=1, max_length=100)
+    max_output_tokens: int = Field(gt=0)
+
+
+class ComposerOfficeEditStepCreateRequest(ComposerOfficeEditStepPreviewRequest):
+    preview_digest: str = Field(min_length=64, max_length=64)
+
+
+class ComposerOfficeEditTargetText(BaseModel):
+    target: str
+    text: str
+
+
+class ComposerOfficeEditStepPreviewResponse(BaseModel):
+    format: Literal["docx", "pptx"]
+    base_revision_id: UUID
+    base_sha256: str
+    transmitted_content: str
+    targets: tuple[ComposerOfficeEditTargetText, ...]
+    preview_digest: str

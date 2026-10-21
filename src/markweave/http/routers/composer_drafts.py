@@ -45,6 +45,8 @@ from markweave.jobs.models import JobOutput
 from markweave.persistence.composer import SqlComposerRepository
 from markweave.reversions.models import ReverseOutputMode
 
+from .composer_office_edit_steps import reviewed_office_decision
+
 _MEDIA_TYPES = {
     ".md": "text/markdown",
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -534,13 +536,23 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:  # noqa: PLR0915
     ) -> ComposerProposalResponse:
         if if_match is None:
             raise ComposerPreconditionRequiredError
-        proposal = _store(dependencies).decide_proposal(
+        store = _store(dependencies)
+        decided_value = payload.decided_value
+        if payload.state.value == ProposalState.EDITED.value:
+            decided_value = reviewed_office_decision(
+                dependencies,
+                user.id,
+                draft_id,
+                store.get_proposal(user.id, draft_id, proposal_id),
+                decided_value,
+            )
+        proposal = store.decide_proposal(
             user.id,
             draft_id,
             proposal_id,
             if_match=if_match,
             state=ProposalState(payload.state.value),
-            decided_value=payload.decided_value,
+            decided_value=decided_value,
         )
         response.headers["Cache-Control"] = "private, no-store"
         return _proposal_response(proposal)

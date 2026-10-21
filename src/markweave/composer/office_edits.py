@@ -387,7 +387,7 @@ def _text_nodes(  # noqa: PLR0915 - one streaming pass
                 ordinal=len(nodes),
                 paragraph=current.paragraph,
                 in_table=current.in_table,
-                eligible=current.eligible and _plain(value),
+                eligible=current.eligible and plain_text(value),
                 text=value,
                 start=current.start,
                 content_start=current.content_start,
@@ -447,7 +447,7 @@ def inspect_text(
     )
 
 
-def _plain(value: str) -> bool:
+def plain_text(value: str) -> bool:
     return all(
         unicodedata.category(character) not in {"Cc", "Cs"}
         and character not in {"\ufffe", "\uffff"}
@@ -459,7 +459,7 @@ def _valid_text(value: object, limits: TypedDocxLimits) -> bool:
     return (
         type(value) is str
         and len(value) <= limits.max_text_characters
-        and _plain(value)
+        and plain_text(value)
     )
 
 

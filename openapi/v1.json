@@ -1668,6 +1668,175 @@
         "title": "ComposerModelStepResponse",
         "type": "object"
       },
+      "ComposerOfficeEditStepCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "approved_endpoint": {
+            "minLength": 1,
+            "title": "Approved Endpoint",
+            "type": "string"
+          },
+          "approved_model": {
+            "minLength": 1,
+            "title": "Approved Model",
+            "type": "string"
+          },
+          "connection_id": {
+            "format": "uuid",
+            "title": "Connection Id",
+            "type": "string"
+          },
+          "instruction": {
+            "minLength": 1,
+            "title": "Instruction",
+            "type": "string"
+          },
+          "max_output_tokens": {
+            "exclusiveMinimum": 0.0,
+            "title": "Max Output Tokens",
+            "type": "integer"
+          },
+          "preview_digest": {
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Preview Digest",
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Targets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "connection_id",
+          "approved_endpoint",
+          "approved_model",
+          "instruction",
+          "targets",
+          "max_output_tokens",
+          "preview_digest"
+        ],
+        "title": "ComposerOfficeEditStepCreateRequest",
+        "type": "object"
+      },
+      "ComposerOfficeEditStepPreviewRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "approved_endpoint": {
+            "minLength": 1,
+            "title": "Approved Endpoint",
+            "type": "string"
+          },
+          "approved_model": {
+            "minLength": 1,
+            "title": "Approved Model",
+            "type": "string"
+          },
+          "connection_id": {
+            "format": "uuid",
+            "title": "Connection Id",
+            "type": "string"
+          },
+          "instruction": {
+            "minLength": 1,
+            "title": "Instruction",
+            "type": "string"
+          },
+          "max_output_tokens": {
+            "exclusiveMinimum": 0.0,
+            "title": "Max Output Tokens",
+            "type": "integer"
+          },
+          "targets": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Targets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "connection_id",
+          "approved_endpoint",
+          "approved_model",
+          "instruction",
+          "targets",
+          "max_output_tokens"
+        ],
+        "title": "ComposerOfficeEditStepPreviewRequest",
+        "type": "object"
+      },
+      "ComposerOfficeEditStepPreviewResponse": {
+        "properties": {
+          "base_revision_id": {
+            "format": "uuid",
+            "title": "Base Revision Id",
+            "type": "string"
+          },
+          "base_sha256": {
+            "title": "Base Sha256",
+            "type": "string"
+          },
+          "format": {
+            "enum": [
+              "docx",
+              "pptx"
+            ],
+            "title": "Format",
+            "type": "string"
+          },
+          "preview_digest": {
+            "title": "Preview Digest",
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/ComposerOfficeEditTargetText"
+            },
+            "title": "Targets",
+            "type": "array"
+          },
+          "transmitted_content": {
+            "title": "Transmitted Content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "format",
+          "base_revision_id",
+          "base_sha256",
+          "transmitted_content",
+          "targets",
+          "preview_digest"
+        ],
+        "title": "ComposerOfficeEditStepPreviewResponse",
+        "type": "object"
+      },
+      "ComposerOfficeEditTargetText": {
+        "properties": {
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target",
+          "text"
+        ],
+        "title": "ComposerOfficeEditTargetText",
+        "type": "object"
+      },
       "ComposerPptxEditRequest": {
         "additionalProperties": false,
         "properties": {
@@ -13292,6 +13461,240 @@
         ]
       }
     },
+    "/api/v1/composer/drafts/{draft_id}/proposals/{proposal_id}/office-edits": {
+      "post": {
+        "description": "Apply a human-approved model proposal to the exact revision it reviewed.",
+        "operationId": "publish_office_edit_proposal_api_v1_composer_drafts__draft_id__proposals__proposal_id__office_edits_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Draft Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Proposal Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComposerRevisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested resource was not found",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A request precondition failed",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request body is too large",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request requires a precondition",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Publish Office Edit Proposal",
+        "tags": [
+          "composer"
+        ]
+      }
+    },
     "/api/v1/composer/drafts/{draft_id}/proposals/{proposal_id}/publish": {
       "post": {
         "operationId": "publish_proposal_api_v1_composer_drafts__draft_id__proposals__proposal_id__publish_post",
@@ -15504,6 +15907,505 @@
           }
         },
         "summary": "List Text Targets",
+        "tags": [
+          "composer"
+        ]
+      }
+    },
+    "/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/office-edit-steps": {
+      "post": {
+        "description": "Transmit the previewed text once; the reply becomes a pending proposal.",
+        "operationId": "start_office_edit_step_api_v1_composer_drafts__draft_id__revisions__revision_id__office_edit_steps_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Draft Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "revision_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Revision Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComposerOfficeEditStepCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComposerModelStepResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The operation is forbidden",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested resource was not found",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A request precondition failed",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request body is too large",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request requires a precondition",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Start Office Edit Step",
+        "tags": [
+          "composer"
+        ]
+      }
+    },
+    "/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/office-edit-steps/preview": {
+      "post": {
+        "description": "Show the exact text a model step would transmit, without sending it.",
+        "operationId": "preview_office_edit_step_api_v1_composer_drafts__draft_id__revisions__revision_id__office_edit_steps_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Draft Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "revision_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Revision Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComposerOfficeEditStepPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComposerOfficeEditStepPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The operation is forbidden",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested resource was not found",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A request precondition failed",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request body is too large",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request requires a precondition",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Preview Office Edit Step",
         "tags": [
           "composer"
         ]

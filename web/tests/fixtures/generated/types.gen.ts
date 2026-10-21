@@ -981,6 +981,114 @@ export type ComposerModelStepResponse = {
 };
 
 /**
+ * ComposerOfficeEditStepCreateRequest
+ */
+export type ComposerOfficeEditStepCreateRequest = {
+    /**
+     * Approved Endpoint
+     */
+    approved_endpoint: string;
+    /**
+     * Approved Model
+     */
+    approved_model: string;
+    /**
+     * Connection Id
+     */
+    connection_id: string;
+    /**
+     * Instruction
+     */
+    instruction: string;
+    /**
+     * Max Output Tokens
+     */
+    max_output_tokens: number;
+    /**
+     * Preview Digest
+     */
+    preview_digest: string;
+    /**
+     * Targets
+     */
+    targets: Array<string>;
+};
+
+/**
+ * ComposerOfficeEditStepPreviewRequest
+ */
+export type ComposerOfficeEditStepPreviewRequest = {
+    /**
+     * Approved Endpoint
+     */
+    approved_endpoint: string;
+    /**
+     * Approved Model
+     */
+    approved_model: string;
+    /**
+     * Connection Id
+     */
+    connection_id: string;
+    /**
+     * Instruction
+     */
+    instruction: string;
+    /**
+     * Max Output Tokens
+     */
+    max_output_tokens: number;
+    /**
+     * Targets
+     */
+    targets: Array<string>;
+};
+
+/**
+ * ComposerOfficeEditStepPreviewResponse
+ */
+export type ComposerOfficeEditStepPreviewResponse = {
+    /**
+     * Base Revision Id
+     */
+    base_revision_id: string;
+    /**
+     * Base Sha256
+     */
+    base_sha256: string;
+    /**
+     * Format
+     */
+    format: 'docx' | 'pptx';
+    /**
+     * Preview Digest
+     */
+    preview_digest: string;
+    /**
+     * Targets
+     */
+    targets: Array<ComposerOfficeEditTargetText>;
+    /**
+     * Transmitted Content
+     */
+    transmitted_content: string;
+};
+
+/**
+ * ComposerOfficeEditTargetText
+ */
+export type ComposerOfficeEditTargetText = {
+    /**
+     * Target
+     */
+    target: string;
+    /**
+     * Text
+     */
+    text: string;
+};
+
+/**
  * ComposerPptxEditRequest
  */
 export type ComposerPptxEditRequest = {
@@ -5642,6 +5750,78 @@ export type DecideProposalApiV1ComposerDraftsDraftIdProposalsProposalIdDecisionP
 
 export type DecideProposalApiV1ComposerDraftsDraftIdProposalsProposalIdDecisionPostResponse = DecideProposalApiV1ComposerDraftsDraftIdProposalsProposalIdDecisionPostResponses[keyof DecideProposalApiV1ComposerDraftsDraftIdProposalsProposalIdDecisionPostResponses];
 
+export type PublishOfficeEditProposalApiV1ComposerDraftsDraftIdProposalsProposalIdOfficeEditsPostData = {
+    body?: never;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * Idempotency-Key
+         */
+        'Idempotency-Key'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Proposal Id
+         */
+        proposal_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/proposals/{proposal_id}/office-edits';
+};
+
+export type PublishOfficeEditProposalApiV1ComposerDraftsDraftIdProposalsProposalIdOfficeEditsPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type PublishOfficeEditProposalApiV1ComposerDraftsDraftIdProposalsProposalIdOfficeEditsPostError = PublishOfficeEditProposalApiV1ComposerDraftsDraftIdProposalsProposalIdOfficeEditsPostErrors[keyof PublishOfficeEditProposalApiV1ComposerDraftsDraftIdProposalsProposalIdOfficeEditsPostErrors];
+
+export type PublishOfficeEditProposalApiV1ComposerDraftsDraftIdProposalsProposalIdOfficeEditsPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: ComposerRevisionResponse;
+};
+
+export type PublishOfficeEditProposalApiV1ComposerDraftsDraftIdProposalsProposalIdOfficeEditsPostResponse = PublishOfficeEditProposalApiV1ComposerDraftsDraftIdProposalsProposalIdOfficeEditsPostResponses[keyof PublishOfficeEditProposalApiV1ComposerDraftsDraftIdProposalsProposalIdOfficeEditsPostResponses];
+
 export type PublishProposalApiV1ComposerDraftsDraftIdProposalsProposalIdPublishPostData = {
     body?: never;
     headers?: {
@@ -6361,6 +6541,150 @@ export type ListTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxText
 };
 
 export type ListTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxTextTargetsGetResponse = ListTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxTextTargetsGetResponses[keyof ListTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxTextTargetsGetResponses];
+
+export type StartOfficeEditStepApiV1ComposerDraftsDraftIdRevisionsRevisionIdOfficeEditStepsPostData = {
+    body: ComposerOfficeEditStepCreateRequest;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * Idempotency-Key
+         */
+        'Idempotency-Key'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Revision Id
+         */
+        revision_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/office-edit-steps';
+};
+
+export type StartOfficeEditStepApiV1ComposerDraftsDraftIdRevisionsRevisionIdOfficeEditStepsPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type StartOfficeEditStepApiV1ComposerDraftsDraftIdRevisionsRevisionIdOfficeEditStepsPostError = StartOfficeEditStepApiV1ComposerDraftsDraftIdRevisionsRevisionIdOfficeEditStepsPostErrors[keyof StartOfficeEditStepApiV1ComposerDraftsDraftIdRevisionsRevisionIdOfficeEditStepsPostErrors];
+
+export type StartOfficeEditStepApiV1ComposerDraftsDraftIdRevisionsRevisionIdOfficeEditStepsPostResponses = {
+    /**
+     * Successful Response
+     */
+    202: ComposerModelStepResponse;
+};
+
+export type StartOfficeEditStepApiV1ComposerDraftsDraftIdRevisionsRevisionIdOfficeEditStepsPostResponse = StartOfficeEditStepApiV1ComposerDraftsDraftIdRevisionsRevisionIdOfficeEditStepsPostResponses[keyof StartOfficeEditStepApiV1ComposerDraftsDraftIdRevisionsRevisionIdOfficeEditStepsPostResponses];
+
+export type PreviewOfficeEditStepApiV1ComposerDraftsDraftIdRevisionsRevisionIdOfficeEditStepsPreviewPostData = {
+    body: ComposerOfficeEditStepPreviewRequest;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+    };
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Revision Id
+         */
+        revision_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/office-edit-steps/preview';
+};
+
+export type PreviewOfficeEditStepApiV1ComposerDraftsDraftIdRevisionsRevisionIdOfficeEditStepsPreviewPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type PreviewOfficeEditStepApiV1ComposerDraftsDraftIdRevisionsRevisionIdOfficeEditStepsPreviewPostError = PreviewOfficeEditStepApiV1ComposerDraftsDraftIdRevisionsRevisionIdOfficeEditStepsPreviewPostErrors[keyof PreviewOfficeEditStepApiV1ComposerDraftsDraftIdRevisionsRevisionIdOfficeEditStepsPreviewPostErrors];
+
+export type PreviewOfficeEditStepApiV1ComposerDraftsDraftIdRevisionsRevisionIdOfficeEditStepsPreviewPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: ComposerOfficeEditStepPreviewResponse;
+};
+
+export type PreviewOfficeEditStepApiV1ComposerDraftsDraftIdRevisionsRevisionIdOfficeEditStepsPreviewPostResponse = PreviewOfficeEditStepApiV1ComposerDraftsDraftIdRevisionsRevisionIdOfficeEditStepsPreviewPostResponses[keyof PreviewOfficeEditStepApiV1ComposerDraftsDraftIdRevisionsRevisionIdOfficeEditStepsPreviewPostResponses];
 
 export type EditPptxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxEditsPostData = {
     body: ComposerPptxEditRequest;

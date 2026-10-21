@@ -17,6 +17,12 @@ from markweave.composer.egress import (
     EgressResponseError,
     EgressUnavailableError,
 )
+from markweave.composer.office_edit_proposals import (
+    OFFICE_EDIT_INTENT,
+    OfficeEditContext,
+    OfficeEditProposalError,
+    parse_model_reply,
+)
 from markweave.http.composer_errors import ComposerUnavailableError
 from markweave.observability import OperationalMetrics
 from markweave.persistence.composer import (
@@ -43,6 +49,7 @@ class ModelStepInput:
     answered_question_id: UUID | None = None
     author_refs: tuple[tuple[UUID, int], ...] = ()
     author_preview_digest: str | None = None
+    office: OfficeEditContext | None = None
 
 
 class ComposerStepRunner:
@@ -102,7 +109,14 @@ class ComposerStepRunner:
         cancel_event = threading.Event()
         thread = threading.Thread(
             target=self._run,
-            args=(actor, step, input_.content, input_.max_output_tokens, cancel_event),
+            args=(
+                actor,
+                step,
+                input_.content,
+                input_.max_output_tokens,
+                cancel_event,
+                input_.office,
+            ),
             daemon=True,
             name="composer-model-step",
         )
@@ -175,13 +189,14 @@ class ComposerStepRunner:
         for _step_id, (_step, _event, thread) in active:
             thread.join(timeout=max(0.0, deadline - monotonic()))
 
-    def _run(  # noqa: PLR0912 - bounded transport and terminal state handling
+    def _run(  # noqa: PLR0912, PLR0913, PLR0915, PLR0917 - bounded transport and terminal state handling
         self,
         actor: ConnectionActor,
         step: ComposerModelStep,
         content: str,
         max_output_tokens: int,
         cancel_event: threading.Event,
+        office: OfficeEditContext | None = None,
     ) -> None:
         started_at = self._metrics.timer() if self._metrics is not None else 0.0
         outcome = "failed"
@@ -217,6 +232,19 @@ class ComposerStepRunner:
                     proposed_value = validated_question(proposed_value)
                 except ValueError:
                     raise EgressResponseError("Provider question is invalid") from None
+            elif step.intent == OFFICE_EDIT_INTENT:
+                # The in-memory disclosure bounds the tool reply; a restarted
+                # step has none and is terminalized by lease recovery instead.
+                if office is None:
+                    raise EgressResponseError("Office edit context is unavailable")
+                try:
+                    proposed_value = parse_model_reply(
+                        proposed_value, office
+                    ).canonical()
+                except OfficeEditProposalError:
+                    raise EgressResponseError(
+                        "Provider tool reply is invalid"
+                    ) from None
             if cancel_event.is_set():
                 outcome = "cancelled"
                 return

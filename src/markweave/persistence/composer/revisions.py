@@ -129,6 +129,25 @@ def _request_digest(
     ).hexdigest()
 
 
+_OFFICE_MEDIA_TYPES = frozenset(
+    {
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    }
+)
+
+
+def _office_base_revision(decided_value: str) -> str | None:
+    """Return the reviewed base revision named by an Office edit decision."""
+
+    try:
+        data = json.loads(decided_value)
+    except ValueError:
+        return None
+    value = data.get("base_revision_id") if isinstance(data, dict) else None
+    return value if isinstance(value, str) else None
+
+
 class _SqlComposerRevisions:
     """Mixin for exact revision reads, publication, restore, and stale cleanup."""
 
@@ -144,10 +163,18 @@ class _SqlComposerRevisions:
         owner_id: UUID,
         draft_id: UUID,
         proposal: ComposerProposalRow,
+        *,
+        office: bool = False,
     ) -> None:
-        """Fence the model step's frozen author grants in the publication transaction."""
+        """Fence the model step's frozen author grants in the publication transaction.
+
+        An Office edit proposal must come from an Office edit step, and an
+        Office edit step's JSON can never be published as Markdown content.
+        """
 
         if not proposal.provenance.startswith("model-step:"):
+            if office:
+                raise ComposerConflictError("Composer proposal origin changed")
             return
         try:
             step_id = UUID(proposal.provenance.removeprefix("model-step:"))
@@ -164,7 +191,7 @@ class _SqlComposerRevisions:
             )
             .with_for_update()
         )
-        if step is None:
+        if step is None or (step.intent == "office_edit") != office:
             raise ComposerConflictError("Composer proposal origin changed")
         try:
             refs = json.loads(step.author_refs)
@@ -485,12 +512,35 @@ class _SqlComposerRevisions:
                         )
                         .with_for_update()
                     )
+                    office_proposal = (
+                        snapshot.operation
+                        == f"office_edit_proposal:{approved_proposal_id}"
+                    )
                     if (
                         proposal is None
                         or proposal.state not in {"accepted", "edited"}
                         or proposal.decided_value is None
                         or draft.version != proposal.base_version + 2
-                        or snapshot.approved_values
+                    ):
+                        raise ComposerConflictError(
+                            "Composer proposal requires review again"
+                        )
+                    if office_proposal:
+                        if (
+                            snapshot.approved_values != proposal.decided_value
+                            or _office_base_revision(proposal.decided_value)
+                            != draft.current_revision_id
+                            or proposal_asset is not None
+                            or any(
+                                artifact.media_type not in _OFFICE_MEDIA_TYPES
+                                for artifact in artifacts
+                            )
+                        ):
+                            raise ComposerConflictError(
+                                "Composer proposal requires review again"
+                            )
+                    elif (
+                        snapshot.approved_values
                         != json.dumps(
                             {"content": proposal.decided_value}, ensure_ascii=False
                         )
@@ -521,9 +571,10 @@ class _SqlComposerRevisions:
                             "Composer proposal requires review again"
                         )
                     self._require_proposal_author_access(
-                        database, owner_id, draft_id, proposal
+                        database, owner_id, draft_id, proposal, office=office_proposal
                     )
-                    approved_draft_content = proposal.decided_value
+                    if not office_proposal:
+                        approved_draft_content = proposal.decided_value
                 pending = database.scalar(
                     select(ComposerRevisionRow.id).where(
                         ComposerRevisionRow.draft_id == str(draft_id),
@@ -629,7 +680,12 @@ class _SqlComposerRevisions:
                     if proposal is None:
                         raise ComposerConflictError("Composer proposal origin changed")
                     self._require_proposal_author_access(
-                        database, owner_id, draft_id, proposal
+                        database,
+                        owner_id,
+                        draft_id,
+                        proposal,
+                        office=reserved.operation
+                        == f"office_edit_proposal:{approved_proposal_id}",
                     )
                 reserved.publication_state = "published"
                 reserved.publication_token = None

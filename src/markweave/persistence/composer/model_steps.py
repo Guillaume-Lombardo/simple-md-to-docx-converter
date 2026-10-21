@@ -192,7 +192,7 @@ class SqlComposerModelStepRepository:
             or not isinstance(max_active, int)
             or max_active <= 0
             or lease <= timedelta(0)
-            or intent not in {"proposal", "question"}
+            or intent not in {"proposal", "question", "office_edit"}
             or (bool(author_refs) != bool(author_preview_digest))
             or (
                 author_preview_digest is not None
@@ -368,6 +368,59 @@ class SqlComposerModelStepRepository:
             raise ComposerConflictError("Model step changed") from None
         except SQLAlchemyError:
             raise PersistenceError from None
+
+    def replay_model_step(  # noqa: PLR0913 - persisted idempotency identity
+        self,
+        owner_id: UUID,
+        draft_id: UUID,
+        *,
+        idempotency_key: str,
+        connection_id: UUID,
+        approved_endpoint: str,
+        approved_model: str,
+        if_match: str,
+        payload_digest: str,
+        intent: str,
+        answered_question_id: UUID | None = None,
+        author_refs: tuple[tuple[UUID, int], ...] = (),
+        author_preview_digest: str | None = None,
+    ) -> ComposerModelStep | None:
+        """Return the owner's step already admitted for this exact request, if any.
+
+        A retry is answered from durable state before current-draft preconditions,
+        which a completed step has advanced. A reused key with any other request
+        identity is a conflict; nothing is transmitted again.
+        """
+
+        try:
+            with Session(self._engine) as database:
+                owned_draft(database, owner_id, draft_id)
+                row = database.scalar(
+                    select(ComposerModelStepRow).where(
+                        ComposerModelStepRow.draft_id == str(draft_id),
+                        ComposerModelStepRow.owner_id == str(owner_id),
+                        ComposerModelStepRow.idempotency_key == idempotency_key,
+                    )
+                )
+                if row is None:
+                    return None
+                if not self._same_request(
+                    row,
+                    connection_id=connection_id,
+                    approved_endpoint=approved_endpoint,
+                    approved_model=approved_model,
+                    if_match=if_match,
+                    payload_digest=payload_digest,
+                    intent=intent,
+                    answered_question_id=answered_question_id,
+                    author_refs=author_refs,
+                    author_preview_digest=author_preview_digest,
+                ):
+                    raise ComposerConflictError("Model step idempotency key was reused")
+                step_id = UUID(row.id)
+        except SQLAlchemyError:
+            raise PersistenceError from None
+        return self.get_model_step(owner_id, draft_id, step_id)
 
     def get_model_step(
         self, owner_id: UUID, draft_id: UUID, step_id: UUID

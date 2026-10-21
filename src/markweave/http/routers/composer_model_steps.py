@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query, Response
+from pydantic import BaseModel
 
 from markweave.auth.models import Role, User
 from markweave.composer.author_knowledge import (
@@ -83,7 +84,7 @@ def _require_headers(
     return if_match, idempotency_key
 
 
-def _payload_digest(payload: ComposerModelStepCreateRequest, limit: int) -> str:
+def _payload_digest(payload: BaseModel, limit: int) -> str:
     try:
         encoded = json.dumps(
             payload.model_dump(mode="json"),

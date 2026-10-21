@@ -267,6 +267,33 @@ offered. The request body is identical to the DOCX one; publication records `pro
 change, and failures use `COMPOSER_PPTX_EDIT_*` codes. A revision of the other format, or a
 Markdown or PDF revision, is refused with `422`.
 
+A model may propose Office text edits only through the allowlisted `replace_text` tool. `POST
+.../revisions/{revision_id}/office-edit-steps/preview` takes the draft `If-Match` and
+`{ "connection_id", "approved_endpoint", "approved_model", "instruction", "targets": [...],
+"max_output_tokens" }` for the current DOCX or PPTX revision. It returns the format, base revision
+and digest, the exact `transmitted_content`, the text of each selected target, and a
+`preview_digest`; nothing is sent. Only the selected targets' text is disclosed, at most 100 of
+them, each named once and currently editable. `POST .../office-edit-steps` repeats the request with
+`preview_digest`, `If-Match`, and an `Idempotency-Key`, and returns `202` with an ordinary model
+step whose `intent` reads `proposal`. A changed document, connection, or disclosure fails with
+`412` before transmission. The reply must be exactly `{ "operations": [{ "op": "replace_text",
+"target", "text" }] }`, optionally in one fenced JSON block, naming disclosed targets at most once
+with valid text. Any other operation, target, key, shape, or prose fails the step with
+`provider_invalid` and creates no proposal, so document text cannot widen the tool's reach.
+
+A successful step creates a pending proposal whose `proposed_value` is a canonical JSON record:
+`kind` `office_edit`, `format`, `engine_version`, base revision ID and digest, `allowed_targets`,
+and operations whose `expected_text` is the transmitted text. The usual decision route accepts or
+rejects it; an `edited` decision may change or drop replacement texts but not the revision,
+targets, or expected texts, and is stored canonically. `POST
+/api/v1/composer/drafts/{id}/proposals/{proposal_id}/office-edits` with the current `If-Match` and
+an `Idempotency-Key` publishes an accepted or edited Office proposal only while its base revision
+is still current and unchanged. It applies the reviewed operations with the same executor, records
+the step's model identity, `provenance` `human:{decision}:model-step:{step_id}`, and operation
+`office_edit_proposal:{proposal_id}`, and fails without publication when any text changed. The
+Markdown proposal publication route refuses Office proposals, and a plain Markdown step's text can
+never be published as an Office edit.
+
 `POST /api/v1/composer/drafts/{id}/revisions/{approved_revision_id}/generations` accepts
 `{ "output": "docx"|"pdf"|"pptx", "template_id": null,
 "template_version_id": null, "presentation_dialect": null, "slide_level": null }`
