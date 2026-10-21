@@ -9,6 +9,7 @@ import os
 import signal
 import subprocess
 import tempfile
+import time
 import zipfile
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -428,6 +429,21 @@ def test_timeout_and_cancellation_kill_process_group_descendants(
         "time.sleep(30)",
     )
 
+    def timeout_readiness_gate() -> bool:
+        # A starved host can reach the 0.3 s deadline before the engine
+        # publishes the descendant pid, which fails on a missing pid file
+        # instead of a surviving descendant (T144). The converter polls this
+        # before every deadline check, so holding the first poll after the
+        # engine starts until publication orders the two; the real deadline
+        # still ends the run. The poll before the workspace exists precedes
+        # the engine start and must not wait.
+        if not any(workspace.glob("md-converter-pdf-*/source.docx")):
+            return False
+        published_by = time.monotonic() + 10.0
+        while not pid_file.exists() and time.monotonic() < published_by:
+            time.sleep(0.005)
+        return False
+
     def probe_failure() -> bool:
         if not staged_file.exists():
             return False
@@ -446,8 +462,8 @@ def test_timeout_and_cancellation_kill_process_group_descendants(
         assert pid_file.read_text(encoding="ascii").isdigit()
         return True
 
-    probes: dict[str, Callable[[], bool] | None] = {
-        "timeout": None,
+    probes: dict[str, Callable[[], bool]] = {
+        "timeout": timeout_readiness_gate,
         "cancel": cancellation_probe,
         "probe-failure": probe_failure,
     }

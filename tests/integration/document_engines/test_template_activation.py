@@ -9,7 +9,6 @@ import os
 import signal
 import subprocess
 import textwrap
-import time
 import zipfile
 from contextlib import suppress
 from pathlib import Path
@@ -47,6 +46,7 @@ from markweave.templates.validation import (
     TemplateLimits,
     validate_template,
 )
+from tests.process_exit import wait_for_process_exit
 
 pytestmark = pytest.mark.integration
 LIMITS = TemplateLimits(
@@ -407,28 +407,14 @@ def test_timeout_kills_a_descendant_that_ignores_sigterm(tmp_path: Path) -> None
         template_engines._run((str(engine),), tmp_path, os.environ, config)
     assert captured.value.code is TemplateValidationErrorCode.ENGINE_TIMEOUT
     descendant_pid = int(pid_file.read_text())
-    deadline = time.monotonic() + 2.0
-
-    def descendant_is_running() -> bool:
-        try:
-            state = Path(f"/proc/{descendant_pid}/stat").read_text().split()[2]
-        except FileNotFoundError:
-            return False
-        # Pytest is PID 1 in this isolated test container, so a killed orphan can
-        # remain as a zombie until container exit. A zombie cannot execute code.
-        return state != "Z"
-
-    try:
-        while time.monotonic() < deadline:
-            if not descendant_is_running():
-                break
-            time.sleep(0.01)
-        else:
-            pytest.fail("Timed-out engine descendant survived process-group cleanup")
-    finally:
-        if descendant_is_running():
-            with suppress(ProcessLookupError):
-                os.kill(descendant_pid, signal.SIGKILL)
+    # Pytest is PID 1 in this isolated test container, so a killed orphan can
+    # remain a zombie until container exit; the shared helper counts it, a task
+    # being reaped and an ESRCH read as exited, from one latched observation.
+    if wait_for_process_exit(descendant_pid, 2.0):
+        return
+    with suppress(ProcessLookupError):
+        os.kill(descendant_pid, signal.SIGKILL)
+    pytest.fail("Timed-out engine descendant survived process-group cleanup")
 
 
 @pytest.mark.requires_pandoc
