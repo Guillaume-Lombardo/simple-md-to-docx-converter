@@ -18,6 +18,7 @@ from markweave.composer.connections import (
     ConnectionConflictError,
     ConnectionNotFoundError,
 )
+from markweave.composer.docx_edits import DocxEditError
 from markweave.composer.egress import (
     EgressCapacityError,
     EgressPolicyError,
@@ -312,6 +313,20 @@ def install_error_handlers(app: FastAPI) -> None:
                     "code": f"COMPOSER_TYPED_{error.code.upper()}",
                     "message": "The typed template or values are invalid.",
                     "paths": list(error.paths),
+                }
+            },
+            headers={"Cache-Control": "private, no-store"},
+        )
+
+    @app.exception_handler(DocxEditError)
+    def docx_edit_handler(_request: Request, error: DocxEditError) -> JSONResponse:
+        return JSONResponse(
+            status_code=413 if error.code == "limit_exceeded" else 422,
+            content={
+                "error": {
+                    "code": f"COMPOSER_DOCX_EDIT_{error.code.upper()}",
+                    "message": "The DOCX edit cannot be applied.",
+                    "paths": list(error.targets),
                 }
             },
             headers={"Cache-Control": "private, no-store"},

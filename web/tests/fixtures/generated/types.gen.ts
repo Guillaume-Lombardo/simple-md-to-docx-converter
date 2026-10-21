@@ -515,6 +515,94 @@ export type ComposerDestinationResolveResponse = {
 };
 
 /**
+ * ComposerDocxEditRequest
+ */
+export type ComposerDocxEditRequest = {
+    /**
+     * Operations
+     */
+    operations: Array<ComposerDocxReplaceTextOperation>;
+};
+
+/**
+ * ComposerDocxReplaceTextOperation
+ */
+export type ComposerDocxReplaceTextOperation = {
+    /**
+     * Expected Text
+     */
+    expected_text: string;
+    /**
+     * Op
+     */
+    op: 'replace_text';
+    /**
+     * Target
+     */
+    target: string;
+    /**
+     * Text
+     */
+    text: string;
+};
+
+/**
+ * ComposerDocxTextTargetListResponse
+ */
+export type ComposerDocxTextTargetListResponse = {
+    /**
+     * Download Sha256
+     */
+    download_sha256: string;
+    /**
+     * Engine Version
+     */
+    engine_version: number;
+    /**
+     * Limit
+     */
+    limit: number;
+    /**
+     * Offset
+     */
+    offset: number;
+    /**
+     * Revision Id
+     */
+    revision_id: string;
+    /**
+     * Targets
+     */
+    targets: Array<ComposerDocxTextTargetResponse>;
+    /**
+     * Total
+     */
+    total: number;
+};
+
+/**
+ * ComposerDocxTextTargetResponse
+ */
+export type ComposerDocxTextTargetResponse = {
+    /**
+     * In Table
+     */
+    in_table: boolean;
+    /**
+     * Paragraph
+     */
+    paragraph: number;
+    /**
+     * Target
+     */
+    target: string;
+    /**
+     * Text
+     */
+    text: string;
+};
+
+/**
  * ComposerDraftListResponse
  */
 export type ComposerDraftListResponse = {
@@ -6068,6 +6156,137 @@ export type DiffRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdDiffGetResp
 };
 
 export type DiffRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdDiffGetResponse = DiffRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdDiffGetResponses[keyof DiffRevisionApiV1ComposerDraftsDraftIdRevisionsRevisionIdDiffGetResponses];
+
+export type EditDocxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxEditsPostData = {
+    body: ComposerDocxEditRequest;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * Idempotency-Key
+         */
+        'Idempotency-Key'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Revision Id
+         */
+        revision_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/docx-edits';
+};
+
+export type EditDocxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxEditsPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type EditDocxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxEditsPostError = EditDocxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxEditsPostErrors[keyof EditDocxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxEditsPostErrors];
+
+export type EditDocxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxEditsPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: ComposerRevisionResponse;
+};
+
+export type EditDocxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxEditsPostResponse = EditDocxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxEditsPostResponses[keyof EditDocxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxEditsPostResponses];
+
+export type ListTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxTextTargetsGetData = {
+    body?: never;
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Revision Id
+         */
+        revision_id: string;
+    };
+    query?: {
+        /**
+         * Limit
+         */
+        limit?: number;
+        /**
+         * Offset
+         */
+        offset?: number;
+    };
+    url: '/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/docx-text-targets';
+};
+
+export type ListTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxTextTargetsGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type ListTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxTextTargetsGetError = ListTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxTextTargetsGetErrors[keyof ListTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxTextTargetsGetErrors];
+
+export type ListTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxTextTargetsGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ComposerDocxTextTargetListResponse;
+};
+
+export type ListTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxTextTargetsGetResponse = ListTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxTextTargetsGetResponses[keyof ListTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxTextTargetsGetResponses];
 
 export type RegenerateApiV1ComposerDraftsDraftIdRevisionsRevisionIdRegenerationsPostData = {
     body?: never;

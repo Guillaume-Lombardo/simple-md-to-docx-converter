@@ -95,8 +95,17 @@ and download are identical. The revision records the exact source and template d
 approved values, provenance, author references, and component version. It does not ask a model to
 fill the document. **Regenerate** uses those retained approved inputs and the exact template
 version, checks the output digest, and makes no model call. A changed template or value requires a
-new plan and review. Typed filling supports the qualified content-control subset; general Word
-editing remains a later capability.
+new plan and review. Typed filling supports the qualified content-control subset.
+
+## Edit Word text
+
+A DOCX revision's body text, including table cell text, can be corrected through the
+[Composer API](api-guide.md) without regenerating the document. Each edit replaces the whole text
+of one run, only if it still holds the text you reviewed, and creates a new immutable revision.
+Formatting, images, styles, relationships, and every other part of the file are kept exactly.
+Text in tracked changes, content controls, and fields cannot be edited this way. Structural
+changes such as adding paragraphs, rows, or images, PowerPoint editing, model-proposed edits,
+and browser controls for this operation are later capabilities.
 
 ## Generate a reviewed document
 

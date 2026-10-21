@@ -235,6 +235,27 @@ content for a later human edit. Human publication records the prior approved rev
 earlier model receipt as lineage in `render_options`; its own `model_identity` remains null so
 the human edit is not attributed to the model. That lineage follows later generated revisions.
 
+`GET /api/v1/composer/drafts/{id}/revisions/{revision_id}/docx-text-targets?limit=200&offset=0`
+lists the editable body text of a revision whose download is a DOCX file. Each target has a
+stable identity such as `word/document.xml#t12`, its zero-based body paragraph number, whether it
+is inside a table, and its exact text. The response also names the revision, the download digest,
+and the edit engine version. Text owned by another Word mechanism is never offered: tracked
+insertions and deletions, content controls, field results, alternate content, and nodes that
+contain control characters. `POST .../revisions/{revision_id}/docx-edits` accepts
+`{ "operations": [{ "op": "replace_text", "target": "word/document.xml#t12",
+"expected_text": "...", "text": "..." }] }` with the current draft `If-Match` and an
+`Idempotency-Key`. Only the current revision can be edited. FastAPI admits a private copy under
+the operator's Word archive limits, rejects active content, signatures, and every external
+relationship except never-fetched hyperlinks, and replaces only the named text nodes when each
+still holds its expected text. Every other package member and every other byte of
+`word/document.xml` stays identical and is re-verified before the new immutable revision is
+published with matching DOCX preview and download artifacts. The revision records the frozen
+operations in `approved_values`, `provenance` `human:docx_edit`, operation
+`docx_edit:{revision_id}`, and the prior revision as lineage. A stale target, unknown or
+ineligible target, duplicate target, invalid text, or exceeded limit fails with a
+`COMPOSER_DOCX_EDIT_*` code that lists only the affected target identities, and no revision is
+published. No model call occurs. Restore copies an earlier revision forward as usual.
+
 `POST /api/v1/composer/drafts/{id}/revisions/{approved_revision_id}/generations` accepts
 `{ "output": "docx"|"pdf"|"pptx", "template_id": null,
 "template_version_id": null, "presentation_dialect": null, "slide_level": null }`
