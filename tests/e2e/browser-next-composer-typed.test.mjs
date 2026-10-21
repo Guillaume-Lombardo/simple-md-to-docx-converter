@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import test from "node:test";
 
 import { chromium } from "playwright-core";
@@ -20,6 +21,12 @@ const malwareMarker =
 const providerEndpoint = "https://e2e-llm:8443/v1";
 const providerModel = "composer-e2e-model";
 const providerSecret = "composer-e2e-write-only-secret";
+// The browser runner is the final image, so this is the packaged CLI.
+const cliBinary = "/opt/md-converter/venv/bin/markweave";
+const cliPython = "/opt/md-converter/venv/bin/python";
+const cliStateHome = "/work/markweave-cli-state";
+const cliFiles = "/work/markweave-cli-files";
+const csrfCookie = "__Host-md_converter_csrf";
 
 async function login(page, username, password) {
   await page.goto(`${baseURL}/login`, { waitUntil: "networkidle" });
@@ -607,6 +614,432 @@ async function modelProposedOfficeEdit(alice, connection, suffix) {
     200,
   );
   assert.equal(reread.targets[0].text, "Model E2E title");
+}
+
+function runInstalled(command, args, input = "") {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      env: {
+        HOME: "/work/home",
+        LANG: "C.UTF-8",
+        PATH: "/usr/bin:/bin",
+        XDG_STATE_HOME: cliStateHome,
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const stdout = [];
+    const stderr = [];
+    const timer = setTimeout(() => child.kill("SIGKILL"), 60_000);
+    child.stdout.on("data", (chunk) => stdout.push(chunk));
+    child.stderr.on("data", (chunk) => stderr.push(chunk));
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({
+        code,
+        stdout: Buffer.concat(stdout).toString("utf8"),
+        stderr: Buffer.concat(stderr).toString("utf8"),
+      });
+    });
+    child.stdin.end(input);
+  });
+}
+
+function lastJson(text) {
+  const line = text.trim().split("\n").at(-1);
+  return line ? JSON.parse(line) : null;
+}
+
+/** Bind an installed-CLI profile to the browser session of one account. */
+async function cliProfile(page, name) {
+  await mkdir(cliStateHome, { recursive: true, mode: 0o700 });
+  // Secure cookies are omitted when filtering by an http URL, so read them all.
+  const cookies = await page.context().cookies();
+  const csrf = cookies.find((cookie) => cookie.name === csrfCookie);
+  const session = cookies.find(
+    (cookie) => cookie.httpOnly && cookie.name !== csrfCookie,
+  );
+  assert.ok(csrf && session, "browser session cookies are available");
+  const saved = await runInstalled(
+    cliPython,
+    [
+      "-c",
+      [
+        "import json, sys",
+        "from markweave.cli.profiles import ProfileStore",
+        "from markweave.cli.types import ConnectionProfile",
+        "data = json.load(sys.stdin)",
+        "ProfileStore().save(ConnectionProfile(data['name'], data['url'], data['session'], data['csrf']))",
+      ].join("\n"),
+    ],
+    JSON.stringify({
+      name,
+      url: "http://127.0.0.1:8080",
+      session: `${session.name}=${session.value}`,
+      csrf: decodeURIComponent(csrf.value),
+    }),
+  );
+  assert.equal(saved.code, 0, saved.stderr);
+  return name;
+}
+
+async function cli(profileName, ...args) {
+  const result = await runInstalled(cliBinary, [
+    "--json",
+    ...args,
+    "--profile",
+    profileName,
+  ]);
+  return {
+    code: result.code,
+    json: result.code === 0 ? lastJson(result.stdout) : null,
+    error: result.code === 0 ? null : lastJson(result.stderr)?.error,
+    stderr: result.stderr,
+  };
+}
+
+function expectCli(result) {
+  assert.equal(result.code, 0, result.stderr);
+  return result.json;
+}
+
+async function privateFile(name, content) {
+  await mkdir(cliFiles, { recursive: true, mode: 0o700 });
+  const path = `${cliFiles}/${name}`;
+  await writeFile(path, content, { mode: 0o600, flag: "wx" });
+  return path;
+}
+
+async function officeDraft(page, name, suffix) {
+  const draft = expectStatus(
+    await api(page, "POST", "/api/v1/composer/drafts", {
+      upload: {
+        bytes: Array.from(await readFile(editableDocx)),
+        filename: `${name}.docx`,
+        type: docxMediaType,
+        title: `${name} ${suffix}`,
+      },
+    }),
+    201,
+  );
+  const path = `/api/v1/composer/drafts/${draft.id}`;
+  const base = expectStatus(
+    await api(page, "POST", `${path}/revisions/from-source`, {
+      headers: {
+        "If-Match": draft.etag,
+        "Idempotency-Key": `${name}-source-${suffix}`,
+      },
+    }),
+    201,
+  );
+  return { draft, path, base };
+}
+
+async function currentOfficeRevision(page, path) {
+  const draft = expectStatus(await api(page, "GET", path), 200);
+  return expectStatus(
+    await api(page, "GET", `${path}/revisions/${draft.current_revision_id}`),
+    200,
+  );
+}
+
+async function officeTitle(page, path, revisionId) {
+  return expectStatus(
+    await api(
+      page,
+      "GET",
+      `${path}/revisions/${revisionId}/docx-text-targets?limit=1`,
+    ),
+    200,
+  ).targets[0].text;
+}
+
+/** Edit, reject a stale edit, and publish a model proposal through the panel. */
+async function officePanelJourney(alice, connection, suffix) {
+  const { draft, path } = await officeDraft(alice, "panel-edit", suffix);
+  const stale = await alice.context().newPage();
+  try {
+    for (const page of [alice, stale]) {
+      await page.goto(`${baseURL}/composer?draft=${draft.id}`, {
+        waitUntil: "networkidle",
+      });
+    }
+    const panel = alice.getByRole("region", { name: "Office text editing" });
+    await panel
+      .getByRole("textbox", { name: /: Fixture Document$/ })
+      .fill("Panel E2E title");
+    await panel.getByRole("button", { name: "Publish text edits (1)" }).click();
+    await panel.getByText(/Text edits published as revision \d+\./).waitFor();
+    const edited = await currentOfficeRevision(alice, path);
+    assert.match(edited.operation, /^docx_edit:/);
+    assert.equal(await officeTitle(alice, path, edited.id), "Panel E2E title");
+    await exactOfficeBytes(alice, path, edited);
+
+    const stalePanel = stale.getByRole("region", {
+      name: "Office text editing",
+    });
+    await stalePanel
+      .getByRole("textbox", { name: /: Fixture Document$/ })
+      .fill("Stale browser title");
+    await stalePanel
+      .getByRole("button", { name: "Publish text edits (1)" })
+      .click();
+    await stalePanel
+      .getByText(
+        "The draft or document changed. Reload the current revision before retrying.",
+      )
+      .waitFor();
+    assert.equal((await currentOfficeRevision(alice, path)).id, edited.id);
+  } finally {
+    await stale.close();
+  }
+
+  await alice
+    .getByRole("combobox", { name: "Connection" })
+    .selectOption(connection.id);
+  await alice
+    .getByRole("spinbutton", { name: /Maximum output tokens/ })
+    .fill("64");
+  const panel = alice.getByRole("region", { name: "Office text editing" });
+  await panel
+    .getByRole("checkbox", { name: "Share “Panel E2E title” with the model" })
+    .check();
+  await panel
+    .getByRole("textbox", { name: "Instruction for the model" })
+    .fill("Make the title formal.");
+  await panel.getByRole("button", { name: "Preview model request" }).click();
+  await panel.getByText("Exact text selected for transmission:").waitFor();
+  await panel
+    .getByRole("button", { name: "Send shared text to the model" })
+    .click();
+  await panel
+    .getByText("The model suggestion is ready for review in the proposals list.")
+    .waitFor({ timeout: 30_000 });
+  const pending = alice
+    .locator("details")
+    .filter({ hasText: "Suggestion · pending" })
+    .last();
+  await pending.locator("summary").waitFor({ timeout: 15_000 });
+  await pending.locator("summary").click();
+  await pending
+    .getByRole("list", { name: "Proposed text changes" })
+    .getByText(/Panel E2E title.*Model E2E title/)
+    .waitFor();
+  await pending.getByRole("button", { name: "Accept" }).click();
+  await alice.getByText(/Your decision was saved/).waitFor();
+  await alice
+    .getByRole("button", { name: "Publish approved text edits" })
+    .click();
+  await alice.getByText(/Approved text edits published/).waitFor();
+  const proposed = await currentOfficeRevision(alice, path);
+  assert.match(proposed.operation, /^office_edit_proposal:/);
+  assert.equal(proposed.model_identity, providerModel);
+  assert.equal(await officeTitle(alice, path, proposed.id), "Model E2E title");
+  await exactOfficeBytes(alice, path, proposed);
+}
+
+async function cliBytes(profileName, path, draftId, revisionId, kind) {
+  const output = `${cliFiles}/${revisionId}-${kind}.docx`;
+  expectCli(
+    await cli(
+      profileName,
+      "composer",
+      "revisions",
+      "download",
+      draftId,
+      revisionId,
+      "--kind",
+      kind,
+      "--output",
+      output,
+    ),
+  );
+  return readFile(output);
+}
+
+/** Drive targets, edit, stale/foreign refusal, model proposal and publication. */
+async function officeCliJourney(alice, bob, connection, suffix) {
+  const aliceCli = await cliProfile(alice, `office-alice-${profile}`);
+  const bobCli = await cliProfile(bob, `office-bob-${profile}`);
+  const created = expectCli(
+    await cli(
+      aliceCli,
+      "composer",
+      "drafts",
+      "create",
+      editableDocx,
+      "--title",
+      `CLI Office ${suffix}`,
+    ),
+  ).draft;
+  const path = `/api/v1/composer/drafts/${created.id}`;
+  const base = expectCli(
+    await cli(
+      aliceCli,
+      "composer",
+      "revisions",
+      "capture",
+      created.id,
+      "--etag",
+      created.etag,
+      "--idempotency-key",
+      `cli-office-source-${suffix}`,
+    ),
+  ).revision;
+  const targets = expectCli(
+    await cli(
+      aliceCli,
+      "composer",
+      "office",
+      "targets",
+      created.id,
+      base.id,
+      "--format",
+      "docx",
+    ),
+  ).targets;
+  assert.deepEqual(
+    { target: targets[0].target, text: targets[0].text },
+    { target: "word/document.xml#t0", text: "Fixture Document" },
+  );
+  const foreign = await cli(
+    bobCli,
+    "composer",
+    "office",
+    "targets",
+    created.id,
+    base.id,
+    "--format",
+    "docx",
+  );
+  assert.notEqual(foreign.code, 0);
+  assert.match(foreign.error?.code ?? "", /not_found/);
+
+  const operations = await privateFile(
+    `operations-${suffix}.json`,
+    JSON.stringify([
+      {
+        target: "word/document.xml#t0",
+        expected_text: "Fixture Document",
+        text: "CLI E2E title",
+      },
+    ]),
+  );
+  const ready = expectStatus(await api(alice, "GET", path), 200);
+  const edit = (etag, key) =>
+    cli(
+      aliceCli,
+      "composer",
+      "office",
+      "edit",
+      created.id,
+      base.id,
+      "--format",
+      "docx",
+      "--operations-file",
+      operations,
+      "--etag",
+      etag,
+      "--idempotency-key",
+      key,
+    );
+  const edited = expectCli(await edit(ready.etag, `cli-office-edit-${suffix}`))
+    .revision;
+  assert.match(edited.operation, /^docx_edit:/);
+  const staleEdit = await edit(ready.etag, `cli-office-stale-${suffix}`);
+  assert.notEqual(staleEdit.code, 0);
+  assert.match(staleEdit.error?.code ?? "", /precondition/);
+  const editedRevision = await currentOfficeRevision(alice, path);
+  assert.equal(editedRevision.id, edited.id);
+  const [download, preview] = await Promise.all([
+    cliBytes(aliceCli, path, created.id, edited.id, "download"),
+    cliBytes(aliceCli, path, created.id, edited.id, "preview"),
+  ]);
+  assert.equal(
+    sha256(download),
+    editedRevision.artifacts.find((item) => item.kind === "download")?.sha256,
+  );
+  assert.equal(
+    sha256(preview),
+    editedRevision.artifacts.find((item) => item.kind === "preview")?.sha256,
+  );
+  assert.deepEqual(download, await exactOfficeBytes(alice, path, editedRevision));
+  assert.equal(await officeTitle(alice, path, edited.id), "CLI E2E title");
+
+  const instruction = await privateFile(
+    `instruction-${suffix}.txt`,
+    "Make the title formal.",
+  );
+  const beforeStep = expectStatus(await api(alice, "GET", path), 200);
+  let step = expectCli(
+    await cli(
+      aliceCli,
+      "composer",
+      "office",
+      "propose",
+      created.id,
+      edited.id,
+      connection.id,
+      "--target",
+      "word/document.xml#t0",
+      "--instruction-file",
+      instruction,
+      "--max-output-tokens",
+      "64",
+      "--etag",
+      beforeStep.etag,
+      "--idempotency-key",
+      `cli-office-step-${suffix}`,
+      "--force",
+    ),
+  ).model_step;
+  for (let attempt = 0; step.status === "running" && attempt < 60; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    step = expectCli(
+      await cli(aliceCli, "composer", "model-steps", "status", created.id, step.id),
+    ).model_step;
+  }
+  assert.equal(step.status, "completed", step.error_code ?? "");
+  const beforeDecision = expectStatus(await api(alice, "GET", path), 200);
+  expectCli(
+    await cli(
+      aliceCli,
+      "composer",
+      "proposals",
+      "decide",
+      created.id,
+      step.proposal_id,
+      "--state",
+      "accepted",
+      "--etag",
+      beforeDecision.etag,
+    ),
+  );
+  const reviewed = expectStatus(await api(alice, "GET", path), 200);
+  const published = expectCli(
+    await cli(
+      aliceCli,
+      "composer",
+      "office",
+      "publish",
+      created.id,
+      step.proposal_id,
+      "--etag",
+      reviewed.etag,
+      "--idempotency-key",
+      `cli-office-publish-${suffix}`,
+    ),
+  ).revision;
+  assert.equal(published.operation, `office_edit_proposal:${step.proposal_id}`);
+  assert.equal(await officeTitle(alice, path, published.id), "Model E2E title");
+  const publishedRevision = await currentOfficeRevision(alice, path);
+  assert.equal(
+    sha256(await cliBytes(aliceCli, path, created.id, published.id, "download")),
+    publishedRevision.artifacts.find((item) => item.kind === "download")?.sha256,
+  );
 }
 
 test(`typed Composer shares, human decisions, and exact regeneration in ${profile}`, async () => {
@@ -1233,6 +1666,8 @@ test(`typed Composer shares, human decisions, and exact regeneration in ${profil
     await docxTextEdits(alice, bob, suffix);
     await pptxTextEdits(alice, bob, suffix);
     await modelProposedOfficeEdit(alice, connection, suffix);
+    await officePanelJourney(alice, connection, suffix);
+    await officeCliJourney(alice, bob, connection, suffix);
   } finally {
     await Promise.all(contexts.map((context) => context.close()));
     await browser.close();
