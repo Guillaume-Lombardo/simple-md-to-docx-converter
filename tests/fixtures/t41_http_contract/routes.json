@@ -334,6 +334,26 @@
     "response_class": "JSONResponse"
   },
   {
+    "path": "/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/docx-text-targets",
+    "methods": [
+      "GET"
+    ],
+    "name": "list_text_targets",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/docx-edits",
+    "methods": [
+      "POST"
+    ],
+    "name": "edit_docx_text",
+    "include_in_schema": true,
+    "status_code": 201,
+    "response_class": "JSONResponse"
+  },
+  {
     "path": "/api/v1/composer/drafts",
     "methods": [
       "POST"
