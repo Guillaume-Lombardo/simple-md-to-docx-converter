@@ -187,6 +187,23 @@ sequential archive downloads.
       source, and loads it by exact ID.
   - The final loader still needs three complete comparable hosted pairs against the
     under-65-second target.
+- 2026-10-21: Pair 1 of 3 for the final loader. Baseline `main` push run 39650212609 (gzip) against
+  candidate run 39650548512 (`0b4c108`, zstd), both on `main` `bc14ebb`, all 23 jobs green in
+  each:
+
+  | Shard | Baseline step | Candidate step | Backend load | CPU busy / iowait | Disk busy, written |
+  |---|---|---|---|---|---|
+  | e2e-standalone-1 | 89 s | 48 s | 46.4 s | 57 / 6 % | 32 % (8:1), 8496 MiB |
+  | e2e-standalone-2 | 88 s | 50 s | 48.2 s | 44 / 23 % | 84 % (259:1), 7729 MiB |
+  | e2e-distributed-1 | 88 s | 46 s | 43.7 s | 57 / 2 % | 25 % (8:1), 6944 MiB |
+  | e2e-distributed-2 | 91 s | 42 s | 40.4 s | 39 / 25 % | 89 % (259:1), 6950 MiB |
+  | mean | 89.0 s | 46.5 s | | | |
+
+  - Other load steps: container 53 → 37 s, supply-chain 69 → 44 s, frontend 20 → 13 s.
+  - The zstd export took 57.7 s (35.2 + 12.5 + 10.0), against 51.8 s for gzip on the baseline
+    runner. The archives are 10 to 14 percent smaller.
+  - Every loaded ID equals the build output, and every job used memory staging.
+  - The step still ends with the backend load, about 1.3 s after `concurrent_load_seconds`.
 
 ## Synchronization
 
