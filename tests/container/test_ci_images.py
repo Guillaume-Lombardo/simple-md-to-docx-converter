@@ -7,6 +7,7 @@ import io
 import json
 import subprocess
 import tarfile
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -320,9 +321,9 @@ def test_load_tags_only_the_domain_roles_after_exact_id_checks(
 
     assert loaded == {role: ci_images.ROLE_IMAGES[role] for role in roles}
     loads = [call for call in runtime.calls if call[:2] == ["podman", "load"]]
-    assert [Path(call[-1]).name for call in loads] == [
+    assert sorted(Path(call[-1]).name for call in loads) == sorted(
         ci_images.archive_name(role) for role in roles
-    ]
+    )
     for role in roles:
         tag = ["podman", "tag", _image_id(role), ci_images.ROLE_IMAGES[role]]
         load = next(call for call in loads if call[-1].endswith(f"/{role}.oci.tar"))
@@ -484,3 +485,67 @@ def test_command_line_build_and_load_report_failures(
         == 1
     )
     assert "error: archive mismatch" in capsys.readouterr().err
+
+
+def test_load_runs_every_domain_archive_concurrently(tmp_path: Path) -> None:
+    roles = IMAGE_DOMAIN_ROLES["e2e-standalone-1"]
+    directory = _archives(tmp_path, roles)
+    runtime = FakeRuntime()
+    # Each load waits until all of them are running; sequential loads time out.
+    barrier = threading.Barrier(len(roles), timeout=5)
+
+    def runner(
+        arguments: list[str], **options: Any
+    ) -> subprocess.CompletedProcess[str]:
+        if arguments[:2] == ["podman", "load"]:
+            barrier.wait()
+        return runtime(arguments, **options)
+
+    loaded = ci_images.load(
+        "e2e-standalone-1", directory, _expected(*roles), runner=runner, clock=_clock
+    )
+
+    assert loaded == {role: ci_images.ROLE_IMAGES[role] for role in roles}
+
+
+@pytest.mark.parametrize("failing", ["backend", "frontend", "reverse-attempt"])
+def test_load_failure_of_one_role_tags_no_image(tmp_path: Path, failing: str) -> None:
+    roles = IMAGE_DOMAIN_ROLES["e2e-distributed-2"]
+    directory = _archives(tmp_path, roles)
+    runtime = FakeRuntime()
+    runtime.failing = (
+        "podman",
+        "load",
+        "--input",
+        str(directory / ci_images.archive_name(failing)),
+    )
+
+    with pytest.raises(ImageTransferError, match="command failed with status 3"):
+        ci_images.load(
+            "e2e-distributed-2", directory, _expected(*roles), runner=runtime
+        )
+
+    assert len([call for call in runtime.calls if call[:2] == ["podman", "load"]]) == 3
+    assert not any(call[:2] == ["podman", "tag"] for call in runtime.calls)
+
+
+@pytest.mark.parametrize("role", ["backend", "frontend", "reverse-attempt"])
+def test_load_checks_every_role_before_loading_any_archive(
+    tmp_path: Path, role: str
+) -> None:
+    roles = IMAGE_DOMAIN_ROLES["e2e-standalone-2"]
+    missing = _archives(tmp_path, tuple(item for item in roles if item != role))
+    runtime = FakeRuntime()
+    with pytest.raises(ImageTransferError, match="was not downloaded"):
+        ci_images.load("e2e-standalone-2", missing, _expected(*roles), runner=runtime)
+    occupied = FakeRuntime()
+    occupied.images[ci_images.ROLE_IMAGES[role]] = "0" * 64
+    complete = tmp_path / "complete"
+    complete.mkdir()
+    for item in roles:
+        _write_archive(complete / ci_images.archive_name(item), item)
+    with pytest.raises(ImageTransferError, match="refusing to replace"):
+        ci_images.load("e2e-standalone-2", complete, _expected(*roles), runner=occupied)
+
+    for calls in (runtime.calls, occupied.calls):
+        assert not any(call[:2] == ["podman", "load"] for call in calls)

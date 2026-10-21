@@ -18,6 +18,7 @@ import re
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -193,6 +194,33 @@ def build(
     return identities
 
 
+def _pending_load(
+    role: str,
+    archive_directory: Path,
+    expected: Mapping[str, str],
+    names: Mapping[str, str],
+    runner: Runner,
+) -> tuple[str, str, Path]:
+    """Check one role completely before any archive of the domain is loaded."""
+    match = EXPECTED_IMAGE_ID.fullmatch(expected.get(role, ""))
+    if match is None:
+        raise ImageTransferError(
+            f"no built image ID was published for the {role} image"
+        )
+    image_id = match.group(1)
+    archive = archive_directory / archive_name(role)
+    if archive.is_symlink() or not archive.is_file():
+        raise ImageTransferError(f"the {role} archive was not downloaded")
+    _verified_archive_id(archive, image_id)
+    name = names[role]
+    exists = runner(
+        ["podman", "image", "exists", name], check=False, capture_output=True
+    )
+    if exists.returncode == 0:
+        raise ImageTransferError(f"refusing to replace the existing image {name}")
+    return role, image_id, archive
+
+
 def load(  # noqa: PLR0913 - explicit expected-identity and test seams
     domain: str,
     archive_directory: Path,
@@ -202,7 +230,12 @@ def load(  # noqa: PLR0913 - explicit expected-identity and test seams
     runner: Runner = subprocess.run,
     clock: Callable[[], float] = time.monotonic,
 ) -> dict[str, str]:
-    """Load only a domain's archives and tag them after exact ID checks."""
+    """Load only a domain's archives and tag them after exact ID checks.
+
+    Every role passes its preconditions before any archive is loaded. The
+    `podman load` commands then run concurrently, because each one is bound by
+    its own archive (T147), and every loaded ID is checked before its tag.
+    """
     try:
         roles = IMAGE_DOMAIN_ROLES[domain]
     except KeyError as error:
@@ -210,26 +243,25 @@ def load(  # noqa: PLR0913 - explicit expected-identity and test seams
             f"domain {domain!r} consumes no final image"
         ) from error
     _require_rootless(runner)
-    loaded: dict[str, str] = {}
-    for role in roles:
-        match = EXPECTED_IMAGE_ID.fullmatch(expected.get(role, ""))
-        if match is None:
-            raise ImageTransferError(
-                f"no built image ID was published for the {role} image"
-            )
-        image_id = match.group(1)
-        archive = archive_directory / archive_name(role)
-        if archive.is_symlink() or not archive.is_file():
-            raise ImageTransferError(f"the {role} archive was not downloaded")
-        _verified_archive_id(archive, image_id)
-        name = names[role]
-        exists = runner(
-            ["podman", "image", "exists", name], check=False, capture_output=True
-        )
-        if exists.returncode == 0:
-            raise ImageTransferError(f"refusing to replace the existing image {name}")
+    pending = [
+        _pending_load(role, archive_directory, expected, names, runner)
+        for role in roles
+    ]
+
+    def load_archive(archive: Path) -> tuple[str, float]:
         started = clock()
         output = _run(runner, ["podman", "load", "--input", str(archive)])
+        return output, clock() - started
+
+    started = clock()
+    with ThreadPoolExecutor(max_workers=len(pending)) as pool:
+        futures = [pool.submit(load_archive, archive) for _, _, archive in pending]
+    # Leaving the pool waited for every load; report the first failure in role order.
+    results = [future.result() for future in futures]
+    loaded: dict[str, str] = {}
+    for (role, image_id, archive), (output, seconds) in zip(
+        pending, results, strict=True
+    ):
         reported = {
             reference.group(1)
             for line in output.splitlines()
@@ -243,6 +275,7 @@ def load(  # noqa: PLR0913 - explicit expected-identity and test seams
             )
         if _image_id(runner, image_id) != image_id:
             raise ImageTransferError(f"the loaded {role} image ID differs")
+        name = names[role]
         _run(runner, ["podman", "tag", image_id, name])
         if _image_id(runner, name) != image_id:
             raise ImageTransferError(f"{name} does not resolve to the built image")
@@ -250,9 +283,14 @@ def load(  # noqa: PLR0913 - explicit expected-identity and test seams
         print(
             f"loaded role={role} image={name} image_id=sha256:{image_id} "
             f"archive_bytes={archive.stat().st_size} "
-            f"load_seconds={clock() - started:.1f}",
+            f"load_seconds={seconds:.1f}",
             flush=True,
         )
+    print(
+        f"loaded domain={domain} roles={len(loaded)} "
+        f"concurrent_load_seconds={clock() - started:.1f}",
+        flush=True,
+    )
     return loaded
 
 
