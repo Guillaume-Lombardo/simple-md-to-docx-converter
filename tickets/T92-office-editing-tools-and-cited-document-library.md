@@ -207,7 +207,7 @@ T91.
   replaceable images, and publishes one revision bound to the loaded values. `markweave composer
   office structure` and `office restructure` read a private operations file whose `replace_image`
   entries name a local PNG or JPEG. Evidence: 19 vitest cases for the panel and its API plus a
-  workspace mount, 21 CLI unit tests, and a final-image journey that drives the panel and the
+  workspace mount, 17 CLI unit tests, and a final-image journey that drives the panel and the
   installed CLI with foreign-user and stale-ETag refusals in both profiles, verified only by hosted
   CI. Model tools for structural edits, DOCX tables and sections, and PPTX tables, styles, and
   objects remain open.
