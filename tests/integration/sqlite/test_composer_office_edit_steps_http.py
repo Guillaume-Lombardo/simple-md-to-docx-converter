@@ -861,6 +861,9 @@ def exercise_retried_steps(harness: OfficeStepHarness) -> None:
     finally:
         harness.authentication.authenticate.return_value = harness.owner
 
+    _exercise_admission_race(harness, step_path, body)
+    prompts = len(harness.prompts)
+
     current = client.get(path).json()
     assert harness.steps is not None
     running_body = ComposerOfficeEditStepCreateRequest.model_validate(
@@ -891,6 +894,50 @@ def exercise_retried_steps(harness: OfficeStepHarness) -> None:
         "running",
     )
     assert len(harness.prompts) == prompts
+
+
+def _exercise_admission_race(
+    harness: OfficeStepHarness, step_path: str, body: dict[str, object]
+) -> None:
+    """An identical request that completes after the replay lookup is replayed."""
+
+    client = harness.client
+    path = step_path.split("/revisions/", 1)[0]
+    etag = client.get(path).json()["etag"]
+    assert harness.steps is not None
+    lookup = harness.steps.replay_model_step
+    paused = [True]
+    winners: list[dict[str, object]] = []
+
+    def lookup_then_lose_the_race(*args: Any, **kwargs: Any) -> object:
+        found = lookup(*args, **kwargs)
+        if paused:
+            # Pause the first request right after its lookup found nothing and
+            # let an identical request be admitted and complete meanwhile.
+            paused.clear()
+            harness.replies.append(_reply((_TITLE, "Raced Title")))
+            winner = client.post(step_path, json=body, headers=_headers(etag, "raced"))
+            assert winner.status_code == 202, winner.text
+            winners.append(_settled(harness, path, winner.json()["id"]))
+            assert client.get(path).json()["etag"] != etag
+        return found
+
+    prompts = len(harness.prompts)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(harness.steps, "replay_model_step", lookup_then_lose_the_race)
+        loser = client.post(step_path, json=body, headers=_headers(etag, "raced"))
+    assert loser.status_code == 202, loser.text
+    assert winners
+    assert winners[0]["status"] == "completed"
+    assert loser.json() == winners[0]
+    assert len(harness.prompts) == prompts + 1
+
+    reused = client.post(
+        step_path,
+        json={**body, "instruction": "A different instruction."},
+        headers=_headers(etag, "raced"),
+    )
+    assert reused.status_code == 412, reused.text
 
 
 def test_retried_steps_replay_without_another_model_call(

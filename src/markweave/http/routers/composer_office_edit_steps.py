@@ -314,31 +314,42 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:  # noqa: PLR0915 
         )
         if replayed is not None:
             return _step_response(replayed)
-        _authorized_connection(dependencies, user, payload)
-        context = _office_context(
-            dependencies, user, draft_id, revision_id, payload.targets, etag
-        )
-        transmitted, preview_digest = _prompt(
-            dependencies, payload.instruction, context
-        )
-        if payload.preview_digest != preview_digest:
-            raise ComposerConflictError("Office edit preview changed")
-        step = runner.start(
-            _actor(dependencies, user),
-            draft_id,
-            ModelStepInput(
-                connection_id=payload.connection_id,
-                if_match=etag,
-                idempotency_key=key,
-                approved_endpoint=payload.approved_endpoint,
-                approved_model=payload.approved_model,
-                content=transmitted,
-                max_output_tokens=payload.max_output_tokens,
-                payload_digest=digest,
-                intent=OFFICE_EDIT_INTENT,
-                office=context,
-            ),
-        )
+        try:
+            _authorized_connection(dependencies, user, payload)
+            context = _office_context(
+                dependencies, user, draft_id, revision_id, payload.targets, etag
+            )
+            transmitted, preview_digest = _prompt(
+                dependencies, payload.instruction, context
+            )
+            if payload.preview_digest != preview_digest:
+                raise ComposerConflictError("Office edit preview changed")
+            step = runner.start(
+                _actor(dependencies, user),
+                draft_id,
+                ModelStepInput(
+                    connection_id=payload.connection_id,
+                    if_match=etag,
+                    idempotency_key=key,
+                    approved_endpoint=payload.approved_endpoint,
+                    approved_model=payload.approved_model,
+                    content=transmitted,
+                    max_output_tokens=payload.max_output_tokens,
+                    payload_digest=digest,
+                    intent=OFFICE_EDIT_INTENT,
+                    office=context,
+                ),
+            )
+        except ComposerConflictError:
+            # An identical request may have been admitted, and even completed,
+            # after the lookup above and moved the draft on. Answer from its
+            # durable step; a different request under this key still fails.
+            replayed = _replayed_step(
+                dependencies, user, draft_id, payload, etag, key, digest
+            )
+            if replayed is None:
+                raise
+            return _step_response(replayed)
         return _step_response(step)
 
     @router.post(
