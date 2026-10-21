@@ -2,7 +2,7 @@
 ticket: T136
 linear_id: G1L-689
 linear_url: https://linear.app/g1lom/issue/G1L-689/t136-fix-the-intermittent-composer-generation-workspace-web-test
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -72,6 +72,14 @@ Observed on 2026-10-12 in PR #285 (T98) runs 38268478604 (head e5543f7) and 3828
     30 without coverage, 3 of 30 with coverage), each with the CI message `expected "vi.fn()" to be
     called with arguments: [ { …(10) }, …(3) ]`. With the fix, under the same load, it failed 0
     of 60 runs.
+
+- 2026-10-21: Verified on `main` and synchronized with G1L-689 (`Done`).
+  [PR #320](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/320) was squash-merged as
+  [`8f489d0a043d42ff359bca41b141eeba5917ea9b`](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/commit/8f489d0a043d42ff359bca41b141eeba5917ea9b); its tree matches
+  reviewed head [`6e3ac4fd5cc44d8e0efcedd45d8b4feab09b30fe`](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/commit/6e3ac4fd5cc44d8e0efcedd45d8b4feab09b30fe).
+  [Final reviewed-head CI run 39599602258](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/39599602258)
+  passed all required checks. The existing catalog-readiness regression, repeated-file stability
+  evidence and three complete web-suite passes remain recorded above.
 
 ## Synchronization
 

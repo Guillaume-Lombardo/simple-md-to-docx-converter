@@ -2,7 +2,7 @@
 ticket: T144
 linear_id: G1L-697
 linear_url: https://linear.app/g1lom/issue/G1L-697/t144-synchronize-descendant-pid-publication-in-the-libreoffice-timeout
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -63,6 +63,20 @@ The independent review of T143 (PR #308) raised this as a minor follow-up.
   intermittent `PANDOC_TIMEOUT` under load (1 of 5 reruns) that this change does not touch.
   Hosted `document-engines` evidence (three consecutive passes) remains to be collected on the
   pull request.
+
+- 2026-10-21: Verified on `main` and synchronized with G1L-697 (`Done`).
+  [PR #321](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/321) was squash-merged as
+  [`09b37c29068280936b436afd8a477e8c3203fb38`](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/commit/09b37c29068280936b436afd8a477e8c3203fb38); its tree matches
+  reviewed head [`7111baf27aaefffea1c38cebecf029a5393ea349`](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/commit/7111baf27aaefffea1c38cebecf029a5393ea349).
+  [Final reviewed-head CI run 39601956015](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/39601956015)
+  passed all required checks. The successful hosted checks complete the external-engine
+  qualification that was unavailable in the earlier local environment; the recorded stress and
+  surviving-descendant evidence remains unchanged.
+  Three consecutive completed hosted `document-engines` executions passed with identical
+  changed test code: [first](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/39599605984/job/119220863654),
+  [second](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/39599605984/job/119223480212)
+  and [third, on the final head](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/39601956015/job/119229179047).
+  A superseded third attempt cancelled by the rebase is not counted as a pass.
 
 ## Synchronization
 

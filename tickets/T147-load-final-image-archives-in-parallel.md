@@ -2,7 +2,7 @@
 ticket: T147
 linear_id: G1L-705
 linear_url: https://linear.app/g1lom/issue/G1L-705/t147-load-final-image-archives-in-parallel
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -234,6 +234,15 @@ sequential archive downloads.
   1.4–2.6 s. The loader's internal `concurrent_load_seconds` counter exceeds the backend load by
   only 0.3–0.6 s; the rest of the step is the `uv run` start and the preconditions. The baselines
   were 70–94 s, and the per-pair means went from 89.0, 88.75 and 81.0 s to 46.5, 47.0 and 48.25 s.
+
+- 2026-10-21: Verified on `main` and synchronized with G1L-705 (`Done`).
+  [PR #323](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/323) was squash-merged as
+  [`4340c5361fe0872f7e56f9435dbb5b90a492643a`](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/commit/4340c5361fe0872f7e56f9435dbb5b90a492643a); its tree matches
+  reviewed head [`e365e0dab83e848362137723073da4b8a0eb6cc9`](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/commit/e365e0dab83e848362137723073da4b8a0eb6cc9).
+  [Final reviewed-head CI run 39660850292](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/39660850292)
+  passed all required checks. All twelve final candidate E2E load steps measured 42–50 s, each
+  below 65 s; no timing waiver was used. The three comparable pairs and unsuccessful prototypes
+  remain recorded above.
 
 ## Synchronization
 
