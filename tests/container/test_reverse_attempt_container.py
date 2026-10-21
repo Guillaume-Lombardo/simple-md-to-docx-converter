@@ -38,7 +38,7 @@ def test_reverse_attempt_dependency_is_exact_and_excluded_from_application_all()
         "cairosvg>=2.8,<3",
         "defusedxml>=0.7,<1",
         "firecrawl-anydoc==0.2.4",
-        "pillow>=12,<13",
+        "pillow>=13,<14",
         "tinycss2>=1.5,<2",
     ]
     assert extras["all"] == ["markweave[standalone,distributed]"]

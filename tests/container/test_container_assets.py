@@ -13,6 +13,7 @@ import sys
 import tarfile
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -823,6 +824,209 @@ def test_supply_chain_produces_in_private_staging_before_atomic_publication() ->
     )
 
 
+def test_a_rejected_scan_is_retained_unverified_for_every_ci_image() -> None:
+    script = Path("scripts/container/supply-chain.sh").read_text(encoding="utf-8")
+    rejected = script[
+        script.index("summary_status=0") : script.index("manifest_digest=")
+    ]
+    assert '"${summary_arguments[@]}" ||\n  summary_status=$?' in rejected
+    assert 'mv --no-target-directory -- "$staging_directory" "$output_directory"' in (
+        rejected
+    )
+    assert 'exit "$summary_status"' in rejected
+    assert "verify_supply_chain" not in rejected
+    ci = Path("scripts/container/run-ci-supply-chain.sh").read_text(encoding="utf-8")
+    assert ci.rstrip().endswith('exit "$status"')
+    assert ci.count("||") == 2
+
+
+def _executable(path: Path, content: str) -> None:
+    path.write_text("#!/usr/bin/env bash\nset -euo pipefail\n" + content)
+    path.chmod(0o755)
+
+
+@pytest.mark.parametrize(
+    ("backend", "reverse", "expected"),
+    [(0, 0, 0), (17, 0, 17), (0, 23, 23), (17, 23, 17)],
+)
+def test_ci_supply_chain_scans_both_images_and_returns_the_first_rejection(
+    tmp_path: Path, backend: int, reverse: int, expected: int
+) -> None:
+    repository = tmp_path / "repository"
+    scripts = repository / "scripts" / "container"
+    scripts.mkdir(parents=True)
+    wrapper = scripts / "run-ci-supply-chain.sh"
+    wrapper.write_text(
+        Path("scripts/container/run-ci-supply-chain.sh").read_text(encoding="utf-8")
+    )
+    calls = tmp_path / "calls.log"
+    _executable(
+        scripts / "supply-chain.sh",
+        'printf "%s\\n" "$*" >>"$FAKE_CALLS"\n'
+        'if [[ "$1" == *reverse-attempt* ]]; then exit "$FAKE_REVERSE"; fi\n'
+        'exit "$FAKE_BACKEND"\n',
+    )
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _executable(
+        fake_bin / "podman",
+        '[[ "$1" == info ]] && { echo true; exit 0; }\n'
+        '[[ "$1 $2" == "image exists" ]] && exit 0\n'
+        "exit 99\n",
+    )
+
+    result = subprocess.run(
+        ["bash", str(wrapper)],
+        cwd=repository,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ
+        | {
+            "FAKE_BACKEND": str(backend),
+            "FAKE_CALLS": str(calls),
+            "FAKE_REVERSE": str(reverse),
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode == expected, result.stderr
+    assert calls.read_text(encoding="utf-8").splitlines() == [
+        "localhost/md-converter:ci artifacts/container",
+        "localhost/md-converter-reverse-attempt:ci artifacts/reverse-attempt "
+        "ci reverse-attempt",
+    ]
+
+
+_FAKE_SUMMARY = """
+import hashlib, json, os, sys
+from pathlib import Path
+
+artifacts = Path(sys.argv[sys.argv.index("--artifacts") + 1])
+names = ("image.oci.tar", "sbom.cdx.json", "sbom.spdx.json", "vulnerabilities.json")
+digests = {
+    name: hashlib.sha256((artifacts / name).read_bytes()).hexdigest() for name in names
+}
+(artifacts / "image-metadata.json").write_text(json.dumps({"artifacts": digests}))
+status = int(os.environ["FAKE_SUMMARY_STATUS"])
+if status:
+    print("error: fixable Critical vulnerabilities found")
+sys.exit(status)
+"""
+
+
+def _run_supply_chain(tmp_path: Path, summary_status: int) -> tuple[Any, Path, Path]:
+    """Run the real scan script against fake tools, scanner, and image runtime."""
+
+    fake_bin, tools, temporary = (
+        tmp_path / "bin",
+        tmp_path / "tools",
+        tmp_path / "tmp",
+    )
+    for directory in (fake_bin, tools, temporary):
+        directory.mkdir()
+    _executable(
+        fake_bin / "curl",
+        'while [[ "$1" != --output ]]; do shift; done\nprintf archive >"$2"\n',
+    )
+    _executable(fake_bin / "sha256sum", "cat >/dev/null\n")
+    _executable(
+        fake_bin / "tar",
+        'while [[ "$1" != --directory ]]; do shift; done\n'
+        'install -m 0755 "$FAKE_TOOLS/$3" "$2/$3"\n',
+    )
+    _executable(
+        tools / "syft",
+        'for argument in "$@"; do\n'
+        '  [[ "$argument" == *json=* ]] && printf "{}" >"${argument#*=}"\n'
+        "done\n"
+        "exit 0\n",
+    )
+    _executable(
+        tools / "grype",
+        '[[ "$1" == db ]] && exit 0\nprintf \'{"matches": []}\'\n',
+    )
+    _executable(
+        fake_bin / "podman",
+        'if [[ "$1 $2" == "image inspect" ]]; then printf "%064d\\n" 7; exit 0; fi\n'
+        'if [[ "$1" == save ]]; then printf oci >"$5"; exit 0; fi\n'
+        "exit 99\n",
+    )
+    summary = tmp_path / "summary.py"
+    summary.write_text(_FAKE_SUMMARY, encoding="utf-8")
+    _executable(
+        fake_bin / "uv",
+        'module="$4"\nshift 4\n'
+        'if [[ "$module" == scripts.container.summarize_supply_chain ]]; then\n'
+        '  exec "$FAKE_PYTHON" "$FAKE_SUMMARY" "$@"\n'
+        "fi\n"
+        'exec "$FAKE_PYTHON" -m "$module" "$@"\n',
+    )
+    output = tmp_path / "evidence" / "container"
+    result = subprocess.run(
+        [
+            "bash",
+            "scripts/container/supply-chain.sh",
+            "localhost/image:ci",
+            str(output),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ
+        | {
+            "FAKE_PYTHON": sys.executable,
+            "FAKE_SUMMARY": str(summary),
+            "FAKE_SUMMARY_STATUS": str(summary_status),
+            "FAKE_TOOLS": str(tools),
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            "TMPDIR": str(temporary),
+        },
+    )
+    return result, output, temporary
+
+
+def test_a_rejected_scan_keeps_unverified_evidence_and_still_fails(
+    tmp_path: Path,
+) -> None:
+    result, output, temporary = _run_supply_chain(tmp_path, summary_status=17)
+
+    assert result.returncode == 17
+    assert "error: fixable Critical vulnerabilities found" in result.stdout
+    assert "release_bundle_manifest_sha256=" not in result.stdout
+    assert f"Retained the rejected, unverified scan evidence in {output}." in (
+        result.stderr
+    )
+    assert sorted(path.name for path in output.iterdir()) == [
+        "image-metadata.json",
+        "image.oci.tar",
+        "sbom.cdx.json",
+        "sbom.spdx.json",
+        "vulnerabilities.json",
+    ]
+    assert json.loads((output / "vulnerabilities.json").read_text()) == {"matches": []}
+    assert [path.name for path in output.parent.iterdir()] == ["container"]
+    assert list(temporary.iterdir()) == []
+    with pytest.raises(verify_supply_chain.SupplyChainVerificationError):
+        verify_supply_chain.verify_bundle(output, expected_manifest_sha256="0" * 64)
+
+
+def test_an_accepted_scan_publishes_a_verifiable_bundle(tmp_path: Path) -> None:
+    result, output, temporary = _run_supply_chain(tmp_path, summary_status=0)
+
+    assert result.returncode == 0, result.stderr
+    digest = (
+        result.stdout.strip()
+        .splitlines()[-1]
+        .removeprefix("release_bundle_manifest_sha256=")
+    )
+    assert re.fullmatch(r"[0-9a-f]{64}", digest)
+    assert (output / "release-bundle.sha256").is_file()
+    verify_supply_chain.verify_bundle(output, expected_manifest_sha256=digest)
+    assert [path.name for path in output.parent.iterdir()] == ["container"]
+    assert list(temporary.iterdir()) == []
+
+
 def test_every_frontend_image_build_command_requests_oci_format() -> None:
     release = Path(".github/workflows/container-release.yml").read_text(
         encoding="utf-8"
@@ -1018,7 +1222,10 @@ def test_oci_export_verifier_rejects_invalid_expected_identity(capsys) -> None:
 
 
 def test_supply_chain_summary_gates_fixable_and_records_unfixed_critical(
-    mocker, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    mocker,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     for name in ("image.oci.tar", "sbom.cdx.json", "sbom.spdx.json"):
         (tmp_path / name).write_text("{}", encoding="utf-8")
@@ -1064,6 +1271,10 @@ def test_supply_chain_summary_gates_fixable_and_records_unfixed_critical(
     )
 
     assert summarize_supply_chain.main() == 1
+    assert capsys.readouterr().out.splitlines() == [
+        "error: fixable Critical vulnerabilities found",
+        "  CVE-FIXED in fixable (fixed in: 2)",
+    ]
     inspected.assert_called_once_with(
         ["/usr/bin/podman", "image", "inspect", "2" * 64],
         check=True,

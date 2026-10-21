@@ -148,11 +148,25 @@ def main() -> int:
     )
     if critical_fixed:
         print("error: fixable Critical vulnerabilities found")
+        _print_findings(critical_fixed)
         return 1
     if arguments.release and critical_unfixed:
         print("error: release has unmitigated Critical vulnerabilities")
+        _print_findings(critical_unfixed)
         return 1
     return 0
+
+
+def _print_findings(findings: list[dict[str, object]]) -> None:
+    """Name every blocking finding so a failed log identifies it without artifacts."""
+
+    for item in findings:
+        versions = item["fix_versions"]
+        fixed = ", ".join(map(str, versions)) if isinstance(versions, list) else ""
+        report = f" [{item['report']}]" if "report" in item else ""
+        print(
+            f"  {item['id']} in {item['package']} (fixed in: {fixed or 'none'}){report}"
+        )
 
 
 if __name__ == "__main__":

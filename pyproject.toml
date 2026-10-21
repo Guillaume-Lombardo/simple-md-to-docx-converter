@@ -44,7 +44,7 @@ server = [
     "cairosvg>=2.8,<3",
     "cryptography>=46,<51",
     "fastapi>=0.116,<1",
-    "pillow>=12,<13",
+    "pillow>=13,<14",
     "pydantic-settings>=2.10,<3",
     "pypdf>=6.16.2,<7",
     "python-multipart>=0.0.20,<1",
@@ -63,7 +63,7 @@ reverse-attempt = [
     "cairosvg>=2.8,<3",
     "defusedxml>=0.7,<1",
     "firecrawl-anydoc==0.2.4",
-    "pillow>=12,<13",
+    "pillow>=13,<14",
     "tinycss2>=1.5,<2",
 ]
 kubernetes = [

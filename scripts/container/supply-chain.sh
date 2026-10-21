@@ -125,7 +125,19 @@ fi
 if [[ "$purpose" == "release" ]]; then
   summary_arguments+=(--release)
 fi
-uv run python -m scripts.container.summarize_supply_chain "${summary_arguments[@]}"
+summary_status=0
+uv run python -m scripts.container.summarize_supply_chain "${summary_arguments[@]}" ||
+  summary_status=$?
+if ((summary_status != 0)); then
+  # Keep the rejected scan for review instead of discarding it with the staging
+  # directory. It has no release-bundle manifest, so it can never verify as an
+  # accepted bundle, and the gate still fails.
+  mv --no-target-directory -- "$staging_directory" "$output_directory"
+  staging_directory=""
+  printf 'Retained the rejected, unverified scan evidence in %s.\n' \
+    "$output_directory" >&2
+  exit "$summary_status"
+fi
 manifest_digest="$(
   uv run python -m scripts.container.verify_supply_chain create \
     --artifacts "$staging_directory" \
