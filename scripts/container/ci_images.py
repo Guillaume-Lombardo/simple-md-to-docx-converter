@@ -19,6 +19,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -30,6 +31,7 @@ from scripts.container.integrity import IntegrityError, oci_identity
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
+    from typing import IO
 
 ROLE_IMAGES: Mapping[str, str] = {
     "backend": "localhost/md-converter:ci",
@@ -51,14 +53,14 @@ DISKSTATS = Path("/proc/diskstats")
 CPUSTATS = Path("/proc/stat")
 CPU_IDLE_FIELDS = (3, 4)  # idle and iowait in the aggregate `cpu` line
 CPU_IOWAIT_FIELD = 4
-# The largest archive bounds the domain's load time. Concurrent loads slowed it by
-# up to 17 s on hosted runners while the disk stayed under 70 percent busy, so the
-# other loads run at a lower CPU priority and use spare time instead (T147).
-LOW_PRIORITY = ("nice", "-n", "10")
+# Temporary T147 measurement, removed before merge: in this domain only, load the
+# largest image alone into fresh stores from its gzip archive and from a zstd
+# re-export, to test whether layer decompression bounds the load.
+COMPRESSION_EXPERIMENT_DOMAIN = "container"
 # Each `podman load` extracts its oci-archive and stages the layer blobs in the
 # image-copy directory before committing layers, so this directory receives about
-# twice the archive bytes. Hosted runners cap disk writes at about 165 MB/s, so a
-# memory-backed directory, when it has room, removes those writes (T147).
+# twice the archive bytes. A memory-backed directory, when it has room, removes
+# those disk writes (T147).
 MEMORY_TMP_ROOT = Path("/dev/shm")  # noqa: S108 - holds a private mkdtemp subdirectory
 MEMORY_TMP_FACTOR = 2
 MEMORY_TMP_MARGIN_BYTES = 512 * 1024 * 1024
@@ -362,6 +364,87 @@ def _print_cpu_delta(before: CpuStats, after: CpuStats) -> None:
     )
 
 
+def _layer_media(archive: Path) -> str:
+    with tarfile.open(archive, mode="r:") as entries:
+        index = json.load(_member(entries, "index.json"))
+        digest = index["manifests"][0]["digest"].removeprefix("sha256:")
+        manifest = json.load(_member(entries, f"blobs/sha256/{digest}"))
+    layers = manifest["layers"]
+    media = sorted({layer["mediaType"].rsplit(".", 1)[-1] for layer in layers})
+    largest = max((layer["size"] for layer in layers), default=0)
+    return f"layers={len(layers)} media={','.join(media)} largest_mib={largest // MIB}"
+
+
+def _member(entries: tarfile.TarFile, name: str) -> IO[bytes]:
+    member = entries.extractfile(name)
+    if member is None:
+        raise ValueError(f"{name} is not a regular archive member")
+    return member
+
+
+def _compression_experiment(
+    runner: Runner, clock: Callable[[], float], item: tuple[str, str, Path]
+) -> None:
+    """Load one image alone into fresh stores from gzip and zstd archives (T147)."""
+    role, image_id, archive = item
+    try:
+        with tempfile.TemporaryDirectory(
+            prefix="markweave-t147-",
+            dir=DEFAULT_IMAGE_COPY_TMP_DIR,
+            ignore_cleanup_errors=True,
+        ) as scratch:
+            root = Path(scratch)
+            zstd = root / "zstd.oci.tar"
+            started = clock()
+            _run(
+                runner,
+                [
+                    "podman",
+                    "push",
+                    "--compression-format",
+                    "zstd",
+                    image_id,
+                    f"oci-archive:{zstd}",
+                ],
+            )
+            print(
+                f"experiment role={role} zstd_export_seconds={clock() - started:.1f} "
+                f"zstd_archive_bytes={zstd.stat().st_size}",
+                flush=True,
+            )
+            for variant, source in (("gzip", archive), ("zstd", zstd)):
+                store = root / variant
+                started = clock()
+                _run(
+                    runner,
+                    [
+                        "podman",
+                        "--root",
+                        str(store / "root"),
+                        "--runroot",
+                        str(store / "run"),
+                        "load",
+                        "--input",
+                        str(source),
+                    ],
+                )
+                print(
+                    f"experiment role={role} variant={variant} "
+                    f"archive_bytes={source.stat().st_size} {_layer_media(source)} "
+                    f"solo_load_seconds={clock() - started:.1f}",
+                    flush=True,
+                )
+                _run(runner, ["podman", "unshare", "rm", "-rf", str(store)])
+    except (
+        ImageTransferError,
+        OSError,
+        ValueError,
+        KeyError,
+        tarfile.TarError,
+    ) as error:
+        print(f"experiment unavailable: {error}", flush=True)
+
+
 def _print_traffic(
     devices: Sequence[str],
     before: tuple[DiskStats, CpuStats],
@@ -388,8 +471,8 @@ def load(  # noqa: PLR0913 - explicit expected-identity and test seams
 
     Every role passes its preconditions before any archive is loaded. The
     `podman load` commands then run concurrently, with their image-copy
-    directory in memory when it has room and every load but the largest at a
-    lower CPU priority (T147). Every loaded ID is checked before its tag.
+    directory in memory when it has room (T147), and every loaded ID is checked
+    before its tag.
     """
     try:
         roles = IMAGE_DOMAIN_ROLES[domain]
@@ -414,13 +497,10 @@ def load(  # noqa: PLR0913 - explicit expected-identity and test seams
     except (ImageTransferError, OSError, ValueError, AttributeError) as error:
         print(f"storage diagnostics unavailable: {error}", flush=True)
         devices, before = (), None
-    largest = max(pending, key=lambda item: item[2].stat().st_size)[2]
 
     def load_archive(archive: Path) -> tuple[str, float]:
-        priority = () if archive == largest else LOW_PRIORITY
-        command = [*priority, "podman", "load", "--input", str(archive)]
         started = clock()
-        output = _run(runner, command, env)
+        output = _run(runner, ["podman", "load", "--input", str(archive)], env)
         return output, clock() - started
 
     started = clock()
@@ -465,7 +545,6 @@ def load(  # noqa: PLR0913 - explicit expected-identity and test seams
         print(
             f"loaded role={role} image={name} image_id=sha256:{image_id} "
             f"archive_bytes={archive.stat().st_size} "
-            f"priority={'normal' if archive == largest else 'low'} "
             f"load_seconds={seconds:.1f}",
             flush=True,
         )
@@ -474,6 +553,10 @@ def load(  # noqa: PLR0913 - explicit expected-identity and test seams
         f"concurrent_load_seconds={clock() - started:.1f}",
         flush=True,
     )
+    if domain == COMPRESSION_EXPERIMENT_DOMAIN:
+        _compression_experiment(
+            runner, clock, max(pending, key=lambda item: item[2].stat().st_size)
+        )
     return loaded
 
 

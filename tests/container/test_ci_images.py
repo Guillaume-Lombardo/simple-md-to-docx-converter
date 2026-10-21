@@ -36,12 +36,6 @@ def _image_id(role: str) -> str:
     return hashlib.sha256(_config(role)).hexdigest()
 
 
-def _command(arguments: list[str]) -> list[str]:
-    """Return a command without its low CPU priority prefix."""
-    prefix = list(ci_images.LOW_PRIORITY)
-    return arguments[len(prefix) :] if arguments[: len(prefix)] == prefix else arguments
-
-
 def _add(archive: tarfile.TarFile, name: str, payload: bytes) -> None:
     member = tarfile.TarInfo(name)
     member.size = len(payload)
@@ -82,14 +76,30 @@ class FakeRuntime:
         self.tag_override: str | None = None
         self.failing: tuple[str, ...] | None = None
         self.info_json: str | None = None
-        self.low_priority: list[list[str]] = []
+        self.experiment: list[list[str]] = []
 
     def __call__(
         self, arguments: list[str], **_options: Any
     ) -> subprocess.CompletedProcess[str]:
-        if _command(arguments) != arguments:
-            self.low_priority.append(_command(arguments))
-        return self._respond(_command(arguments))
+        match arguments:
+            case ["podman", "push", "--compression-format", "zstd", image_id, target]:
+                self.experiment.append(arguments)
+                role = next(
+                    role
+                    for role in ci_images.ROLE_IMAGES
+                    if _image_id(role) == image_id
+                )
+                _write_archive(Path(target.removeprefix("oci-archive:")), role)
+                return subprocess.CompletedProcess(arguments, 0, "", "")
+            case ["podman", "--root", _, "--runroot", _, "load", *_] | [
+                "podman",
+                "unshare",
+                "rm",
+                *_,
+            ]:
+                self.experiment.append(arguments)
+                return subprocess.CompletedProcess(arguments, 0, "", "")
+        return self._respond(arguments)
 
     def _respond(self, arguments: list[str]) -> subprocess.CompletedProcess[str]:
         self.calls.append(arguments)
@@ -517,7 +527,7 @@ def test_load_runs_every_domain_archive_concurrently(tmp_path: Path) -> None:
     def runner(
         arguments: list[str], **options: Any
     ) -> subprocess.CompletedProcess[str]:
-        if _command(arguments)[:2] == ["podman", "load"]:
+        if arguments[:2] == ["podman", "load"]:
             barrier.wait()
         return runtime(arguments, **options)
 
@@ -699,7 +709,7 @@ class EnvRecorder:
     def __call__(
         self, arguments: list[str], **options: Any
     ) -> subprocess.CompletedProcess[str]:
-        if _command(arguments)[:2] == ["podman", "load"]:
+        if arguments[:2] == ["podman", "load"]:
             env = options.get("env")
             self.environments.append(env)
             self.present.append(env is not None and Path(env["TMPDIR"]).is_dir())
@@ -823,35 +833,6 @@ def test_load_failure_removes_the_memory_copy_directory(tmp_path: Path) -> None:
     assert list(memory.iterdir()) == []
 
 
-def test_load_lowers_the_priority_of_all_but_the_largest_archive(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    roles = IMAGE_DOMAIN_ROLES["e2e-standalone-1"]
-    directory = _archives(tmp_path, roles)
-    with tarfile.open(directory / ci_images.archive_name("frontend"), "a:") as archive:
-        _add(archive, "padding", b"\0" * 65536)
-    runtime = FakeRuntime()
-
-    ci_images.load(
-        "e2e-standalone-1", directory, _expected(*roles), runner=runtime, clock=_clock
-    )
-
-    assert sorted(Path(call[-1]).name for call in runtime.low_priority) == [
-        ci_images.archive_name("backend"),
-        ci_images.archive_name("reverse-attempt"),
-    ]
-    assert all(call[:2] == ["podman", "load"] for call in runtime.low_priority)
-    output = capsys.readouterr().out
-    assert "loaded role=frontend " in output
-    assert "priority=normal" in next(
-        line for line in output.splitlines() if "loaded role=frontend " in line
-    )
-    for role in ("backend", "reverse-attempt"):
-        assert "priority=low" in next(
-            line for line in output.splitlines() if f"loaded role={role} " in line
-        )
-
-
 def test_read_cpustats_keeps_busy_iowait_and_total_jiffies(tmp_path: Path) -> None:
     stats = tmp_path / "stat"
     stats.write_text(
@@ -884,3 +865,80 @@ def test_load_reports_cpu_busy_and_iowait_shares(
     )
 
     assert "cpu busy_percent=75 iowait_percent=5 cpus=" in capsys.readouterr().out
+
+
+def test_container_domain_compares_gzip_and_zstd_solo_loads(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    roles = IMAGE_DOMAIN_ROLES["container"]
+    directory = _archives(tmp_path, roles)
+    runtime = FakeRuntime()
+
+    ci_images.load(
+        "container", directory, _expected(*roles), runner=runtime, clock=_clock
+    )
+
+    pushes = [call for call in runtime.experiment if call[1] == "push"]
+    loads = [call for call in runtime.experiment if "load" in call]
+    removals = [call for call in runtime.experiment if call[1] == "unshare"]
+    assert len(pushes) == 1
+    assert len(loads) == len(removals) == 2
+    assert all(Path(call[3]).parent == Path(call[5]).parent for call in loads)
+    output = capsys.readouterr().out
+    assert "experiment role=" in output
+    for variant in ("gzip", "zstd"):
+        assert f"variant={variant} " in output
+    assert "layers=0 media= largest_mib=0 solo_load_seconds=0.0" in output
+
+
+def test_other_domains_skip_the_compression_experiment(tmp_path: Path) -> None:
+    roles = IMAGE_DOMAIN_ROLES["e2e-standalone-1"]
+    runtime = FakeRuntime()
+
+    ci_images.load(
+        "e2e-standalone-1",
+        _archives(tmp_path, roles),
+        _expected(*roles),
+        runner=runtime,
+        clock=_clock,
+    )
+
+    assert runtime.experiment == []
+
+
+def test_compression_experiment_failure_never_blocks_a_load(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    roles = IMAGE_DOMAIN_ROLES["container"]
+    runtime = FakeRuntime()
+
+    def runner(
+        arguments: list[str], **options: Any
+    ) -> subprocess.CompletedProcess[str]:
+        if arguments[:2] == ["podman", "push"]:
+            return subprocess.CompletedProcess(arguments, 125, "", "no zstd")
+        return runtime(arguments, **options)
+
+    loaded = ci_images.load(
+        "container",
+        _archives(tmp_path, roles),
+        _expected(*roles),
+        runner=runner,
+        clock=_clock,
+    )
+
+    assert loaded == {role: ci_images.ROLE_IMAGES[role] for role in roles}
+    assert "experiment unavailable: command failed with status 125" in (
+        capsys.readouterr().out
+    )
+
+
+def test_layer_media_rejects_a_non_regular_member(tmp_path: Path) -> None:
+    archive = tmp_path / "directory.oci.tar"
+    with tarfile.open(archive, "w:") as entries:
+        member = tarfile.TarInfo("index.json")
+        member.type = tarfile.DIRTYPE
+        entries.addfile(member)
+
+    with pytest.raises(ValueError, match="not a regular archive member"):
+        ci_images._layer_media(archive)

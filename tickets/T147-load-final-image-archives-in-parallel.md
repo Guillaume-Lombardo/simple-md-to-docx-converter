@@ -99,8 +99,9 @@ sequential archive downloads.
 - 2026-10-21: Diagnostics result, run 39633287852 (green). All four E2E shards report Podman 4.9.3
   with the native `overlay` driver and no mount program, so the graph driver is not the cause. The
   archives, the graph root and `/var/tmp` sit on one device (8:1 or 259:1). For about 2.3 GB of
-  archives, that device wrote 10.7 to 14.0 GB at about 165 MB/s, the hosted runner's write cap, with
-  `concurrent_load_seconds` of 82.8, 77.1, 84.6 and 66.4. The loads are write-bound. Each
+  archives, that device wrote 10.7 to 14.0 GB (about 165 MB/s) and was 34 percent busy, with
+  `concurrent_load_seconds` of 82.8, 77.1, 84.6 and 66.4. These runs do not show whether that
+  rate is a fixed runner limit. Each
   `podman load` of an `oci-archive` first extracts the archive into the image-copy directory and
   stages the layer blobs there, then commits the layers into the store, so the copy directory alone
   receives about twice the archive bytes.
@@ -125,16 +126,35 @@ sequential archive downloads.
   | mean | 85.5 s | 67.8 s | |
 
   Every job used `/dev/shm` (about 7.99 GiB free, 4.83 GiB required). Disk writes fell from 10.7–14.0
-  GB to 6.9–8.5 GB, and the disk was 20 to 66 percent busy instead of saturated. The step now ends
-  with the backend load, which takes 4 to 17 s longer than alone because the frontend and
-  reverse-attempt loads compete with it (frontend 16–21 s alone, 35–40 s concurrently). The mean
-  misses the under-65-second target by about 3 s.
-- 2026-10-21: Second correction. The largest archive of the domain (the backend) keeps normal
-  priority, and the other loads run under `nice -n 10`, so they use the CPU the backend leaves idle
-  instead of slowing it down. Each `loaded role` line reports its priority. The loader also prints
-  the CPU busy and iowait shares from `/proc/stat` over the loads, to confirm the CPU contention.
-  The new unit tests check that only the largest archive runs at normal priority and that the
-  CPU shares are reported; they fail without their mechanism. The hosted before/after runs follow.
+  GB to 6.9–8.5 GB, and the disk was 20 to 66 percent busy. The step now ends with the backend
+  load, which takes 4 to 17 s longer than alone while the frontend and reverse-attempt loads run
+  beside it (frontend 16–21 s alone, 35–40 s concurrently). The mean misses the under-65-second
+  target, and three shards are above it.
+- 2026-10-21: Second attempt, unsuccessful: CPU priority (`a804e24`). The largest archive kept
+  normal priority and the other loads ran under `nice -n 10`. The loader also printed the CPU busy
+  and iowait shares from `/proc/stat`. Run 39642307514 (all jobs green) against the sequential
+  baseline of `main` push run 39640756703 on `a143a09`:
+
+  | Shard | Sequential step | Priority step | Backend load | CPU busy / iowait | Disk busy, written |
+  |---|---|---|---|---|---|
+  | e2e-standalone-1 | 78 s | 69 s | 65.8 s | 43 / 17 % | 71 %, 8013 MiB |
+  | e2e-standalone-2 | 90 s | 66 s | 63.8 s | 44 / 16 % | 71 %, 8219 MiB |
+  | e2e-distributed-1 | 93 s | 79 s | 76.8 s | 49 / 5 % | 21 %, 8098 MiB |
+  | e2e-distributed-2 | 93 s | 76 s | 73.3 s | 50 / 3 % | 20 %, 8178 MiB |
+  | mean | 88.5 s | 72.5 s | | | |
+
+  Every shard is above 65 s and the result is no better than the memory directory alone. With four
+  CPUs about half busy, these runs do not show aggregate CPU saturation, so the priority change is
+  reverted. The CPU diagnostic stays.
+- 2026-10-21: Working hypothesis, not yet demonstrated: each load is bounded by its own layer
+  decompression. `podman save --format oci-archive` writes gzip layers by default, the store
+  receives about 3.5 times the archive bytes, and the backend takes 45–58 s even alone. Controlled
+  comparison, temporary and removed before merge: in the `container` domain only, after the normal
+  loads, the loader re-exports the largest image with `podman push --compression-format zstd` and
+  loads the gzip archive and the zstd archive one after the other, each alone into a fresh store
+  under `/var/tmp`. It prints the layer media types, the archive sizes, the export time and both
+  solo load times. A failure only prints a notice. The E2E load steps do not run it. Changing the
+  CI or release archive format remains an owner decision (posted on PR #323).
 
 ## Synchronization
 
