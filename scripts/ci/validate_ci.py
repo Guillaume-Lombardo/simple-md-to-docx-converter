@@ -213,14 +213,17 @@ class ReleaseWorkflowPolicy:
 
 
 CONTAINER_RELEASE_CANONICAL_DIGEST = (
-    "810e586d676e8798045db316bca62a0ba952d7dd9c98c11f87e904f21d7dbce1"
+    "fa1bd343ccb60f1133d7ca7bada3fc7dc73e67082ee0907ce9a3b65ff584dd6a"
+)
+CONTAINER_QUALIFY_CANONICAL_DIGEST = (
+    "9777aeffcf09320e58592a904534b536f678f25cff1eddbaada698091b92666d"
 )
 CONTAINER_PAIR_PUBLISHER_CANONICAL_DIGEST = (
     "3a61c6bd75e47afe761ead42b77f73ae46cc0da2e8430f09e5dce0f74a7d6fdc"
 )
 RELEASE_IMAGE_ROLES = ("backend", "frontend", "reverse_attempt")
 PRODUCTION_RELEASE_CANONICAL_DIGEST = (
-    "b34c7150eeefcb669c29d5dde3f4dc2dc700397742e9b0414580b29c90ed9699"
+    "50da2beef208fdec6bb7a5b9d8433803a84223f3f4ab916bf923b4f841e593ba"
 )
 
 
@@ -2131,6 +2134,213 @@ def validate_container_publish_pair_text(text: str) -> list[str]:
     return errors
 
 
+RELEASE_QUALIFICATION_JOBS = ("stage", "smoke", "supply-chain", "e2e")
+RELEASE_QUALIFICATION_TIMEOUT_MINUTES = 30
+# One job each for stage, smoke and supply-chain, plus one per E2E shard.
+RELEASE_QUALIFICATION_JOB_COUNT = len(RELEASE_QUALIFICATION_JOBS) - 1 + len(E2E_DOMAINS)
+RELEASE_BUILD_FRAGMENTS = (
+    "podman build",
+    "scripts/container/build",
+    "scripts.container.ci_images build",
+    "scripts/container/supply-chain.sh",
+    "scripts/e2e/run.sh",
+    "scripts.ci.run_domain",
+)
+
+
+def _validate_staged_publication(workflow: Mapping[str, Any]) -> list[str]:
+    """Require publication to copy only the qualified staged set, never rebuild."""
+    errors: list[str] = []
+    steps = _job_steps(workflow, "publish")
+    downloads = [
+        index
+        for index, step in enumerate(steps)
+        if step.get("name") == "Download the qualified staged image set"
+        and str(step.get("uses", "")).startswith("actions/download-artifact@")
+        and step.get("with")
+        == {"name": "container-stage-${{ inputs.tag }}", "path": "artifacts/container"}
+    ]
+    pushes = [index for index, step in enumerate(steps) if step.get("id") == "push"]
+    if len(downloads) != 1 or len(pushes) != 1 or downloads[0] > pushes[0]:
+        errors.append(
+            "container publication must download the qualified staged set before push"
+        )
+    runs = "\n".join(str(step.get("run", "")) for step in steps)
+    errors.extend(
+        f"container publication must not build or requalify images: {fragment}"
+        for fragment in RELEASE_BUILD_FRAGMENTS
+        if fragment in runs
+    )
+    return errors
+
+
+def _validate_qualification_jobs(workflow: Mapping[str, Any]) -> list[str]:
+    errors: list[str] = []
+    jobs = _mapping(workflow.get("jobs")) or {}
+    if tuple(jobs) != RELEASE_QUALIFICATION_JOBS:
+        errors.append("container qualification jobs do not match the exact contract")
+    for name in RELEASE_QUALIFICATION_JOBS:
+        job = _mapping(jobs.get(name)) or {}
+        if job.get("permissions") != READ_ONLY_PERMISSIONS:
+            errors.append(f"container qualification job {name!r} must be read-only")
+        condition = job.get("if")
+        if not isinstance(condition, str) or not all(
+            clause in condition
+            for clause in (
+                TRUSTED_REPOSITORY_CONDITION,
+                "github.event_name == 'push'",
+                "github.ref == 'refs/heads/main'",
+                "github.sha == inputs.source-sha",
+            )
+        ):
+            errors.append(
+                f"container qualification job {name!r} lacks the trusted-main guard"
+            )
+        if job.get("timeout-minutes") != RELEASE_QUALIFICATION_TIMEOUT_MINUTES:
+            errors.append(
+                f"container qualification job {name!r} lacks the reviewed timeout"
+            )
+        if name != "stage" and job.get("needs") != "stage":
+            errors.append(
+                f"container qualification job {name!r} must consume the single stage"
+            )
+    return errors
+
+
+def _qualification_runs(workflow: Mapping[str, Any], job_name: str) -> str:
+    return "\n".join(
+        str(step.get("run", "")) for step in _job_steps(workflow, job_name)
+    )
+
+
+def _validate_qualification_commands(workflow: Mapping[str, Any]) -> list[str]:
+    build_run = _qualification_runs(workflow, "stage")
+    errors = [
+        f"container qualification stage is missing: {required}"
+        for required in (
+            'SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"',
+            "export SOURCE_DATE_EPOCH",
+            "uv run python -m scripts.container.ci_images build",
+            """--roles '["backend", "frontend", "reverse-attempt"]'""",
+            'test "$(git rev-parse HEAD)" = "$SOURCE_SHA"',
+            'test "$RELEASE_TAG" = "v$RELEASE_VERSION"',
+        )
+        if required not in build_run
+    ]
+    for name in ("smoke", "supply-chain", "e2e"):
+        runs = _qualification_runs(workflow, name)
+        if "uv run python -m scripts.container.ci_images load" not in runs:
+            errors.append(
+                f"container qualification job {name!r} must load images by verified ID"
+            )
+        if "scripts.container.ci_images build" in runs or "podman build" in runs:
+            errors.append(f"container qualification job {name!r} must not rebuild")
+    smoke_run = _qualification_runs(workflow, "smoke")
+    errors.extend(
+        f"container qualification smoke is missing: {required}"
+        for required in (
+            'bash scripts/container/smoke-reverse-attempt.sh "$reverse_attempt_image"',
+            'bash scripts/container/smoke.sh "$backend_image"',
+            'bash scripts/container/api-smoke.sh "$backend_image"',
+            'bash scripts/container/distributed-api-smoke.sh "$backend_image"',
+            'bash scripts/container/recovery-cli-smoke.sh "$backend_image"',
+            'bash web/scripts/run-rootless-smoke.sh "$frontend_image" --existing',
+        )
+        if required not in smoke_run
+    )
+    supply_run = _qualification_runs(workflow, "supply-chain")
+    errors.extend(
+        f"container qualification evidence is missing: {required}"
+        for required in (
+            "localhost/md-converter:ci artifacts/container/backend release",
+            "localhost/md-converter-web:ci artifacts/container/frontend release",
+            "localhost/md-converter-reverse-attempt:ci artifacts/container/reverse_attempt release reverse-attempt",
+        )
+        if required not in supply_run
+    )
+    retained = [
+        step
+        for step in _job_steps(workflow, "supply-chain")
+        if step.get("name") == "Retain staged pair before registry mutation"
+    ]
+    retained_with = (
+        _mapping(retained[0].get("with")) or {} if len(retained) == 1 else {}
+    )
+    if retained_with.get("name") != "container-stage-${{ inputs.tag }}" or str(
+        retained_with.get("path", "")
+    ).splitlines() != [
+        "artifacts/container/backend/",
+        "artifacts/container/frontend/",
+        "artifacts/container/reverse_attempt/",
+    ]:
+        errors.append("container qualification must retain the exact staged set")
+    if 'uv run python -m scripts.ci.run_domain "$E2E_DOMAIN"' not in (
+        _qualification_runs(workflow, "e2e")
+    ):
+        errors.append("container qualification E2E must run the registered shard")
+    return errors
+
+
+def validate_container_qualify_workflow_text(text: str) -> list[str]:
+    """Validate the read-only build-once, qualify-in-parallel release stage."""
+    workflow, errors = _load_workflow(text)
+    if workflow is None:
+        return errors
+    if hashlib.sha256(text.encode("utf-8")).hexdigest() != (
+        CONTAINER_QUALIFY_CANONICAL_DIGEST
+    ):
+        errors.append(
+            "container qualification workflow differs from the reviewed policy"
+        )
+    expected_inputs = {
+        name: {"required": True, "type": "string"}
+        for name in ("version", "tag", "source-sha")
+    }
+    if _mapping(workflow.get("on")) != {"workflow_call": {"inputs": expected_inputs}}:
+        errors.append("container qualification must be an exact reusable workflow")
+    if workflow.get("permissions") != READ_ONLY_PERMISSIONS:
+        errors.append(
+            "container qualification permissions must default to contents: read"
+        )
+    if set(workflow) != {"name", "on", "permissions", "jobs"}:
+        errors.append("container qualification fields do not match the allowlist")
+    errors.extend(_validate_qualification_jobs(workflow))
+    e2e = _mapping((_mapping(workflow.get("jobs")) or {}).get("e2e")) or {}
+    strategy = _mapping(e2e.get("strategy")) or {}
+    matrix = _mapping(strategy.get("matrix")) or {}
+    if strategy.get("fail-fast") is not False or matrix != {
+        "domain": list(E2E_DOMAINS)
+    }:
+        errors.append(
+            "container qualification must run every E2E shard of both profiles"
+        )
+    errors.extend(
+        _validate_action_allowlist(
+            workflow,
+            allowed_actions=frozenset(
+                {
+                    "actions/checkout",
+                    "actions/download-artifact",
+                    "actions/setup-node",
+                    "actions/setup-python",
+                    "actions/upload-artifact",
+                    "astral-sh/setup-uv",
+                }
+            ),
+        )
+    )
+    errors.extend(_validate_checkout_credentials(workflow))
+    if re.search(r"\bsecrets\b|github\.token|packages:|id-token", text):
+        errors.append("container qualification must not hold publication credentials")
+    for forbidden in ("--privileged", "skopeo", "ghcr.io", "enable-cache: true"):
+        if forbidden in text.casefold():
+            errors.append(
+                f"container qualification must not use {forbidden.strip('-')}"
+            )
+    errors.extend(_validate_qualification_commands(workflow))
+    return errors
+
+
 def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
     text: str,
 ) -> list[str]:
@@ -2172,14 +2382,14 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         errors.append("container release workflow fields do not match the allowlist")
     jobs = _mapping(workflow.get("jobs")) or {}
     if set(jobs) != {
-        "build-and-publish",
+        "publish",
         "recover-evidence",
         "attest",
         "release-evidence",
     }:
         errors.append("container release jobs do not match the exact contract")
     expected_permissions = {
-        "build-and-publish": {"contents": "read", "packages": "write"},
+        "publish": {"contents": "read", "packages": "write"},
         "recover-evidence": {
             "actions": "read",
             "contents": "read",
@@ -2199,7 +2409,7 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
             errors.append(f"container release job {name!r} permissions are not minimal")
         condition = job.get("if")
         required_conditions = {
-            "build-and-publish": (
+            "publish": (
                 TRUSTED_REPOSITORY_CONDITION,
                 "github.event_name == 'push'",
                 "github.ref == 'refs/heads/main'",
@@ -2215,7 +2425,7 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
                 TRUSTED_REPOSITORY_CONDITION,
                 "github.event_name == 'push'",
                 "github.event_name == 'workflow_dispatch'",
-                "needs.build-and-publish.result == 'success'",
+                "needs.publish.result == 'success'",
                 "needs.recover-evidence.result == 'success'",
             ),
             "release-evidence": (
@@ -2223,7 +2433,7 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
                 TRUSTED_REPOSITORY_CONDITION,
                 "github.event_name == 'push'",
                 "github.event_name == 'workflow_dispatch'",
-                "needs.build-and-publish.result == 'success'",
+                "needs.publish.result == 'success'",
                 "needs.recover-evidence.result == 'success'",
                 "needs.attest.result == 'success'",
             ),
@@ -2233,11 +2443,11 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         ):
             errors.append(f"container release job {name!r} lacks the repository guard")
         if (
-            name == "build-and-publish"
+            name == "publish"
             and isinstance(condition, str)
             and "workflow_dispatch" in condition
         ):
-            errors.append("manual container recovery must not enter the build job")
+            errors.append("manual container recovery must not enter the publish job")
         if (
             name == "recover-evidence"
             and isinstance(condition, str)
@@ -2245,13 +2455,10 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         ):
             errors.append("automatic publication must not enter the recovery job")
         timeout = job.get("timeout-minutes")
-        maximum_timeout = (
-            120 if name == "build-and-publish" else MAX_RELEASE_TIMEOUT_MINUTES
-        )
         if (
             not isinstance(timeout, int)
             or isinstance(timeout, bool)
-            or not 0 < timeout <= maximum_timeout
+            or not 0 < timeout <= MAX_RELEASE_TIMEOUT_MINUTES
         ):
             errors.append(f"container release job {name!r} lacks a bounded timeout")
     errors.extend(
@@ -2262,7 +2469,6 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
                     "actions/attest-build-provenance",
                     "actions/checkout",
                     "actions/download-artifact",
-                    "actions/setup-node",
                     "actions/setup-python",
                     "actions/upload-artifact",
                     "astral-sh/setup-uv",
@@ -2288,13 +2494,6 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         'test "$RELEASE_TAG" = "v$RELEASE_VERSION"',
         'test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha)" = "$SOURCE_SHA"',
         "[.tag_name, .target_commitish, .draft, .prerelease] | @tsv",
-        '"localhost/md-converter:$RELEASE_VERSION"',
-        'bash scripts/container/recovery-cli-smoke.sh "$backend_image"',
-        '"localhost/md-converter-web:$RELEASE_VERSION"',
-        'MARKWEAVE_E2E_LOCAL_IMAGE="localhost/md-converter:$RELEASE_VERSION"',
-        'MARKWEAVE_E2E_LOCAL_FRONTEND_IMAGE="localhost/md-converter-web:$RELEASE_VERSION"',
-        "bash scripts/e2e/run.sh standalone",
-        "bash scripts/e2e/run.sh distributed",
         "container-release-${{ inputs.tag }}",
         "sudo apt-get install --yes podman skopeo",
         "skopeo --version",
@@ -2312,16 +2511,19 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         '.conclusion == "failure"',
         'git merge-base --is-ancestor "$SOURCE_SHA" "$run_sha"',
         'git merge-base --is-ancestor "$run_sha" "$GITHUB_SHA"',
-        '.name == "build-and-publish"',
+        '.name == "container-qualify / supply-chain"',
+        '(.name | startswith("container-qualify / ")) and .conclusion == "success")] | length\' <<< "$jobs_json")" = '
+        f"{RELEASE_QUALIFICATION_JOB_COUNT}",
+        '(.name | startswith("container-qualify / ")) and .conclusion != "success")] | length\' <<< "$jobs_json")" = 0',
         '.conclusion == "success"',
         "container-stage-$RELEASE_TAG",
         ".size_in_bytes <= 4000000000",
         ".expired == false",
         "Retain staged pair before registry mutation",
         "container-stage-${{ inputs.tag }}",
-        "needs.build-and-publish.outputs.backend-digest || needs.recover-evidence.outputs.backend-digest",
-        "needs.build-and-publish.outputs.frontend-digest || needs.recover-evidence.outputs.frontend-digest",
-        "needs.build-and-publish.outputs.reverse-attempt-digest || needs.recover-evidence.outputs.reverse-attempt-digest",
+        "needs.publish.outputs.backend-digest || needs.recover-evidence.outputs.backend-digest",
+        "needs.publish.outputs.frontend-digest || needs.recover-evidence.outputs.frontend-digest",
+        "needs.publish.outputs.reverse-attempt-digest || needs.recover-evidence.outputs.reverse-attempt-digest",
         "artifacts/container/reverse_attempt/",
         "anydoc-cargo.cdx.json anydoc-cargo-vulnerabilities.json",
         '--repo "$GITHUB_REPOSITORY"',
@@ -2331,7 +2533,7 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
             errors.append(f"container release is missing dynamic contract: {required}")
     identity_steps = [
         step
-        for step in _job_steps(workflow, "build-and-publish")
+        for step in _job_steps(workflow, "publish")
         if step.get("name") == "Validate the reviewed release identity"
     ]
     identity_run = identity_steps[0].get("run") if len(identity_steps) == 1 else None
@@ -2344,24 +2546,7 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
             errors.append(
                 f"container recovery identity validation is missing: {required}"
             )
-    build_steps = [
-        step
-        for step in _job_steps(workflow, "build-and-publish")
-        if step.get("name") == "Build and validate the final rootless image pair once"
-    ]
-    build_run = build_steps[0].get("run") if len(build_steps) == 1 else None
-    for required in (
-        'SOURCE_DATE_EPOCH="$source_date_epoch" bash scripts/container/build.sh "$backend_image"',
-        'podman build --format oci --timestamp "$source_date_epoch"',
-        'bash scripts/container/recovery-cli-smoke.sh "$backend_image"',
-        'bash web/scripts/run-rootless-smoke.sh "$frontend_image" --existing',
-        'SOURCE_DATE_EPOCH="$source_date_epoch" bash scripts/container/build-reverse-attempt.sh "$reverse_attempt_image"',
-        'bash scripts/container/smoke-reverse-attempt.sh "$reverse_attempt_image"',
-    ):
-        if not isinstance(build_run, str) or required not in build_run:
-            errors.append(f"automatic container build is missing: {required}")
-    if isinstance(build_run, str) and "workflow_dispatch" in build_run:
-        errors.append("manual container recovery must not rebuild the image")
+    errors.extend(_validate_staged_publication(workflow))
     recovery_steps = _job_steps(workflow, "recover-evidence")
     recovery_names = [step.get("name") for step in recovery_steps]
     expected_recovery_names = [
@@ -2454,7 +2639,7 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         )
     publish_steps = [
         step
-        for step in _job_steps(workflow, "build-and-publish")
+        for step in _job_steps(workflow, "publish")
         if step.get("name")
         == "Publish the bound pair without overwriting a conflicting image"
     ]
@@ -2497,12 +2682,33 @@ def validate_production_release_workflow_text(  # noqa: PLR0912, PLR0915
     expected_jobs = {
         "detect",
         RELEASE_PRODUCER_JOB,
+        "container-qualify",
         "create-release",
         "publish",
         "container",
     }
     if set(jobs) != expected_jobs:
         errors.append("automatic release jobs do not match the exact contract")
+    # Tag, Release, PyPI and GHCR mutations wait for the qualified image set (T134).
+    # A status function would run a job despite a failed qualification.
+    for name in ("create-release", "publish", "container"):
+        job = _mapping(jobs.get(name)) or {}
+        needs = job.get("needs")
+        if not isinstance(needs, list) or "container-qualify" not in needs:
+            errors.append(
+                f"automatic release job {name!r} must wait for container qualification"
+            )
+        if re.search(r"\b(?:always|failure|cancelled)\(\)", str(job.get("if", ""))):
+            errors.append(
+                f"automatic release job {name!r} must not run after a failed dependency"
+            )
+    create_needs = (_mapping(jobs.get("create-release")) or {}).get("needs")
+    if not isinstance(create_needs, list) or RELEASE_PRODUCER_JOB not in create_needs:
+        errors.append("automatic release must verify Python artifacts before tagging")
+    for name in ("publish", "container"):
+        needs = (_mapping(jobs.get(name)) or {}).get("needs")
+        if not isinstance(needs, list) or "create-release" not in needs:
+            errors.append(f"automatic release job {name!r} must follow the Release")
     expected_permissions = {
         "create-release": {"contents": "write"},
         "publish": {"id-token": "write"},
@@ -2544,6 +2750,11 @@ def validate_production_release_workflow_text(  # noqa: PLR0912, PLR0915
     container = _mapping(jobs.get("container")) or {}
     if container.get("uses") != "./.github/workflows/container-release.yml":
         errors.append("container publication must call the reviewed reusable workflow")
+    qualification = _mapping(jobs.get("container-qualify")) or {}
+    if qualification.get("uses") != "./.github/workflows/container-qualify.yml":
+        errors.append(
+            "container qualification must call the reviewed reusable workflow"
+        )
     if re.search(r"\bsecrets\b", text, re.IGNORECASE):
         errors.append("automatic release workflow must not access stored secrets")
     required_contracts = (
@@ -2560,6 +2771,7 @@ def validate_production_release_workflow_text(  # noqa: PLR0912, PLR0915
         "target_commitish=$SOURCE_SHA",
         "python-release-${{ needs.detect.outputs.tag }}",
         '--version "$RELEASE_VERSION"',
+        "./.github/workflows/container-qualify.yml",
         "./.github/workflows/container-release.yml",
     )
     for required in required_contracts:
@@ -2623,7 +2835,10 @@ def validate_production_release_workflow_text(  # noqa: PLR0912, PLR0915
                 }
             ),
             allowed_local_workflows=frozenset(
-                {"./.github/workflows/container-release.yml"}
+                {
+                    "./.github/workflows/container-qualify.yml",
+                    "./.github/workflows/container-release.yml",
+                }
             ),
         )
     )
@@ -2720,6 +2935,17 @@ def validate_workflow_files(paths: Iterable[Path]) -> list[str]:
     """Validate every committed workflow against its filename-specific policy."""
     errors: list[str] = []
     for path in sorted(paths):
+        if path.name == "container-qualify.yml":
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError as error:
+                errors.append(f"{path}: cannot read workflow: {error}")
+                continue
+            errors.extend(
+                f"{path}: {error}"
+                for error in validate_container_qualify_workflow_text(text)
+            )
+            continue
         if path.name == "container-release.yml":
             try:
                 text = path.read_text(encoding="utf-8")

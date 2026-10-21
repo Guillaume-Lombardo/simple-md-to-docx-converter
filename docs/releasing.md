@@ -68,15 +68,27 @@ repositories.
 4. The workflow builds the wheel and sdist once from the reviewed main SHA, validates bounded
    metadata and integrity, and installs the exact wheel in a clean Python 3.14 environment. Only
    those verified files are transferred to the `pypi` environment job.
-5. A minimal `contents: write` job atomically creates the tag ref at the exact reviewed SHA before
-   publishing the matching GitHub Release. A failed-job rerun accepts a partially created tag or
-   Release only after verifying its exact SHA, tag, target, draft, and prerelease state. The PyPI
-   job then rechecks that the version is still unpublished and uploads the verified files with
-   PEP 740 attestations through OIDC.
-6. The reusable container workflow checks out the same SHA, derives all three image tags from the
-   detected version, and runs the rootless final-image, two-profile E2E, and Critical-vulnerability
-   gates. It serializes each image once into a private `dir:` transport and uploads the complete
-   backend/frontend/reverse-attempt staging artifact before any registry mutation. Authenticated preflight checks
+5. In parallel, the read-only reusable `container-qualify.yml` workflow qualifies the container
+   images before any irreversible external mutation. Its `build` job checks out the same SHA and
+   builds the backend, frontend, and reverse-attempt images once, with the reviewed commit
+   timestamp, then exports each one as an OCI archive bound to its image ID and transfers it within
+   the run. Parallel jobs load those archives only after the archive, loaded, and tagged image IDs
+   equal the build output: `smoke` runs the final-image, API, distributed, recovery, and frontend
+   smokes; `supply-chain` generates the SBOMs and runs the Critical-vulnerability gate, then retains
+   the complete backend/frontend/reverse-attempt staging artifact `container-stage-v<version>`;
+   and four `e2e` jobs run both shards of both storage profiles. No qualification job holds a write
+   permission or a registry credential.
+6. Only after both the Python artifacts and the container qualification succeed does a minimal
+   `contents: write` job atomically create the tag ref at the exact reviewed SHA before publishing
+   the matching GitHub Release. A container build, smoke, scan, or E2E failure therefore leaves no
+   tag, GitHub Release, or PyPI version; rerun the failed jobs, or use the attempt mechanism above
+   when the run cannot be rerun. A failed-job rerun accepts a partially created tag or Release only
+   after verifying its exact SHA, tag, target, draft, and prerelease state. The PyPI job then
+   rechecks that the version is still unpublished and uploads the verified files with PEP 740
+   attestations through OIDC.
+7. The reusable container publication workflow verifies the Release identity, downloads the
+   qualified staging artifact from the same run, and never rebuilds or requalifies an image. It
+   serializes each image once into a private `dir:` transport. Authenticated preflight checks
    every source and version tag for all roles before the first copy, accepting only an absent tag
    or the exact intended digest. Skopeo then copies those exact staged bytes and verifies every
    remote digest. A later copy failure may leave a partial set, but the retained staging artifact
@@ -119,12 +131,13 @@ PyPI version blocks a fresh run rather than being silently reused. Investigate p
 state before authorizing any manual recovery. Recovery must not rebuild any container: registry
 serialization is not guaranteed to be byte-reproducible across hosted Podman versions. Run
 `container-release.yml` from `main` with the exact existing version, `v<version>` tag, reviewed
-source SHA, and the ID of a failed source run whose `build-and-publish` job successfully retained
-the exact pre-mutation staging artifact before the job failed.
+source SHA, and the ID of a failed source run in which every `container-qualify` job succeeded and
+the `container-qualify / supply-chain` job retained the exact pre-mutation staging artifact.
 
 Before download, recovery verifies the source run belongs to this upstream repository and exact
 workflow, ran from trusted `main` at a descendant of the release source and an ancestor of the
-current trusted `main` workflow SHA, reached the successful pre-mutation staging step, and has one
+current trusted `main` workflow SHA, completed every qualification job successfully, reached the
+successful pre-mutation staging step, and has one
 bounded non-expired artifact with matching repository/run metadata. It downloads by immutable
 artifact ID, not name alone. It then validates the exact regular-file set, closed checksum bundle,
 OCI archives and metadata relationships, publication receipts, release version/tag/source, and the

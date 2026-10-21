@@ -1,0 +1,365 @@
+name: Container qualification
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      tag:
+        required: true
+        type: string
+      source-sha:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  stage:
+    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.ref == 'refs/heads/main' && github.event_name == 'push' && github.sha == inputs.source-sha }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      archive-attempt: ${{ github.run_attempt }}
+      backend-image-id: ${{ steps.build.outputs.backend-image-id }}
+      frontend-image-id: ${{ steps.build.outputs.frontend-image-id }}
+      reverse-attempt-image-id: ${{ steps.build.outputs.reverse-attempt-image-id }}
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source-sha }}
+          persist-credentials: false
+      - name: Set up Python 3.14
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+          check-latest: false
+      - name: Set up uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.12.1"
+          enable-cache: false
+      - name: Validate the reviewed release source
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ inputs.source-sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_SHA" = "$SOURCE_SHA"
+          test "$RELEASE_TAG" = "v$RELEASE_VERSION"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          uv run python -c 'import os, tomllib; assert tomllib.load(open("pyproject.toml", "rb"))["project"]["version"] == os.environ["RELEASE_VERSION"]'
+      - name: Synchronize locked dependencies
+        run: uv sync --locked --all-groups
+      - name: Verify preinstalled rootless Podman for image builds
+        run: |
+          set -euo pipefail
+          podman_version="$(podman version --format '{{.Client.Version}}')"
+          [[ "$podman_version" =~ ^([0-9]+)\.[0-9]+\.[0-9]+ ]]
+          (( BASH_REMATCH[1] >= 4 ))
+          echo "Using preinstalled Podman $podman_version"
+          podman info --format '{{.Host.Security.Rootless}}' | grep -Fx true
+      - name: Build, export and verify the three final images once
+        id: build
+        run: |
+          set -euo pipefail
+          SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+          export SOURCE_DATE_EPOCH
+          uv run python -m scripts.container.ci_images build \
+            --roles '["backend", "frontend", "reverse-attempt"]' \
+            --output-directory "$RUNNER_TEMP/release-images" \
+            --github-output "$GITHUB_OUTPUT"
+      - name: Transfer the backend archive within this run
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-image-backend-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-images/backend.oci.tar
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+      - name: Transfer the frontend archive within this run
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-image-frontend-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-images/frontend.oci.tar
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+      - name: Transfer the reverse-attempt archive within this run
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-image-reverse-attempt-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-images/reverse-attempt.oci.tar
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+
+  smoke:
+    needs: stage
+    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.ref == 'refs/heads/main' && github.event_name == 'push' && github.sha == inputs.source-sha }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source-sha }}
+          persist-credentials: false
+      - name: Set up Python 3.14
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+          check-latest: false
+      - name: Set up uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.12.1"
+          enable-cache: false
+      - name: Set up pinned Node for the frontend smoke
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.19.0
+          check-latest: false
+      - name: Bootstrap verified Corepack and pnpm
+        run: |
+          set -euo pipefail
+          scripts/javascript/bootstrap-pnpm.sh "$RUNNER_TEMP/markweave-js-tools"
+          echo "$RUNNER_TEMP/markweave-js-tools/bin" >> "$GITHUB_PATH"
+          echo "COREPACK_HOME=$RUNNER_TEMP/markweave-js-tools/corepack-home" >> "$GITHUB_ENV"
+          echo "COREPACK_ENABLE_NETWORK=0" >> "$GITHUB_ENV"
+      - name: Synchronize locked dependencies
+        run: uv sync --locked --all-groups
+      - name: Verify preinstalled rootless Podman for container validation
+        run: |
+          set -euo pipefail
+          podman_version="$(podman version --format '{{.Client.Version}}')"
+          [[ "$podman_version" =~ ^([0-9]+)\.[0-9]+\.[0-9]+ ]]
+          (( BASH_REMATCH[1] >= 4 ))
+          echo "Using preinstalled Podman $podman_version"
+          podman info --format '{{.Host.Security.Rootless}}' | grep -Fx true
+      - name: Download the backend archive
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-image-backend-${{ github.run_id }}-${{ needs.stage.outputs.archive-attempt }}
+          path: ${{ runner.temp }}/release-images
+      - name: Download the frontend archive
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-image-frontend-${{ github.run_id }}-${{ needs.stage.outputs.archive-attempt }}
+          path: ${{ runner.temp }}/release-images
+      - name: Download the reverse-attempt archive
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-image-reverse-attempt-${{ github.run_id }}-${{ needs.stage.outputs.archive-attempt }}
+          path: ${{ runner.temp }}/release-images
+      - name: Load the verified three-image set
+        env:
+          BACKEND_IMAGE_ID: ${{ needs.stage.outputs.backend-image-id }}
+          FRONTEND_IMAGE_ID: ${{ needs.stage.outputs.frontend-image-id }}
+          REVERSE_ATTEMPT_IMAGE_ID: ${{ needs.stage.outputs.reverse-attempt-image-id }}
+        run: |
+          set -euo pipefail
+          for domain in container frontend; do
+            uv run python -m scripts.container.ci_images load \
+              --domain "$domain" --archive-directory "$RUNNER_TEMP/release-images" \
+              --backend-image-id "$BACKEND_IMAGE_ID" \
+              --frontend-image-id "$FRONTEND_IMAGE_ID" \
+              --reverse-attempt-image-id "$REVERSE_ATTEMPT_IMAGE_ID"
+          done
+      - name: Smoke-test the exact staged images
+        run: |
+          set -euo pipefail
+          backend_image=localhost/md-converter:ci
+          frontend_image=localhost/md-converter-web:ci
+          reverse_attempt_image=localhost/md-converter-reverse-attempt:ci
+          bash scripts/container/smoke-reverse-attempt.sh "$reverse_attempt_image"
+          bash scripts/container/smoke.sh "$backend_image"
+          bash scripts/container/api-smoke.sh "$backend_image"
+          bash scripts/container/distributed-api-smoke.sh "$backend_image"
+          bash scripts/container/recovery-cli-smoke.sh "$backend_image"
+          bash web/scripts/run-rootless-smoke.sh "$frontend_image" --existing
+
+  supply-chain:
+    needs: stage
+    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.ref == 'refs/heads/main' && github.event_name == 'push' && github.sha == inputs.source-sha }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source-sha }}
+          persist-credentials: false
+      - name: Set up Python 3.14
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+          check-latest: false
+      - name: Set up uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.12.1"
+          enable-cache: false
+      - name: Synchronize locked dependencies
+        run: uv sync --locked --all-groups
+      - name: Verify preinstalled rootless Podman for evidence generation
+        run: |
+          set -euo pipefail
+          podman_version="$(podman version --format '{{.Client.Version}}')"
+          [[ "$podman_version" =~ ^([0-9]+)\.[0-9]+\.[0-9]+ ]]
+          (( BASH_REMATCH[1] >= 4 ))
+          echo "Using preinstalled Podman $podman_version"
+          podman info --format '{{.Host.Security.Rootless}}' | grep -Fx true
+      - name: Download the backend archive
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-image-backend-${{ github.run_id }}-${{ needs.stage.outputs.archive-attempt }}
+          path: ${{ runner.temp }}/release-images
+      - name: Download the frontend archive
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-image-frontend-${{ github.run_id }}-${{ needs.stage.outputs.archive-attempt }}
+          path: ${{ runner.temp }}/release-images
+      - name: Download the reverse-attempt archive
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-image-reverse-attempt-${{ github.run_id }}-${{ needs.stage.outputs.archive-attempt }}
+          path: ${{ runner.temp }}/release-images
+      - name: Load the verified three-image set
+        env:
+          BACKEND_IMAGE_ID: ${{ needs.stage.outputs.backend-image-id }}
+          FRONTEND_IMAGE_ID: ${{ needs.stage.outputs.frontend-image-id }}
+          REVERSE_ATTEMPT_IMAGE_ID: ${{ needs.stage.outputs.reverse-attempt-image-id }}
+        run: |
+          set -euo pipefail
+          for domain in container frontend; do
+            uv run python -m scripts.container.ci_images load \
+              --domain "$domain" --archive-directory "$RUNNER_TEMP/release-images" \
+              --backend-image-id "$BACKEND_IMAGE_ID" \
+              --frontend-image-id "$FRONTEND_IMAGE_ID" \
+              --reverse-attempt-image-id "$REVERSE_ATTEMPT_IMAGE_ID"
+          done
+      - name: Generate and verify release SBOM evidence for all three images
+        run: |
+          set -euo pipefail
+          bash scripts/container/supply-chain.sh \
+            localhost/md-converter:ci artifacts/container/backend release
+          bash scripts/container/supply-chain.sh \
+            localhost/md-converter-web:ci artifacts/container/frontend release
+          bash scripts/container/supply-chain.sh \
+            localhost/md-converter-reverse-attempt:ci artifacts/container/reverse_attempt release reverse-attempt
+      - name: Retain staged pair before registry mutation
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: container-stage-${{ inputs.tag }}
+          path: |
+            artifacts/container/backend/
+            artifacts/container/frontend/
+            artifacts/container/reverse_attempt/
+          if-no-files-found: error
+          retention-days: 90
+
+  e2e:
+    name: e2e (${{ matrix.domain }})
+    needs: stage
+    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.ref == 'refs/heads/main' && github.event_name == 'push' && github.sha == inputs.source-sha }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        domain:
+          - e2e-standalone-1
+          - e2e-standalone-2
+          - e2e-distributed-1
+          - e2e-distributed-2
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source-sha }}
+          persist-credentials: false
+      - name: Set up Python 3.14
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+          check-latest: false
+      - name: Set up uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.12.1"
+          enable-cache: false
+      - name: Set up pinned Node for rootless E2E
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.19.0
+          check-latest: false
+      - name: Bootstrap verified Corepack and pnpm
+        run: |
+          set -euo pipefail
+          scripts/javascript/bootstrap-pnpm.sh "$RUNNER_TEMP/markweave-js-tools"
+          echo "$RUNNER_TEMP/markweave-js-tools/bin" >> "$GITHUB_PATH"
+          echo "COREPACK_HOME=$RUNNER_TEMP/markweave-js-tools/corepack-home" >> "$GITHUB_ENV"
+          echo "COREPACK_ENABLE_NETWORK=0" >> "$GITHUB_ENV"
+      - name: Synchronize locked dependencies
+        run: uv sync --locked --all-groups
+      - name: Verify preinstalled rootless Podman for E2E
+        run: |
+          set -euo pipefail
+          podman_version="$(podman version --format '{{.Client.Version}}')"
+          [[ "$podman_version" =~ ^([0-9]+)\.[0-9]+\.[0-9]+ ]]
+          (( BASH_REMATCH[1] >= 4 ))
+          echo "Using preinstalled Podman $podman_version"
+          podman info --format '{{.Host.Security.Rootless}}' | grep -Fx true
+      - name: Download the backend archive
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-image-backend-${{ github.run_id }}-${{ needs.stage.outputs.archive-attempt }}
+          path: ${{ runner.temp }}/release-images
+      - name: Download the frontend archive
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-image-frontend-${{ github.run_id }}-${{ needs.stage.outputs.archive-attempt }}
+          path: ${{ runner.temp }}/release-images
+      - name: Download the reverse-attempt archive
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-image-reverse-attempt-${{ github.run_id }}-${{ needs.stage.outputs.archive-attempt }}
+          path: ${{ runner.temp }}/release-images
+      - name: Load the verified three-image set
+        env:
+          BACKEND_IMAGE_ID: ${{ needs.stage.outputs.backend-image-id }}
+          E2E_DOMAIN: ${{ matrix.domain }}
+          FRONTEND_IMAGE_ID: ${{ needs.stage.outputs.frontend-image-id }}
+          REVERSE_ATTEMPT_IMAGE_ID: ${{ needs.stage.outputs.reverse-attempt-image-id }}
+        run: >-
+          uv run python -m scripts.container.ci_images load
+          --domain "$E2E_DOMAIN" --archive-directory "$RUNNER_TEMP/release-images"
+          --backend-image-id "$BACKEND_IMAGE_ID"
+          --frontend-image-id "$FRONTEND_IMAGE_ID"
+          --reverse-attempt-image-id "$REVERSE_ATTEMPT_IMAGE_ID"
+      - name: Test the exact staged images in one E2E shard
+        env:
+          E2E_DOMAIN: ${{ matrix.domain }}
+        run: uv run python -m scripts.ci.run_domain "$E2E_DOMAIN"
+      - name: Retain failed E2E evidence
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-e2e-failure-${{ matrix.domain }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/e2e/${{ startsWith(matrix.domain, 'e2e-standalone-') && 'standalone' || 'distributed' }}
+          if-no-files-found: error
+          retention-days: 30

@@ -126,8 +126,17 @@ jobs:
             dist/*.tar.gz
           if-no-files-found: error
 
+  container-qualify:
+    needs: detect
+    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.detect.outputs.changed == 'true' }}
+    uses: ./.github/workflows/container-qualify.yml
+    with:
+      version: ${{ needs.detect.outputs.version }}
+      tag: ${{ needs.detect.outputs.tag }}
+      source-sha: ${{ needs.detect.outputs.source-sha }}
+
   create-release:
-    needs: [detect, build-and-verify]
+    needs: [detect, build-and-verify, container-qualify]
     if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.detect.outputs.changed == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -165,7 +174,7 @@ jobs:
             = "$RELEASE_TAG"$'\t'"$SOURCE_SHA"$'\tfalse\tfalse'
 
   publish:
-    needs: [detect, build-and-verify, create-release]
+    needs: [detect, build-and-verify, container-qualify, create-release]
     if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.detect.outputs.changed == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -193,7 +202,7 @@ jobs:
           attestations: true
 
   container:
-    needs: [detect, create-release]
+    needs: [detect, container-qualify, create-release]
     if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.detect.outputs.changed == 'true' }}
     permissions:
       actions: read

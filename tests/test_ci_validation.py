@@ -17,6 +17,7 @@ from scripts.ci.validate_ci import (
     discover_workflow_paths,
     main,
     validate_container_publish_pair_text,
+    validate_container_qualify_workflow_text,
     validate_container_release_workflow_text,
     validate_final_image_registry,
     validate_production_release_workflow_text,
@@ -834,6 +835,7 @@ def test_all_committed_workflows_have_explicit_policies() -> None:
     workflows = discover_workflow_paths(Path(".github/workflows"))
     assert [path.name for path in workflows] == [
         "ci.yml",
+        "container-qualify.yml",
         "container-release.yml",
         "mutation.yml",
         "release.yml",
@@ -849,30 +851,207 @@ def test_container_release_workflow_satisfies_exact_policy() -> None:
     assert validate_container_release_workflow_text(workflow) == []
 
 
+def _container_qualify_workflow() -> str:
+    return Path(".github/workflows/container-qualify.yml").read_text(encoding="utf-8")
+
+
 @pytest.mark.unit
-def test_container_release_policy_requires_recovery_final_image_smoke() -> None:
-    workflow = Path(".github/workflows/container-release.yml").read_text(
-        encoding="utf-8"
-    )
-    weakened = workflow.replace(
+def test_container_qualify_workflow_satisfies_exact_policy() -> None:
+    assert validate_container_qualify_workflow_text(_container_qualify_workflow()) == []
+
+
+@pytest.mark.unit
+def test_container_qualification_requires_recovery_final_image_smoke() -> None:
+    weakened = _container_qualify_workflow().replace(
         '          bash scripts/container/recovery-cli-smoke.sh "$backend_image"\n',
         "",
         1,
     )
-    errors = validate_container_release_workflow_text(weakened)
+    errors = validate_container_qualify_workflow_text(weakened)
     assert any("recovery-cli-smoke.sh" in error for error in errors)
 
 
 @pytest.mark.unit
-def test_container_release_policy_requires_oci_frontend_build() -> None:
+@pytest.mark.parametrize(
+    ("needle", "replacement", "message"),
+    [
+        (
+            """--roles '["backend", "frontend", "reverse-attempt"]'""",
+            """--roles '["backend", "frontend"]'""",
+            "container qualification stage is missing: "
+            """--roles '["backend", "frontend", "reverse-attempt"]'""",
+        ),
+        (
+            "          export SOURCE_DATE_EPOCH\n",
+            "",
+            "container qualification stage is missing: export SOURCE_DATE_EPOCH",
+        ),
+        (
+            "          - e2e-distributed-2\n",
+            "",
+            "container qualification must run every E2E shard of both profiles",
+        ),
+        (
+            "      fail-fast: false\n",
+            "      fail-fast: true\n",
+            "container qualification must run every E2E shard of both profiles",
+        ),
+        (
+            "  supply-chain:\n    needs: stage\n",
+            "  supply-chain:\n    needs: smoke\n",
+            "container qualification job 'supply-chain' must consume the single stage",
+        ),
+        (
+            "  smoke:\n    needs: stage\n    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.ref == 'refs/heads/main' && github.event_name == 'push' && github.sha == inputs.source-sha }}\n    runs-on: ubuntu-24.04\n    timeout-minutes: 30\n    permissions:\n      contents: read\n",
+            "  smoke:\n    needs: stage\n    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.ref == 'refs/heads/main' && github.event_name == 'push' && github.sha == inputs.source-sha }}\n    runs-on: ubuntu-24.04\n    timeout-minutes: 30\n    permissions:\n      contents: read\n      packages: write\n",
+            "container qualification must not hold publication credentials",
+        ),
+        (
+            'uv run python -m scripts.ci.run_domain "$E2E_DOMAIN"',
+            "bash scripts/e2e/run.sh standalone",
+            "container qualification E2E must run the registered shard",
+        ),
+        (
+            "          name: container-stage-${{ inputs.tag }}\n",
+            "          name: container-stage-candidate\n",
+            "container qualification must retain the exact staged set",
+        ),
+    ],
+)
+def test_container_qualification_policy_rejects_weakening(
+    needle: str, replacement: str, message: str
+) -> None:
+    workflow = _container_qualify_workflow()
+    assert needle in workflow
+    weakened = workflow.replace(needle, replacement, 1)
+    errors = validate_container_qualify_workflow_text(weakened)
+    assert "container qualification workflow differs from the reviewed policy" in (
+        errors
+    )
+    assert message in errors
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("needle", "replacement", "message"),
+    [
+        (
+            "        type: string\n\npermissions:",
+            "        type: string\n  workflow_dispatch:\n\npermissions:",
+            "container qualification must be an exact reusable workflow",
+        ),
+        (
+            "permissions:\n  contents: read\n\njobs:",
+            "permissions:\n  contents: write\n\njobs:",
+            "container qualification permissions must default to contents: read",
+        ),
+        (
+            "permissions:\n  contents: read\n\njobs:",
+            "permissions:\n  contents: read\n\nenv:\n  EXTRA: value\n\njobs:",
+            "container qualification fields do not match the allowlist",
+        ),
+        (
+            "  smoke:\n    needs: stage\n",
+            "  smoke-tests:\n    needs: stage\n",
+            "container qualification jobs do not match the exact contract",
+        ),
+        (
+            "    timeout-minutes: 30\n    permissions:\n      contents: read\n    outputs:",
+            "    timeout-minutes: 120\n    permissions:\n      contents: read\n    outputs:",
+            "container qualification job 'stage' lacks the reviewed timeout",
+        ),
+        (
+            "  e2e:\n    name: e2e (${{ matrix.domain }})\n    needs: stage\n    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && ",
+            "  e2e:\n    name: e2e (${{ matrix.domain }})\n    needs: stage\n    if: ${{ ",
+            "container qualification job 'e2e' lacks the trusted-main guard",
+        ),
+        (
+            '          bash scripts/container/smoke.sh "$backend_image"\n',
+            '          bash scripts/container/smoke.sh "$backend_image"\n'
+            "          skopeo inspect containers-storage:localhost/md-converter:ci\n",
+            "container qualification must not use skopeo",
+        ),
+    ],
+)
+def test_container_qualification_policy_rejects_shape_and_credential_changes(
+    needle: str, replacement: str, message: str
+) -> None:
+    workflow = _container_qualify_workflow()
+    assert needle in workflow
+    errors = validate_container_qualify_workflow_text(
+        workflow.replace(needle, replacement, 1)
+    )
+    assert message in errors
+
+
+@pytest.mark.unit
+def test_container_qualification_rejects_an_unparsable_workflow() -> None:
+    assert validate_container_qualify_workflow_text("jobs: [") != []
+
+
+@pytest.mark.unit
+def test_container_qualification_loads_images_only_by_verified_id() -> None:
+    workflow = _container_qualify_workflow()
+    rebuilt = workflow.replace(
+        "uv run python -m scripts.container.ci_images load \\\n",
+        "uv run python -m scripts.container.ci_images build \\\n",
+    )
+    assert rebuilt != workflow
+    errors = validate_container_qualify_workflow_text(rebuilt)
+    assert "container qualification job 'smoke' must not rebuild" in errors
+    assert "container qualification job 'supply-chain' must not rebuild" in errors
+
+
+@pytest.mark.unit
+def test_container_publication_downloads_the_qualified_set_without_rebuilding() -> None:
     workflow = Path(".github/workflows/container-release.yml").read_text(
         encoding="utf-8"
     )
-    weakened = workflow.replace("podman build --format oci", "podman build")
+    rebuilt = workflow.replace(
+        "          bash scripts/container/publish-release-pair.sh \\\n"
+        '            artifacts/container "$RELEASE_VERSION" "$SOURCE_SHA"\n',
+        '          bash scripts/container/build.sh "localhost/md-converter:x"\n'
+        "          bash scripts/container/publish-release-pair.sh \\\n"
+        '            artifacts/container "$RELEASE_VERSION" "$SOURCE_SHA"\n',
+        1,
+    )
+    assert rebuilt != workflow
+    errors = validate_container_release_workflow_text(rebuilt)
+    assert (
+        "container publication must not build or requalify images: "
+        "scripts/container/build"
+    ) in errors
+    undownloaded = workflow.replace(
+        "          name: container-stage-${{ inputs.tag }}\n"
+        "          path: artifacts/container\n",
+        "          name: container-stage-${{ inputs.tag }}\n"
+        "          path: elsewhere\n",
+        1,
+    )
+    assert undownloaded != workflow
+    errors = validate_container_release_workflow_text(undownloaded)
+    assert (
+        "container publication must download the qualified staged set before push"
+        in errors
+    )
 
-    errors = validate_container_release_workflow_text(weakened)
 
-    assert any("podman build --format oci" in error for error in errors)
+@pytest.mark.unit
+def test_container_recovery_requires_every_qualification_job_to_pass() -> None:
+    workflow = Path(".github/workflows/container-release.yml").read_text(
+        encoding="utf-8"
+    )
+    line = next(
+        line
+        for line in workflow.splitlines(keepends=True)
+        if '.conclusion != "success")] | length' in line
+    )
+    errors = validate_container_release_workflow_text(workflow.replace(line, "", 1))
+    assert any(
+        error.startswith("container release is missing dynamic contract: ")
+        and '.conclusion != "success"' in error
+        for error in errors
+    )
 
 
 @pytest.mark.unit
@@ -890,7 +1069,7 @@ def test_container_release_recovery_is_bound_to_existing_release_identity() -> N
 
 
 @pytest.mark.unit
-def test_container_release_recovery_cannot_enter_the_build_job() -> None:
+def test_container_release_recovery_cannot_enter_the_publish_job() -> None:
     workflow = Path(".github/workflows/container-release.yml").read_text(
         encoding="utf-8"
     )
@@ -900,7 +1079,7 @@ def test_container_release_recovery_cannot_enter_the_build_job() -> None:
         1,
     )
     errors = validate_container_release_workflow_text(weakened)
-    assert "manual container recovery must not enter the build job" in errors
+    assert "manual container recovery must not enter the publish job" in errors
 
 
 @pytest.mark.unit
@@ -1003,11 +1182,11 @@ def test_container_recovery_routes_exact_digest_to_existing_jobs() -> None:
         encoding="utf-8"
     )
     assert (
-        "subject-digest: ${{ needs.build-and-publish.outputs.backend-digest || needs.recover-evidence.outputs.backend-digest }}"
+        "subject-digest: ${{ needs.publish.outputs.backend-digest || needs.recover-evidence.outputs.backend-digest }}"
         in workflow
     )
     assert (
-        "subject-digest: ${{ needs.build-and-publish.outputs.frontend-digest || needs.recover-evidence.outputs.frontend-digest }}"
+        "subject-digest: ${{ needs.publish.outputs.frontend-digest || needs.recover-evidence.outputs.frontend-digest }}"
         in workflow
     )
     assert "needs.recover-evidence.result == 'success'" in workflow
@@ -1080,6 +1259,62 @@ def test_container_release_policy_rejects_unreviewed_mutation() -> None:
 def test_automatic_release_workflow_satisfies_exact_policy() -> None:
     workflow = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
     assert validate_production_release_workflow_text(workflow) == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("needle", "replacement", "message"),
+    [
+        (
+            "needs: [detect, build-and-verify, container-qualify]",
+            "needs: [detect, build-and-verify]",
+            "automatic release job 'create-release' must wait for container qualification",
+        ),
+        (
+            "needs: [detect, build-and-verify, container-qualify]",
+            "needs: [detect, container-qualify]",
+            "automatic release must verify Python artifacts before tagging",
+        ),
+        (
+            "needs: [detect, build-and-verify, container-qualify, create-release]",
+            "needs: [detect, build-and-verify, create-release]",
+            "automatic release job 'publish' must wait for container qualification",
+        ),
+        (
+            "needs: [detect, build-and-verify, container-qualify, create-release]",
+            "needs: [detect, build-and-verify, container-qualify]",
+            "automatic release job 'publish' must follow the Release",
+        ),
+        (
+            "needs: [detect, container-qualify, create-release]",
+            "needs: [detect, create-release]",
+            "automatic release job 'container' must wait for container qualification",
+        ),
+        (
+            "uses: ./.github/workflows/container-qualify.yml",
+            "uses: ./.github/workflows/container-release.yml",
+            "container qualification must call the reviewed reusable workflow",
+        ),
+        (
+            "  create-release:\n    needs: [detect, build-and-verify, container-qualify]\n    if: ${{ ",
+            "  create-release:\n    needs: [detect, build-and-verify, container-qualify]\n    if: ${{ always() && ",
+            "automatic release job 'create-release' must not run after a failed dependency",
+        ),
+        (
+            "  publish:\n    needs: [detect, build-and-verify, container-qualify, create-release]\n    if: ${{ ",
+            "  publish:\n    needs: [detect, build-and-verify, container-qualify, create-release]\n    if: ${{ !cancelled() && ",
+            "automatic release job 'publish' must not run after a failed dependency",
+        ),
+    ],
+)
+def test_automatic_release_qualifies_images_before_any_irreversible_mutation(
+    needle: str, replacement: str, message: str
+) -> None:
+    workflow = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+    assert needle in workflow
+    weakened = workflow.replace(needle, replacement, 1)
+    errors = validate_production_release_workflow_text(weakened)
+    assert message in errors
 
 
 @pytest.mark.unit

@@ -289,7 +289,7 @@ archive fails closed.
 `scripts/e2e/run.sh` groups its scenarios into phases and assigns every phase to one shard.
 `MARKWEAVE_E2E_SHARD=<n>` runs one shard on a fresh deployment, re-seeding through `e2e_seed_*`
 functions the state a phase of another shard would otherwise produce. Unset or `all` runs every
-shard in order on one deployment, as releases do. The CI validator runs
+shard in order on one deployment. CI and releases run each shard as a separate job. The CI validator runs
 `scripts/ci/e2e_shards.py`, which fails when a scenario is outside every phase, reachable from more
 than one shard, or hidden in a seed; `uv run python -m scripts.ci.e2e_shards` prints the shard map.
 

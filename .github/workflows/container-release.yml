@@ -35,10 +35,10 @@ permissions:
   contents: read
 
 jobs:
-  build-and-publish:
+  publish:
     if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.ref == 'refs/heads/main' && github.event_name == 'push' && github.sha == inputs.source-sha }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
@@ -62,18 +62,6 @@ jobs:
         with:
           version: "0.12.1"
           enable-cache: false
-      - name: Set up pinned Node for the frontend image
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24.19.0
-          check-latest: false
-      - name: Bootstrap verified Corepack and pnpm
-        run: |
-          set -euo pipefail
-          scripts/javascript/bootstrap-pnpm.sh "$RUNNER_TEMP/markweave-js-tools"
-          echo "$RUNNER_TEMP/markweave-js-tools/bin" >> "$GITHUB_PATH"
-          echo "COREPACK_HOME=$RUNNER_TEMP/markweave-js-tools/corepack-home" >> "$GITHUB_ENV"
-          echo "COREPACK_ENABLE_NETWORK=0" >> "$GITHUB_ENV"
       - name: Validate the reviewed release identity
         env:
           GH_TOKEN: ${{ github.token }}
@@ -100,62 +88,11 @@ jobs:
           sudo apt-get install --yes podman skopeo
           podman info --format '{{.Host.Security.Rootless}}' | grep -Fx true
           skopeo --version
-      - name: Pull and verify the pinned base image
-        run: |
-          set -euo pipefail
-          base=registry.access.redhat.com/ubi9/python-314@sha256:194df4e35e0e5467e1b57266f4d61f821e1b1f567135f074d23066d3604ae653
-          podman pull --quiet "$base"
-          test "$(podman image inspect "$base" --format '{{.Digest}}')" = sha256:194df4e35e0e5467e1b57266f4d61f821e1b1f567135f074d23066d3604ae653
-      - name: Build and validate the final rootless image pair once
-        env:
-          RELEASE_VERSION: ${{ inputs.version }}
-        run: |
-          set -euo pipefail
-          backend_image="localhost/md-converter:$RELEASE_VERSION"
-          frontend_image="localhost/md-converter-web:$RELEASE_VERSION"
-          reverse_attempt_image="localhost/md-converter-reverse-attempt:$RELEASE_VERSION"
-          source_date_epoch="$(git show -s --format=%ct HEAD)"
-          SOURCE_DATE_EPOCH="$source_date_epoch" bash scripts/container/build.sh "$backend_image"
-          podman build --format oci --timestamp "$source_date_epoch" \
-            --tag "$frontend_image" --file web/Containerfile .
-          SOURCE_DATE_EPOCH="$source_date_epoch" bash scripts/container/build-reverse-attempt.sh "$reverse_attempt_image"
-          bash scripts/container/smoke-reverse-attempt.sh "$reverse_attempt_image"
-          bash scripts/container/smoke.sh "$backend_image"
-          bash scripts/container/api-smoke.sh "$backend_image"
-          bash scripts/container/distributed-api-smoke.sh "$backend_image"
-          bash scripts/container/recovery-cli-smoke.sh "$backend_image"
-          bash web/scripts/run-rootless-smoke.sh "$frontend_image" --existing
-      - name: Generate and verify release SBOM evidence for all three images
-        env:
-          RELEASE_VERSION: ${{ inputs.version }}
-        run: |
-          set -euo pipefail
-          bash scripts/container/supply-chain.sh \
-            "localhost/md-converter:$RELEASE_VERSION" artifacts/container/backend release
-          bash scripts/container/supply-chain.sh \
-            "localhost/md-converter-web:$RELEASE_VERSION" artifacts/container/frontend release
-          bash scripts/container/supply-chain.sh \
-            "localhost/md-converter-reverse-attempt:$RELEASE_VERSION" artifacts/container/reverse_attempt release reverse-attempt
-      - name: Test the exact staged image pair in both storage profiles
-        env:
-          RELEASE_VERSION: ${{ inputs.version }}
-        run: |
-          set -euo pipefail
-          export MARKWEAVE_E2E_LOCAL_IMAGE="localhost/md-converter:$RELEASE_VERSION"
-          export MARKWEAVE_E2E_LOCAL_FRONTEND_IMAGE="localhost/md-converter-web:$RELEASE_VERSION"
-          export MARKWEAVE_E2E_LOCAL_REVERSE_ATTEMPT_IMAGE="localhost/md-converter-reverse-attempt:$RELEASE_VERSION"
-          bash scripts/e2e/run.sh standalone
-          bash scripts/e2e/run.sh distributed
-      - name: Retain staged pair before registry mutation
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - name: Download the qualified staged image set
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: container-stage-${{ inputs.tag }}
-          path: |
-            artifacts/container/backend/
-            artifacts/container/frontend/
-            artifacts/container/reverse_attempt/
-          if-no-files-found: error
-          retention-days: 90
+          path: artifacts/container
       - name: Log in to GHCR
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
@@ -258,7 +195,9 @@ jobs:
           git merge-base --is-ancestor "$run_sha" "$GITHUB_SHA"
 
           jobs_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID/jobs")"
-          test "$(jq '[.jobs[] | select((.name == "build-and-publish" or (.name | endswith(" / build-and-publish"))) and .status == "completed" and ([.steps[] | select(.name == "Retain staged pair before registry mutation" and .status == "completed" and .conclusion == "success")] | length) == 1)] | length' <<< "$jobs_json")" = 1
+          test "$(jq '[.jobs[] | select(.name == "container-qualify / supply-chain" and .status == "completed" and ([.steps[] | select(.name == "Retain staged pair before registry mutation" and .status == "completed" and .conclusion == "success")] | length) == 1)] | length' <<< "$jobs_json")" = 1
+          test "$(jq '[.jobs[] | select((.name | startswith("container-qualify / ")) and .conclusion == "success")] | length' <<< "$jobs_json")" = 7
+          test "$(jq '[.jobs[] | select((.name | startswith("container-qualify / ")) and .conclusion != "success")] | length' <<< "$jobs_json")" = 0
           artifact_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID/artifacts" \
             | jq --exit-status --arg name "container-stage-$RELEASE_TAG" \
               '[.artifacts[] | select(.name == $name)] | if length == 1 then .[0] else error("expected one exact staged-pair artifact") end')"
@@ -343,8 +282,8 @@ jobs:
           retention-days: 90
 
   attest:
-    needs: [build-and-publish, recover-evidence]
-    if: ${{ always() && github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.ref == 'refs/heads/main' && ((github.event_name == 'push' && github.sha == inputs.source-sha && needs.build-and-publish.result == 'success') || (github.event_name == 'workflow_dispatch' && needs.recover-evidence.result == 'success')) }}
+    needs: [publish, recover-evidence]
+    if: ${{ always() && github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.ref == 'refs/heads/main' && ((github.event_name == 'push' && github.sha == inputs.source-sha && needs.publish.result == 'success') || (github.event_name == 'workflow_dispatch' && needs.recover-evidence.result == 'success')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -363,26 +302,26 @@ jobs:
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ghcr.io/guillaume-lombardo/md-converter
-          subject-digest: ${{ needs.build-and-publish.outputs.backend-digest || needs.recover-evidence.outputs.backend-digest }}
+          subject-digest: ${{ needs.publish.outputs.backend-digest || needs.recover-evidence.outputs.backend-digest }}
           push-to-registry: true
       - name: Attest the published frontend image identity
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ghcr.io/guillaume-lombardo/md-converter-web
-          subject-digest: ${{ needs.build-and-publish.outputs.frontend-digest || needs.recover-evidence.outputs.frontend-digest }}
+          subject-digest: ${{ needs.publish.outputs.frontend-digest || needs.recover-evidence.outputs.frontend-digest }}
           push-to-registry: true
 
       - name: Attest the published reverse-attempt image identity
-        if: ${{ needs.build-and-publish.outputs.reverse-attempt-digest != '' || needs.recover-evidence.outputs.reverse-attempt-digest != '' }}
+        if: ${{ needs.publish.outputs.reverse-attempt-digest != '' || needs.recover-evidence.outputs.reverse-attempt-digest != '' }}
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ghcr.io/guillaume-lombardo/md-converter-reverse-attempt
-          subject-digest: ${{ needs.build-and-publish.outputs.reverse-attempt-digest || needs.recover-evidence.outputs.reverse-attempt-digest }}
+          subject-digest: ${{ needs.publish.outputs.reverse-attempt-digest || needs.recover-evidence.outputs.reverse-attempt-digest }}
           push-to-registry: true
 
   release-evidence:
-    needs: [build-and-publish, recover-evidence, attest]
-    if: ${{ always() && github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.ref == 'refs/heads/main' && needs.attest.result == 'success' && ((github.event_name == 'push' && github.sha == inputs.source-sha && needs.build-and-publish.result == 'success') || (github.event_name == 'workflow_dispatch' && needs.recover-evidence.result == 'success')) }}
+    needs: [publish, recover-evidence, attest]
+    if: ${{ always() && github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.ref == 'refs/heads/main' && needs.attest.result == 'success' && ((github.event_name == 'push' && github.sha == inputs.source-sha && needs.publish.result == 'success') || (github.event_name == 'workflow_dispatch' && needs.recover-evidence.result == 'success')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -398,7 +337,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
           SOURCE_SHA: ${{ inputs.source-sha }}
-          REVERSE_ATTEMPT_DIGEST: ${{ needs.build-and-publish.outputs.reverse-attempt-digest || needs.recover-evidence.outputs.reverse-attempt-digest }}
+          REVERSE_ATTEMPT_DIGEST: ${{ needs.publish.outputs.reverse-attempt-digest || needs.recover-evidence.outputs.reverse-attempt-digest }}
         run: |
           set -euo pipefail
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha)" = "$SOURCE_SHA"

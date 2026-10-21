@@ -273,30 +273,44 @@ def test_release_retains_and_attests_the_matched_three_image_set() -> None:
         (ROOT / ".github/workflows/container-release.yml").read_text()
     )
     jobs = workflow["jobs"]
-    build = jobs["build-and-publish"]["steps"]
-    runs = "\n".join(step.get("run", "") for step in build)
-    assert runs.count('build-reverse-attempt.sh "$reverse_attempt_image"') == 1
-    assert runs.count('smoke-reverse-attempt.sh "$reverse_attempt_image"') == 1
+    qualification = yaml.safe_load(
+        (ROOT / ".github/workflows/container-qualify.yml").read_text()
+    )["jobs"]
+    build = "\n".join(step.get("run", "") for step in qualification["stage"]["steps"])
+    assert """--roles '["backend", "frontend", "reverse-attempt"]'""" in build
+    smoke = "\n".join(step.get("run", "") for step in qualification["smoke"]["steps"])
+    assert smoke.count('smoke-reverse-attempt.sh "$reverse_attempt_image"') == 1
+    evidence = qualification["supply-chain"]["steps"]
+    runs = "\n".join(step.get("run", "") for step in evidence)
     assert "artifacts/container/reverse_attempt release reverse-attempt" in runs
-    assert (
-        'MARKWEAVE_E2E_LOCAL_REVERSE_ATTEMPT_IMAGE="localhost/md-converter-reverse-attempt:$RELEASE_VERSION"'
-        in runs
-    )
+    assert qualification["e2e"]["strategy"]["matrix"]["domain"] == [
+        "e2e-standalone-1",
+        "e2e-standalone-2",
+        "e2e-distributed-1",
+        "e2e-distributed-2",
+    ]
     retained = next(
-        index
-        for index, step in enumerate(build)
+        step
+        for step in evidence
         if step["name"] == "Retain staged pair before registry mutation"
     )
-    published = next(
-        index for index, step in enumerate(build) if step.get("id") == "push"
-    )
-    assert retained < published
-    assert build[retained]["with"]["path"].splitlines() == [
+    assert retained["with"]["path"].splitlines() == [
         "artifacts/container/backend/",
         "artifacts/container/frontend/",
         "artifacts/container/reverse_attempt/",
     ]
-    for job in ("build-and-publish", "recover-evidence"):
+    publish = jobs["publish"]["steps"]
+    downloaded = next(
+        index
+        for index, step in enumerate(publish)
+        if step["name"] == "Download the qualified staged image set"
+    )
+    published = next(
+        index for index, step in enumerate(publish) if step.get("id") == "push"
+    )
+    assert downloaded < published
+    assert publish[downloaded]["with"]["name"] == retained["with"]["name"]
+    for job in ("publish", "recover-evidence"):
         assert (
             jobs[job]["outputs"]["reverse-attempt-digest"]
             == "${{ steps.push.outputs.reverse-attempt-digest }}"
@@ -329,12 +343,12 @@ def test_recovery_attaches_only_the_source_selected_image_roles(
     )
     assert (
         reverse_attestation["if"]
-        == "${{ needs.build-and-publish.outputs.reverse-attempt-digest != '' || needs.recover-evidence.outputs.reverse-attempt-digest != '' }}"
+        == "${{ needs.publish.outputs.reverse-attempt-digest != '' || needs.recover-evidence.outputs.reverse-attempt-digest != '' }}"
     )
     step = jobs["release-evidence"]["steps"][-1]
     assert (
         step["env"]["REVERSE_ATTEMPT_DIGEST"]
-        == "${{ needs.build-and-publish.outputs.reverse-attempt-digest || needs.recover-evidence.outputs.reverse-attempt-digest }}"
+        == "${{ needs.publish.outputs.reverse-attempt-digest || needs.recover-evidence.outputs.reverse-attempt-digest }}"
     )
     roles = ["backend", "frontend"] + ([] if legacy else ["reverse_attempt"])
     expected = []

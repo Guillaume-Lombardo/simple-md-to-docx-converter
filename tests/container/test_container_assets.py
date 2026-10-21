@@ -266,20 +266,25 @@ def test_recovery_smoke_is_a_required_ci_and_release_final_image_gate() -> None:
     release_command = 'bash scripts/container/recovery-cli-smoke.sh "$backend_image"'
     run_ci = Path("scripts/container/run-ci.sh").read_text(encoding="utf-8")
     release = yaml.safe_load(
-        Path(".github/workflows/container-release.yml").read_text(encoding="utf-8")
+        Path(".github/workflows/container-qualify.yml").read_text(encoding="utf-8")
     )
-    release_run = next(
-        step["run"]
-        for step in release["jobs"]["build-and-publish"]["steps"]
-        if step["name"] == "Build and validate the final rootless image pair once"
+    smoke_steps = release["jobs"]["smoke"]["steps"]
+    load = next(
+        index
+        for index, step in enumerate(smoke_steps)
+        if step["name"] == "Load the verified three-image set"
+    )
+    smoke = next(
+        index
+        for index, step in enumerate(smoke_steps)
+        if step["name"] == "Smoke-test the exact staged images"
     )
 
     assert run_ci.count(ci_command) == 1
     assert run_ci.index('podman image exists "$final_image"') < run_ci.index(ci_command)
-    assert release_run.count(release_command) == 1
-    assert release_run.index(
-        'bash scripts/container/build.sh "$backend_image"'
-    ) < release_run.index(release_command)
+    assert smoke_steps[smoke]["run"].count(release_command) == 1
+    assert release["jobs"]["smoke"]["needs"] == "stage"
+    assert load < smoke
 
 
 def test_recovery_smoke_uses_private_volume_and_real_rollback() -> None:
@@ -1028,7 +1033,7 @@ def test_an_accepted_scan_publishes_a_verifiable_bundle(tmp_path: Path) -> None:
 
 
 def test_every_frontend_image_build_command_requests_oci_format() -> None:
-    release = Path(".github/workflows/container-release.yml").read_text(
+    release = Path(".github/workflows/container-qualify.yml").read_text(
         encoding="utf-8"
     )
     helper = Path("scripts/container/build-frontend.sh").read_text(encoding="utf-8")
@@ -1043,7 +1048,7 @@ def test_every_frontend_image_build_command_requests_oci_format() -> None:
         "1700000000",
     ]
 
-    assert "podman build --format oci" in release
+    assert "uv run python -m scripts.container.ci_images build" in release
     assert "build_options=(--pull=never --format oci)" in helper
     assert 'podman build "${build_options[@]}"' in helper
     for source in (release, helper, *callers):

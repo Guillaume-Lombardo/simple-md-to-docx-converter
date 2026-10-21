@@ -2,7 +2,7 @@
 ticket: T134
 linear_id: G1L-687
 linear_url: https://linear.app/g1lom/issue/G1L-687/t134-qualify-release-images-before-irreversible-python-publication
-status: Backlog
+status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -52,6 +52,45 @@ Every release job must finish well under 20 minutes, and only the publishing job
 ## Progress
 
 - 2026-10-12: Created from the T133 partial 0.7.4 release and extended with lot 3 of the CI speed plan.
+- 2026-10-21: Started on branch `chore/T134-qualify-release-before-publication` from `origin/main`
+  `95bc188`.
+- 2026-10-21: Implemented.
+  - **New read-only reusable workflow `container-qualify.yml`.** `stage` builds the backend,
+    frontend and reverse-attempt images once through `scripts.container.ci_images build`, with the
+    reviewed commit timestamp exported as `SOURCE_DATE_EPOCH` (the same release build semantics),
+    and transfers each OCI archive within the run. `smoke`, `supply-chain` and a four-job `e2e`
+    matrix (both shards of both profiles) load the archives only after `ci_images load` proves the
+    archive, loaded and tagged image IDs equal the stage output. `smoke` keeps the release smoke
+    list unchanged; `supply-chain` keeps the three `supply-chain.sh ... release` gates and retains
+    `container-stage-v<version>` ("Retain staged pair before registry mutation", 90 days). Every
+    job is `contents: read` with a 30-minute bound; none holds a registry or OIDC credential.
+  - **`release.yml`.** `container-qualify` runs in parallel with the Python build.
+    `create-release` needs `build-and-verify` and `container-qualify`; `publish` (PyPI) and
+    `container` also need `container-qualify`. A qualification failure therefore leaves no tag,
+    Release, PyPI version or GHCR tag. The `pypi` environment and `release.yml` publisher identity
+    are unchanged.
+  - **`container-release.yml`.** `build-and-publish` becomes `publish`: it verifies the Release
+    identity, downloads the qualified staged set from the same run and publishes it with the
+    unchanged `publish-release-pair.sh`; it no longer builds, smokes, scans or runs E2E. Recovery
+    now requires the `container-qualify / supply-chain` staging step and every
+    `container-qualify` job of the source run to have succeeded. `attest` and `release-evidence`
+    keep their behaviour; as before, `attest` and `recover-evidence` also hold `packages: write`.
+  - **Validator.** `scripts/ci/validate_ci.py` gains `validate_container_qualify_workflow_text`
+    (canonical digest, exact jobs and permissions, trusted-main guards, bounded timeouts, single
+    stage consumed by every job, verified-ID loads, all E2E domains, smoke and evidence commands,
+    staged retention, no credentials or caches) and `_validate_staged_publication` (publication
+    downloads the staged set before push and never builds or requalifies). The production policy
+    requires `create-release`, `publish` and `container` to need `container-qualify` without a
+    status function that would run them after a failed dependency.
+  - **Docs.** `docs/releasing.md` (steps 5 to 7 and recovery), section 11 of the product
+    specification, `docs/local-development.md` and the `run.sh` shard comment.
+- 2026-10-21: Local verification. `uv run python -m scripts.ci.validate_ci` passes; actionlint
+  1.7.12 reports nothing on the four workflows; `tests/test_ci_validation.py`, the container and
+  release tests (749) pass; the `unit or light_coverage` selection has only the 7 sandbox
+  failures that also fail on unmodified `main` in this container. The new validator code is fully
+  covered by mutation tests. Not verifiable locally: a hosted release run (it requires a version
+  transition on `main`); the first release after merge is the end-to-end evidence, and its job
+  durations must be recorded against the 20-minute target.
 
 ## Synchronization
 
