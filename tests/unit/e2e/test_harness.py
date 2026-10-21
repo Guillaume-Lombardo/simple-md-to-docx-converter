@@ -1578,6 +1578,25 @@ def test_reverse_fault_window_starts_after_the_worker_broker_path_is_proven() ->
 
 
 @pytest.mark.unit
+def test_reverse_expiry_waits_for_every_worker_broker_path_after_the_browser_switch() -> (
+    None
+):
+    runner = _runner_text()
+    workspaces = _function(runner, "e2e_phase_browser_workspaces")
+    switch = workspaces.index("use_browser_runtime")
+    gate = workspaces.index("wait_for_reverse_workers_broker")
+    # The first reverse job after the switch waits for the broker path (T142).
+    assert switch < gate < workspaces.index("--phase expiry-submit")
+    readiness = _function(runner, "wait_for_reverse_workers_broker")
+    assert "scripts.e2e.reverse_broker wait-worker-broker" in readiness
+    assert '--metrics-url "$metrics_url"' in readiness
+    assert 'for worker in "$worker_one_name" "$worker_two_name"; do' in readiness
+    assert 'podman port "$worker" 9464/tcp' in readiness
+    assert 'podman port "$application_name" 8080/tcp' in readiness
+    assert '"${metrics_urls[@]}"' in readiness
+
+
+@pytest.mark.unit
 def test_reverse_frontend_outage_reuses_bound_broker_recovery() -> None:
     runner = RUNNER.read_text()
     lifecycle = runner[
