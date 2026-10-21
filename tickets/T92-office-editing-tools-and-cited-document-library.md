@@ -2,7 +2,7 @@
 ticket: T92
 linear_id: G1L-591
 linear_url: https://linear.app/g1lom/issue/G1L-591/t92-deliver-bounded-office-editing-tools-and-cited-document-library
-status: Backlog
+status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -40,6 +40,30 @@ T91.
 ## Progress
 
 - 2026-09-22: Created in Linear and mirrored before implementation. No delivery is claimed.
+- 2026-10-21: Started from `main` `95bc188` after T89–T91 reached Done; G1L-591 moved to In
+  Progress. First increment: the DOCX body-text edit family only.
+  `markweave.composer.docx_edits` admits a private copy under the existing bounded Word
+  archive/OPC checks (active content, signatures, and every external relationship except
+  never-fetched hyperlinks are rejected), lists stable `word/document.xml#t<n>` text targets with
+  paragraph and table context, and replaces whole `w:t` nodes under an expected-text
+  precondition by splicing exact bytes. Every other package member and byte is preserved and
+  re-verified after writing; tracked changes, content controls, field results, alternate
+  content, self-closing, attributed, and control-character nodes are never targets.
+  `GET .../revisions/{revision_id}/docx-text-targets` and
+  `POST .../revisions/{revision_id}/docx-edits` (current revision only, `If-Match`,
+  `Idempotency-Key`) publish an immutable revision with matching DOCX download/preview, frozen
+  operation record, `human:docx_edit` provenance, and lineage; failures return
+  `COMPOSER_DOCX_EDIT_*` with target identities only. OpenAPI, the T41 fixtures, and the web
+  bindings are regenerated; the API and user guides document the operation and its limits.
+  Unit (100% branch coverage of the executor), SQLite HTTP integration, real-corpus
+  preservation, and Pandoc-generated DOCX tests pass locally. The LibreOffice rendering test
+  could not pass on this host: its LibreOffice 24.2.7.2 differs from the pinned 26.2.5.2
+  toolchain and the existing T91 rendering test fails identically on `main`. Open in later
+  increments: table, section, image, and style structure edits; every PPTX family; model
+  tool-call proposals using the same executor; semantic DOCX diff; CLI and browser controls;
+  the permissioned cited library with scanned uploads; PostgreSQL/S3 and final-rootless-image
+  E2E proof in both profiles; independent review and docker-box deployment. No acceptance
+  criterion is claimed complete.
 
 ## Synchronization
 
