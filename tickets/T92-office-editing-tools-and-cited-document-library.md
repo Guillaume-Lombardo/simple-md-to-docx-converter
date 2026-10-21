@@ -91,6 +91,21 @@ T91.
   native PostgreSQL 16 and a moto S3 endpoint because the pinned PostgreSQL 18 and RustFS images
   could not be pulled (Docker Hub 429; GHCR blob download refused by the proxy). Podman is
   unavailable, so the final-image phase is verified only by hosted CI.
+- 2026-10-21: Second increment on `feat/T92-pptx-text-edits`, stacked on PR #314. The executor
+  is now a shared `office_edits` core (admission, text-node grammar, byte splicing, verification)
+  with two package kinds; DOCX behavior and its public API are unchanged. The PPTX kind lists
+  slides in `p:sldIdLst` order, each followed by its notes part, and fails closed on unknown,
+  duplicate, mistyped, or shared slide and notes relationships. Whole `a:t` runs are replaced
+  without adding attributes; `a:fld` text, alternate content, attributed runs, and runs
+  containing markup are excluded. `GET .../pptx-text-targets` and `POST .../pptx-edits` mirror the
+  DOCX contract with `COMPOSER_PPTX_EDIT_*` errors and `human:pptx_edit` provenance. Evidence:
+  100% branch coverage of `pptx_edits`; real `pres.pptx` edits of all 13 slide, table, group,
+  and notes targets change only the four edited parts; a host LibreOffice conversion renders the
+  edited deck; a Pandoc 3.1.3 deck edits cleanly; and SQLite and PostgreSQL/S3 HTTP workflows
+  cover listing, format mismatch, stale target, publication, replay, restore, and ownership. The
+  final-image Composer browser phase now stages `pptx/pres.pptx` and checks the PPTX workflow,
+  including the edited title in the private PPTX preview, in both profiles; that phase is
+  verified only by hosted CI.
 
 ## Synchronization
 

@@ -1,5 +1,6 @@
-"""Read and apply bounded DOCX text edits on exact, owner-scoped revisions."""
+"""Read and apply bounded DOCX and PPTX text edits on exact, owner-scoped revisions."""
 
+from collections.abc import Callable
 from typing import Annotated
 from uuid import UUID
 
@@ -7,12 +8,19 @@ from fastapi import APIRouter, Depends, Header, Query, Response
 
 from markweave.auth.models import User
 from markweave.composer.docx_edits import (
-    DOCX_EDIT_ENGINE_VERSION,
     DOCX_EDIT_MEDIA_TYPE,
-    ReplaceText,
     apply_docx_text_edits,
     inspect_docx_text,
+)
+from markweave.composer.office_edits import (
+    OFFICE_EDIT_ENGINE_VERSION,
+    ReplaceText,
     operations_record,
+)
+from markweave.composer.pptx_edits import (
+    PPTX_EDIT_MEDIA_TYPE,
+    apply_pptx_text_edits,
+    inspect_pptx_text,
 )
 from markweave.composer.revisions import (
     ArtifactContent,
@@ -21,10 +29,15 @@ from markweave.composer.revisions import (
     RevisionSnapshot,
     direct_publish_lineage,
 )
+from markweave.composer.typed_templates import TypedDocxLimits
 from markweave.http.composer_docx_edit_schemas import (
     ComposerDocxEditRequest,
+    ComposerDocxReplaceTextOperation,
     ComposerDocxTextTargetListResponse,
     ComposerDocxTextTargetResponse,
+    ComposerPptxEditRequest,
+    ComposerPptxTextTargetListResponse,
+    ComposerPptxTextTargetResponse,
 )
 from markweave.http.composer_errors import (
     ComposerRequestError,
@@ -39,6 +52,7 @@ from .composer_fill_templates import typed_docx_limits
 from .composer_revisions import _require_headers, _revision_response
 
 _MAXIMUM_OFFSET = 2_147_483_647
+_REVISION = "/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}"
 
 
 def _store(dependencies: HttpDependencies) -> SqlComposerRepository:
@@ -48,26 +62,101 @@ def _store(dependencies: HttpDependencies) -> SqlComposerRepository:
     return store
 
 
-def _docx_download(
-    store: SqlComposerRepository, owner_id: UUID, revision: ComposerRevision
+def _office_download(
+    store: SqlComposerRepository,
+    owner_id: UUID,
+    revision: ComposerRevision,
+    media_type: str,
 ) -> tuple[bytes, str]:
     artifact = next(item for item in revision.artifacts if item.kind == "download")
-    if artifact.media_type != DOCX_EDIT_MEDIA_TYPE:
-        raise ComposerRequestError("Revision download is not a DOCX document")
+    if artifact.media_type != media_type:
+        raise ComposerRequestError("Revision download has another document format")
     content = store.read_artifact(owner_id, revision.draft_id, revision.id, "download")
     return content, artifact.sha256
 
 
-def _operation(revision_id: UUID) -> str:
-    return f"docx_edit:{revision_id}"
+def _publish_edit(  # noqa: PLR0913, PLR0917 - one explicit publication contract
+    dependencies: HttpDependencies,
+    user: User,
+    draft_id: UUID,
+    revision_id: UUID,
+    requested: tuple[ComposerDocxReplaceTextOperation, ...],
+    headers: tuple[str, str],
+    *,
+    label: str,
+    media_type: str,
+    apply: Callable[[bytes, tuple[ReplaceText, ...], TypedDocxLimits], bytes],
+) -> ComposerRevision:
+    """Edit a private copy of the current revision and publish the exact result."""
+
+    match, key = headers
+    store = _store(dependencies)
+    operations = tuple(
+        ReplaceText(item.target, item.expected_text, item.text) for item in requested
+    )
+    record = operations_record(operations)
+    operation = f"{label}:{revision_id}"
+    replay = store.find_revision_by_key(user.id, draft_id, key)
+    if replay is not None:
+        if (
+            replay.snapshot.operation != operation
+            or replay.snapshot.approved_values != record
+        ):
+            raise ComposerConflictError("Revision idempotency key was reused")
+        return replay
+    draft = store.get_draft(user.id, draft_id)
+    if draft.current_revision_id != revision_id:
+        raise ComposerConflictError("Only the current revision can be edited")
+    base = store.get_revision(user.id, draft_id, revision_id)
+    content, _digest = _office_download(store, user.id, base, media_type)
+    edited = apply(content, operations, typed_docx_limits(dependencies))
+    return store.publish_revision(
+        user.id,
+        draft_id,
+        actor_id=user.id,
+        if_match=match,
+        idempotency_key=key,
+        snapshot=RevisionSnapshot(
+            source=draft.source,
+            template_reference=base.snapshot.template_reference,
+            approved_values=record,
+            render_options=direct_publish_lineage(
+                base.id,
+                base.snapshot.model_identity,
+                base.snapshot.render_options,
+            ),
+            model_identity=None,
+            provenance=f"human:{label}",
+            operation=operation,
+        ),
+        artifacts=(
+            ArtifactContent("download", media_type, edited),
+            ArtifactContent("preview", media_type, edited),
+        ),
+    )
+
+
+def _published(
+    dependencies: HttpDependencies,
+    user: User,
+    draft_id: UUID,
+    revision: ComposerRevision,
+    response: Response,
+) -> ComposerRevisionResponse:
+    response.headers["Location"] = (
+        f"/api/v1/composer/drafts/{draft_id}/revisions/{revision.id}"
+    )
+    response.headers["ETag"] = _store(dependencies).get_draft(user.id, draft_id).etag
+    response.headers["Cache-Control"] = "private, no-store"
+    return _revision_response(revision)
 
 
 def build_router(dependencies: HttpDependencies) -> APIRouter:
-    """Expose the first qualified T92 Office edit family: DOCX body text."""
+    """Expose the qualified T92 Office text edit families: DOCX body and PPTX slides."""
     router = APIRouter()
 
     @router.get(
-        "/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/docx-text-targets",
+        f"{_REVISION}/docx-text-targets",
         response_model=ComposerDocxTextTargetListResponse,
         tags=["composer"],
         responses=error_responses(401, 404, 413, 422, 503),
@@ -82,13 +171,15 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:
     ) -> ComposerDocxTextTargetListResponse:
         store = _store(dependencies)
         revision = store.get_revision(user.id, draft_id, revision_id)
-        content, digest = _docx_download(store, user.id, revision)
+        content, digest = _office_download(
+            store, user.id, revision, DOCX_EDIT_MEDIA_TYPE
+        )
         targets = inspect_docx_text(content, typed_docx_limits(dependencies))
         response.headers["Cache-Control"] = "private, no-store"
         return ComposerDocxTextTargetListResponse(
             revision_id=revision.id,
             download_sha256=digest,
-            engine_version=DOCX_EDIT_ENGINE_VERSION,
+            engine_version=OFFICE_EDIT_ENGINE_VERSION,
             targets=tuple(
                 ComposerDocxTextTargetResponse(
                     target=item.target,
@@ -104,7 +195,7 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:
         )
 
     @router.post(
-        "/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/docx-edits",
+        f"{_REVISION}/docx-edits",
         response_model=ComposerRevisionResponse,
         status_code=201,
         tags=["composer"],
@@ -121,59 +212,89 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:
     ) -> ComposerRevisionResponse:
         """Publish a new revision whose DOCX differs only in the requested text."""
 
-        match, key = _require_headers(if_match, idempotency_key)
+        revision = _publish_edit(
+            dependencies,
+            user,
+            draft_id,
+            revision_id,
+            payload.operations,
+            _require_headers(if_match, idempotency_key),
+            label="docx_edit",
+            media_type=DOCX_EDIT_MEDIA_TYPE,
+            apply=apply_docx_text_edits,
+        )
+        return _published(dependencies, user, draft_id, revision, response)
+
+    @router.get(
+        f"{_REVISION}/pptx-text-targets",
+        response_model=ComposerPptxTextTargetListResponse,
+        tags=["composer"],
+        responses=error_responses(401, 404, 413, 422, 503),
+    )
+    def list_pptx_text_targets(  # noqa: PLR0913, PLR0917 - explicit FastAPI page fields
+        draft_id: UUID,
+        revision_id: UUID,
+        response: Response,
+        user: Annotated[User, Depends(dependencies.current_user)],
+        limit: Annotated[int, Query(ge=1, le=500)] = 200,
+        offset: Annotated[int, Query(ge=0, le=_MAXIMUM_OFFSET)] = 0,
+    ) -> ComposerPptxTextTargetListResponse:
         store = _store(dependencies)
-        operations = tuple(
-            ReplaceText(item.target, item.expected_text, item.text)
-            for item in payload.operations
+        revision = store.get_revision(user.id, draft_id, revision_id)
+        content, digest = _office_download(
+            store, user.id, revision, PPTX_EDIT_MEDIA_TYPE
         )
-        record = operations_record(operations)
-        replay = store.find_revision_by_key(user.id, draft_id, key)
-        if replay is not None:
-            if (
-                replay.snapshot.operation != _operation(revision_id)
-                or replay.snapshot.approved_values != record
-            ):
-                raise ComposerConflictError("Revision idempotency key was reused")
-            revision = replay
-        else:
-            draft = store.get_draft(user.id, draft_id)
-            if draft.current_revision_id != revision_id:
-                raise ComposerConflictError("Only the current revision can be edited")
-            base = store.get_revision(user.id, draft_id, revision_id)
-            content, _digest = _docx_download(store, user.id, base)
-            edited = apply_docx_text_edits(
-                content, operations, typed_docx_limits(dependencies)
-            )
-            revision = store.publish_revision(
-                user.id,
-                draft_id,
-                actor_id=user.id,
-                if_match=match,
-                idempotency_key=key,
-                snapshot=RevisionSnapshot(
-                    source=draft.source,
-                    template_reference=base.snapshot.template_reference,
-                    approved_values=record,
-                    render_options=direct_publish_lineage(
-                        base.id,
-                        base.snapshot.model_identity,
-                        base.snapshot.render_options,
-                    ),
-                    model_identity=None,
-                    provenance="human:docx_edit",
-                    operation=_operation(revision_id),
-                ),
-                artifacts=(
-                    ArtifactContent("download", DOCX_EDIT_MEDIA_TYPE, edited),
-                    ArtifactContent("preview", DOCX_EDIT_MEDIA_TYPE, edited),
-                ),
-            )
-        response.headers["Location"] = (
-            f"/api/v1/composer/drafts/{draft_id}/revisions/{revision.id}"
-        )
-        response.headers["ETag"] = store.get_draft(user.id, draft_id).etag
+        targets = inspect_pptx_text(content, typed_docx_limits(dependencies))
         response.headers["Cache-Control"] = "private, no-store"
-        return _revision_response(revision)
+        return ComposerPptxTextTargetListResponse(
+            revision_id=revision.id,
+            download_sha256=digest,
+            engine_version=OFFICE_EDIT_ENGINE_VERSION,
+            targets=tuple(
+                ComposerPptxTextTargetResponse(
+                    target=item.target,
+                    slide=item.slide,
+                    notes=item.notes,
+                    paragraph=item.paragraph,
+                    in_table=item.in_table,
+                    text=item.text,
+                )
+                for item in targets[offset : offset + limit]
+            ),
+            total=len(targets),
+            limit=limit,
+            offset=offset,
+        )
+
+    @router.post(
+        f"{_REVISION}/pptx-edits",
+        response_model=ComposerRevisionResponse,
+        status_code=201,
+        tags=["composer"],
+        responses=error_responses(401, 404, 412, 413, 422, 428, 503),
+    )
+    def edit_pptx_text(  # noqa: PLR0913, PLR0917 - explicit HTTP preconditions
+        draft_id: UUID,
+        revision_id: UUID,
+        payload: ComposerPptxEditRequest,
+        response: Response,
+        user: Annotated[User, Depends(dependencies.mutation_actor)],
+        if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+        idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+    ) -> ComposerRevisionResponse:
+        """Publish a new revision whose PPTX differs only in the requested text."""
+
+        revision = _publish_edit(
+            dependencies,
+            user,
+            draft_id,
+            revision_id,
+            payload.operations,
+            _require_headers(if_match, idempotency_key),
+            label="pptx_edit",
+            media_type=PPTX_EDIT_MEDIA_TYPE,
+            apply=apply_pptx_text_edits,
+        )
+        return _published(dependencies, user, draft_id, revision, response)
 
     return router

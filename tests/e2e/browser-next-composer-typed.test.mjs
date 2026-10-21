@@ -10,6 +10,9 @@ const profile = process.env.MARKWEAVE_E2E_PROFILE || "standalone";
 const typedDocx = "/spikes/anydoc/corpus/docx/typed.docx";
 const typedSchema = "/spikes/anydoc/corpus/docx/typed-schema.json";
 const editableDocx = "/spikes/anydoc/corpus/docx/text.docx";
+const editablePptx = "/spikes/anydoc/corpus/pptx/pres.pptx";
+const pptxMediaType =
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 const docxMediaType =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const malwareMarker =
@@ -133,7 +136,7 @@ async function createDraftWithSource(page, suffix) {
   return { path, source, current };
 }
 
-async function exactDocx(page, path, revision) {
+async function exactOfficeBytes(page, path, revision) {
   const artifactPath = `${path}/revisions/${revision.id}/artifacts`;
   const [preview, download] = await Promise.all([
     page.request.get(`${artifactPath}/preview`),
@@ -181,7 +184,7 @@ async function docxTextEdits(alice, bob, suffix) {
     }),
     201,
   );
-  assert.deepEqual(await exactDocx(alice, path, base), sourceBytes);
+  assert.deepEqual(await exactOfficeBytes(alice, path, base), sourceBytes);
   const targetsPath = `${path}/revisions/${base.id}/docx-text-targets`;
   const listed = expectStatus(
     await api(alice, "GET", `${targetsPath}?limit=500`),
@@ -285,7 +288,7 @@ async function docxTextEdits(alice, bob, suffix) {
     201,
   );
   assert.equal(replay.id, edited.id);
-  const editedBytes = await exactDocx(alice, path, edited);
+  const editedBytes = await exactOfficeBytes(alice, path, edited);
   assert.notDeepEqual(editedBytes, sourceBytes);
   const reread = expectStatus(
     await api(
@@ -304,8 +307,10 @@ async function docxTextEdits(alice, bob, suffix) {
   await alice
     .getByRole("combobox", { name: "Saved drafts" })
     .selectOption(draft.id);
-  const frame = alice.frameLocator('iframe[title^="DOCX revision"]');
-  await frame.getByText(expectedTitle).waitFor();
+  await alice
+    .frameLocator(`iframe[title="DOCX revision ${edited.id} preview"]`)
+    .getByText(expectedTitle, { exact: true })
+    .waitFor();
 
   const afterEdit = expectStatus(await api(alice, "GET", path), 200);
   assert.equal(afterEdit.current_revision_id, edited.id);
@@ -330,7 +335,7 @@ async function docxTextEdits(alice, bob, suffix) {
     }),
     201,
   );
-  assert.deepEqual(await exactDocx(alice, path, restored), sourceBytes);
+  assert.deepEqual(await exactOfficeBytes(alice, path, restored), sourceBytes);
   const history = expectStatus(
     await api(alice, "GET", `${path}/revisions`),
     200,
@@ -340,6 +345,139 @@ async function docxTextEdits(alice, bob, suffix) {
     `docx_edit:${base.id}`,
     "restore",
   ]);
+}
+
+async function pptxTextEdits(alice, bob, suffix) {
+  const sourceBytes = await readFile(editablePptx);
+  const draft = expectStatus(
+    await api(alice, "POST", "/api/v1/composer/drafts", {
+      upload: {
+        bytes: Array.from(sourceBytes),
+        filename: "editable.pptx",
+        type: pptxMediaType,
+        title: `Editable deck ${suffix}`,
+      },
+    }),
+    201,
+  );
+  const path = `/api/v1/composer/drafts/${draft.id}`;
+  const base = expectStatus(
+    await api(alice, "POST", `${path}/revisions/from-source`, {
+      headers: {
+        "If-Match": draft.etag,
+        "Idempotency-Key": `pptx-edit-source-${suffix}`,
+      },
+    }),
+    201,
+  );
+  const targetsPath = `${path}/revisions/${base.id}/pptx-text-targets`;
+  const listed = expectStatus(
+    await api(alice, "GET", `${targetsPath}?limit=500`),
+    200,
+  );
+  assert.equal(listed.download_sha256, sha256(sourceBytes));
+  const title = listed.targets[0];
+  const notes = listed.targets.find((item) => item.notes);
+  assert.equal(title.slide, 1);
+  assert.ok(notes, "The qualified deck has editable speaker notes");
+  assert.equal((await api(bob, "GET", targetsPath)).status, 404);
+  const ready = expectStatus(await api(alice, "GET", path), 200);
+  const editPath = `${path}/revisions/${base.id}/pptx-edits`;
+  const stale = await api(alice, "POST", editPath, {
+    headers: {
+      "If-Match": ready.etag,
+      "Idempotency-Key": `pptx-edit-stale-${suffix}`,
+    },
+    json: {
+      operations: [
+        {
+          op: "replace_text",
+          target: title.target,
+          expected_text: "Stale title",
+          text: "x",
+        },
+      ],
+    },
+  });
+  assert.equal(stale.status, 422, stale.text);
+  assert.equal(stale.json.error.code, "COMPOSER_PPTX_EDIT_TARGET_CHANGED");
+  const editedTitle = `Edited E2E deck ${suffix}`;
+  const request = {
+    operations: [
+      {
+        op: "replace_text",
+        target: title.target,
+        expected_text: title.text,
+        text: editedTitle,
+      },
+      {
+        op: "replace_text",
+        target: notes.target,
+        expected_text: notes.text,
+        text: "Edited E2E note",
+      },
+    ],
+  };
+  const edited = expectStatus(
+    await api(alice, "POST", editPath, {
+      headers: {
+        "If-Match": ready.etag,
+        "Idempotency-Key": `pptx-edit-${suffix}`,
+      },
+      json: request,
+    }),
+    201,
+  );
+  assert.equal(edited.operation, `pptx_edit:${base.id}`);
+  assert.equal(
+    expectStatus(
+      await api(alice, "POST", editPath, {
+        headers: {
+          "If-Match": ready.etag,
+          "Idempotency-Key": `pptx-edit-${suffix}`,
+        },
+        json: request,
+      }),
+      201,
+    ).id,
+    edited.id,
+  );
+  const editedBytes = await exactOfficeBytes(alice, path, edited);
+  assert.notDeepEqual(editedBytes, sourceBytes);
+  const reread = expectStatus(
+    await api(
+      alice,
+      "GET",
+      `${path}/revisions/${edited.id}/pptx-text-targets?limit=500`,
+    ),
+    200,
+  );
+  assert.equal(reread.total, listed.total);
+  assert.equal(reread.targets[0].text, editedTitle);
+  assert.equal(
+    reread.targets.find((item) => item.target === notes.target).text,
+    "Edited E2E note",
+  );
+  await alice.goto(`${baseURL}/composer`, { waitUntil: "networkidle" });
+  await alice
+    .getByRole("combobox", { name: "Saved drafts" })
+    .selectOption(draft.id);
+  await alice
+    .frameLocator(`iframe[title="PPTX revision ${edited.id} preview"]`)
+    .locator("#document")
+    .getByText(editedTitle, { exact: true })
+    .waitFor();
+  const afterEdit = expectStatus(await api(alice, "GET", path), 200);
+  const restored = expectStatus(
+    await api(alice, "POST", `${path}/revisions/${base.id}/restore`, {
+      headers: {
+        "If-Match": afterEdit.etag,
+        "Idempotency-Key": `pptx-edit-restore-${suffix}`,
+      },
+    }),
+    201,
+  );
+  assert.deepEqual(await exactOfficeBytes(alice, path, restored), sourceBytes);
 }
 
 test(`typed Composer shares, human decisions, and exact regeneration in ${profile}`, async () => {
@@ -818,7 +956,7 @@ test(`typed Composer shares, human decisions, and exact regeneration in ${profil
     assert.equal(frozen.approved_values["decision.date"], "2026-09-24");
     assert.equal(frozen.approved_values["decision.approved"], true);
     assert.equal(frozen.provenance["decision.date"].kind, "human_edited");
-    const firstBytes = await exactDocx(alice, path, published);
+    const firstBytes = await exactOfficeBytes(alice, path, published);
     assert.equal(frozen.result_sha256, sha256(firstBytes));
     assert.equal(
       (await api(bob, "GET", `${path}/revisions/${published.id}`)).status,
@@ -841,7 +979,10 @@ test(`typed Composer shares, human decisions, and exact regeneration in ${profil
     );
     assert.equal(regenerated.operation, "regenerate_fill");
     assert.equal(regenerated.model_identity, null);
-    assert.deepEqual(await exactDocx(alice, path, regenerated), firstBytes);
+    assert.deepEqual(
+      await exactOfficeBytes(alice, path, regenerated),
+      firstBytes,
+    );
     assert.equal(
       (
         await api(
@@ -961,6 +1102,7 @@ test(`typed Composer shares, human decisions, and exact regeneration in ${profil
     assert.equal((await api(admin, "GET", authorPath)).status, 200);
     assert.equal((await api(admin, "GET", templatePath)).status, 200);
     await docxTextEdits(alice, bob, suffix);
+    await pptxTextEdits(alice, bob, suffix);
   } finally {
     await Promise.all(contexts.map((context) => context.close()));
     await browser.close();

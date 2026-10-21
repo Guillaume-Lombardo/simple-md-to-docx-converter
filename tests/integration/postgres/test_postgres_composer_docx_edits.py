@@ -1,4 +1,4 @@
-"""Distributed PostgreSQL/S3 proof of the DOCX text-edit HTTP workflow."""
+"""Distributed PostgreSQL/S3 proof of the DOCX and PPTX text-edit HTTP workflows."""
 
 import os
 from collections.abc import Iterator
@@ -18,6 +18,7 @@ from tests.integration.sqlite.test_composer_docx_edits_http import (
     exercise_markdown_refusal,
     exercise_nested_markup_refusal,
     exercise_owner_fence,
+    exercise_pptx_workflow,
     exercise_rejection,
     exercise_request_validation,
 )
@@ -84,3 +85,7 @@ def test_postgres_s3_nested_markup_is_refused_without_publication(
     harness: DocxEditHarness,
 ) -> None:
     exercise_nested_markup_refusal(harness)
+
+
+def test_postgres_s3_pptx_slide_and_notes_edits(harness: DocxEditHarness) -> None:
+    exercise_pptx_workflow(harness)

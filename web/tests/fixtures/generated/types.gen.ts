@@ -981,6 +981,80 @@ export type ComposerModelStepResponse = {
 };
 
 /**
+ * ComposerPptxEditRequest
+ */
+export type ComposerPptxEditRequest = {
+    /**
+     * Operations
+     */
+    operations: Array<ComposerDocxReplaceTextOperation>;
+};
+
+/**
+ * ComposerPptxTextTargetListResponse
+ */
+export type ComposerPptxTextTargetListResponse = {
+    /**
+     * Download Sha256
+     */
+    download_sha256: string;
+    /**
+     * Engine Version
+     */
+    engine_version: number;
+    /**
+     * Limit
+     */
+    limit: number;
+    /**
+     * Offset
+     */
+    offset: number;
+    /**
+     * Revision Id
+     */
+    revision_id: string;
+    /**
+     * Targets
+     */
+    targets: Array<ComposerPptxTextTargetResponse>;
+    /**
+     * Total
+     */
+    total: number;
+};
+
+/**
+ * ComposerPptxTextTargetResponse
+ */
+export type ComposerPptxTextTargetResponse = {
+    /**
+     * In Table
+     */
+    in_table: boolean;
+    /**
+     * Notes
+     */
+    notes: boolean;
+    /**
+     * Paragraph
+     */
+    paragraph: number;
+    /**
+     * Slide
+     */
+    slide: number;
+    /**
+     * Target
+     */
+    target: string;
+    /**
+     * Text
+     */
+    text: string;
+};
+
+/**
  * ComposerProposalDecision
  */
 export type ComposerProposalDecision = 'accepted' | 'edited' | 'rejected';
@@ -6287,6 +6361,137 @@ export type ListTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxText
 };
 
 export type ListTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxTextTargetsGetResponse = ListTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxTextTargetsGetResponses[keyof ListTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxTextTargetsGetResponses];
+
+export type EditPptxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxEditsPostData = {
+    body: ComposerPptxEditRequest;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * Idempotency-Key
+         */
+        'Idempotency-Key'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Revision Id
+         */
+        revision_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/pptx-edits';
+};
+
+export type EditPptxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxEditsPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type EditPptxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxEditsPostError = EditPptxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxEditsPostErrors[keyof EditPptxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxEditsPostErrors];
+
+export type EditPptxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxEditsPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: ComposerRevisionResponse;
+};
+
+export type EditPptxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxEditsPostResponse = EditPptxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxEditsPostResponses[keyof EditPptxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxEditsPostResponses];
+
+export type ListPptxTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxTextTargetsGetData = {
+    body?: never;
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Revision Id
+         */
+        revision_id: string;
+    };
+    query?: {
+        /**
+         * Limit
+         */
+        limit?: number;
+        /**
+         * Offset
+         */
+        offset?: number;
+    };
+    url: '/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/pptx-text-targets';
+};
+
+export type ListPptxTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxTextTargetsGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type ListPptxTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxTextTargetsGetError = ListPptxTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxTextTargetsGetErrors[keyof ListPptxTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxTextTargetsGetErrors];
+
+export type ListPptxTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxTextTargetsGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ComposerPptxTextTargetListResponse;
+};
+
+export type ListPptxTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxTextTargetsGetResponse = ListPptxTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxTextTargetsGetResponses[keyof ListPptxTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxTextTargetsGetResponses];
 
 export type RegenerateApiV1ComposerDraftsDraftIdRevisionsRevisionIdRegenerationsPostData = {
     body?: never;

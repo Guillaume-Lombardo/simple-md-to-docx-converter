@@ -648,13 +648,12 @@ def test_composer_browser_mounts_only_checksum_verified_small_corpus(
     tmp_path: Path,
 ) -> None:
     runner = _runner_text()
-    stage = runner.split("for corpus_file in docx/text.docx pdf/text.pdf; do", 1)[
-        1
-    ].split("\ndone", 1)[0]
-    stage = "for corpus_file in docx/text.docx pdf/text.pdf; do" + stage + "\ndone"
+    loop = "for corpus_file in docx/text.docx pdf/text.pdf pptx/pres.pptx; do"
+    stage = runner.split(loop, 1)[1].split("\ndone", 1)[0]
+    stage = loop + stage + "\ndone"
     repository = tmp_path / "repository"
     corpus = repository / "spikes" / "anydoc" / "corpus"
-    for filename in ("docx/text.docx", "pdf/text.pdf"):
+    for filename in ("docx/text.docx", "pdf/text.pdf", "pptx/pres.pptx"):
         source = corpus / filename
         source.parent.mkdir(parents=True, exist_ok=True)
         source.write_bytes(filename.encode())
@@ -686,8 +685,9 @@ def test_composer_browser_mounts_only_checksum_verified_small_corpus(
     } == {
         "docx/text.docx",
         "pdf/text.pdf",
+        "pptx/pres.pptx",
     }
-    for filename in ("docx/text.docx", "pdf/text.pdf"):
+    for filename in ("docx/text.docx", "pdf/text.pdf", "pptx/pres.pptx"):
         assert (staged / filename).read_bytes() == (corpus / filename).read_bytes()
     browser = runner.split("run_browser_test() {", 1)[1].split(
         "\nstart_production_router() {", 1
