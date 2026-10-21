@@ -263,7 +263,7 @@ function ComposerWorkspaceInner({
   const [output, setOutput] = useState<"docx" | "pdf" | "pptx">("docx");
   const [templateId, setTemplateId] = useState("");
   const [templates, setTemplates] = useState<ComposerTemplate[]>([]);
-  const [templateLoading, setTemplateLoading] = useState(false);
+  const [templateSettledRequest, setTemplateSettledRequest] = useState("");
   const [templateError, setTemplateError] = useState("");
   const [templateRefresh, setTemplateRefresh] = useState(0);
   const [dialect, setDialect] = useState<"auto" | "markdown" | "marp">("auto");
@@ -308,6 +308,14 @@ function ComposerWorkspaceInner({
 
   const ownerId =
     authState.phase === "authenticated" ? authState.user.id : null;
+  // Style selection and generation wait until the catalog request for the
+  // current owner, draft, output and retry has settled. Deriving this keeps
+  // them disabled from the first render, before the catalog effect runs.
+  const templateRequest =
+    ownerId && view.draft?.id
+      ? JSON.stringify([ownerId, view.draft.id, output, templateRefresh])
+      : "";
+  const templateLoading = templateSettledRequest !== templateRequest;
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -777,9 +785,6 @@ function ComposerWorkspaceInner({
     const draftId = view.draft?.id;
     if (!draftId || !ownerId) return;
     const controller = new AbortController();
-    queueMicrotask(() => {
-      if (!controller.signal.aborted) setTemplateLoading(true);
-    });
     void Promise.all([
       api.conversionOptions(output, controller.signal),
       api.templates(output, controller.signal),
@@ -814,7 +819,8 @@ function ComposerWorkspaceInner({
         setTemplateError(safeError(failure));
       })
       .finally(() => {
-        if (!controller.signal.aborted) setTemplateLoading(false);
+        if (!controller.signal.aborted)
+          setTemplateSettledRequest(templateRequest);
       });
     return () => controller.abort();
   }, [
@@ -824,6 +830,7 @@ function ComposerWorkspaceInner({
     output,
     ownerId,
     templateRefresh,
+    templateRequest,
     view.draft?.id,
   ]);
 
@@ -2365,7 +2372,6 @@ function ComposerWorkspaceInner({
                           | "pdf"
                           | "pptx";
                         setOutput(next);
-                        setTemplateLoading(true);
                         setTemplateError("");
                         setTemplateId("");
                         setTemplates([]);

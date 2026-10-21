@@ -1067,8 +1067,9 @@ test("a human Markdown edit must be saved before explicit immutable publication"
 
 test("Generate submits the current approved Markdown revision without a model call", async () => {
   const api = setup({ markdown: true });
-  await screen.findByRole("button", { name: "Generate DOCX" });
-  fireEvent.click(screen.getByRole("button", { name: "Generate DOCX" }));
+  const generate = await screen.findByRole("button", { name: "Generate DOCX" });
+  await waitFor(() => expect(generate).toBeEnabled());
+  fireEvent.click(generate);
   await waitFor(() =>
     expect(api.startGeneration).toHaveBeenCalledWith(
       expect.objectContaining({ id: draft.id, etag: draft.etag }),
@@ -1093,8 +1094,9 @@ test("Generate submits the current approved Markdown revision without a model ca
 
 test("Generate publishes a source snapshot before reserving an approved Markdown revision", async () => {
   const api = setup({ markdown: true, sourceSnapshot: true });
-  await screen.findByRole("button", { name: "Generate DOCX" });
-  fireEvent.click(screen.getByRole("button", { name: "Generate DOCX" }));
+  const generate = await screen.findByRole("button", { name: "Generate DOCX" });
+  await waitFor(() => expect(generate).toBeEnabled());
+  fireEvent.click(generate);
   await waitFor(() =>
     expect(api.startGeneration).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1121,8 +1123,9 @@ test("Generate publishes a source snapshot before reserving an approved Markdown
 
 test("Generate publishes current content when the Markdown artifact lacks approval metadata", async () => {
   const api = setup({ markdown: true, unapprovedMarkdownRevision: true });
-  await screen.findByRole("button", { name: "Generate DOCX" });
-  fireEvent.click(screen.getByRole("button", { name: "Generate DOCX" }));
+  const generate = await screen.findByRole("button", { name: "Generate DOCX" });
+  await waitFor(() => expect(generate).toBeEnabled());
+  fireEvent.click(generate);
   await waitFor(() =>
     expect(api.startGeneration).toHaveBeenCalledWith(
       expect.objectContaining({ id: draft.id }),

@@ -762,6 +762,63 @@ test("a rejected template version requires an explicit refreshed choice before r
   expect(api.startGeneration).toHaveBeenCalledTimes(2);
 });
 
+test("style selection and generation stay disabled until the template catalog settles", async () => {
+  // A mutation observer sees every commit, including the first render of the
+  // generation controls before the catalog effect runs (T136).
+  const enabledBeforeCatalog: string[] = [];
+  let catalogSettled = false;
+  const observer = new MutationObserver(() => {
+    if (catalogSettled) return;
+    const style = document.querySelector<HTMLSelectElement>(
+      'select[aria-label="Style template"]',
+    );
+    const generate = Array.from(document.querySelectorAll("button")).find(
+      (button) => button.textContent === "Generate DOCX",
+    );
+    if (style && !style.disabled) enabledBeforeCatalog.push("style");
+    if (generate && !generate.disabled) enabledBeforeCatalog.push("generate");
+  });
+  observer.observe(document.body, {
+    attributes: true,
+    childList: true,
+    subtree: true,
+  });
+  const catalog =
+    deferred<
+      { id: string; current_version_id: string | null; name: string }[]
+    >();
+  try {
+    const { api } = setup();
+    api.templates.mockReturnValueOnce(catalog.promise);
+    const style = await screen.findByRole("combobox", {
+      name: "Style template",
+    });
+    await waitFor(() => expect(api.templates).toHaveBeenCalledOnce());
+    expect(style).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Generate DOCX" }),
+    ).toBeDisabled();
+    catalogSettled = true;
+    await act(async () => {
+      catalog.resolve([
+        {
+          id: templateId,
+          current_version_id: templateVersionId,
+          name: "Reviewed style",
+        },
+      ]);
+      await catalog.promise;
+    });
+    await waitFor(() => expect(style).toBeEnabled());
+    expect(
+      screen.getByRole("option", { name: "Reviewed style" }),
+    ).toBeInTheDocument();
+  } finally {
+    observer.disconnect();
+  }
+  expect(enabledBeforeCatalog).toEqual([]);
+});
+
 test.each(["failed", "cancelled"])(
   "a %s conversion can be retried without replacing the retained revision",
   async (status) => {
