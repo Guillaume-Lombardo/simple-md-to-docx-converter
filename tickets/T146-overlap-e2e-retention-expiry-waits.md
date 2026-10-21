@@ -88,6 +88,37 @@ Measured on scheduled main run 39109797384 (2026-10-18):
   New unit cases cover an already expired late transition (rejected) and a late read of a timely
   transition (accepted); the rejection cases fail without the fix.
 
+- 2026-10-21: Hosted timing evidence, three comparable pairs. Each pair runs the baseline (PR #323,
+  same `main`, without T146) and T146 (PR #322) in the same minutes. Durations are the "Run selected
+  final-image suite without a shell" step only: archive download and load time are excluded (the
+  baseline branch also changes the load step), and cancelled attempts are not counted. All 24 E2E
+  jobs passed on their first attempt, so both profiles completed final-image qualification each
+  time.
+
+  | Shard | Pair 1: 39604676996 → 39604675291 | Pair 2: 39610249167 → 39610248496 | Pair 3: 39626961561 → 39626960438 | Mean saved |
+  |---|---|---|---|---|
+  | e2e-standalone-1 | 446 → 381 s (65 s) | 460 → 446 s (14 s) | 404 → 345 s (59 s) | 46 s |
+  | e2e-distributed-1 | 488 → 420 s (68 s) | 558 → 435 s (123 s) | 521 → 492 s (29 s) | 73 s |
+  | e2e-standalone-2 | 536 → 461 s (75 s) | 513 → 462 s (51 s) | 506 → 473 s (33 s) | 53 s |
+  | e2e-distributed-2 | 527 → 448 s (79 s) | 540 → 452 s (88 s) | 478 → 468 s (10 s) | 59 s |
+
+  Waits recorded by the verify steps:
+
+  | Step | Pair 1 | Pair 2 | Pair 3 |
+  |---|---|---|---|
+  | `verify-expiration`, standalone (shard 1) | 9.1 s | 1.0 s | 16.3 s |
+  | `verify-expiration`, distributed (shard 1) | 18.8 s | 18.3 s | 2.6 s |
+  | reverse `expiry-verify` (shard 2, both profiles) | 1.0–1.2 s | 1.1 s | 1.1–1.2 s |
+
+  Before this change, each of these steps slept for the full retention window. Shard 1 saved 59.7 s
+  on average over the three pairs (about 55 s expected) and shard 2 saved 56 s (about 60 s
+  expected). The criterion is not met on every pair: pair 3 saved 59 and 29 s on shard 1 and 33
+  and 10 s on shard 2, and pair 2 saved 14 s on e2e-standalone-1. The verify waits show that the
+  retention windows now overlap other journeys in every run (the reverse wait is at most 1.2 s). So
+  the spread between pairs comes from runner-to-runner variation in the rest of the suite (the same
+  baseline shard ranges from 404 to 460 s), not from the change. Whether the per-pair criterion
+  stands or the three-pair mean is accepted is an owner decision.
+
 ## Synchronization
 
 Keep status, scope, acceptance criteria, dependencies, and progress aligned with G1L-704.
