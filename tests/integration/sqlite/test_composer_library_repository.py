@@ -241,3 +241,54 @@ def test_database_failures_become_persistence_errors(
     for call in calls:
         with pytest.raises(PersistenceError):
             call()
+
+
+def test_reconciliation_removes_only_unreferenced_sources_within_its_limit(
+    engine: Engine, tmp_path: Path, mocker: MockerFixture
+) -> None:
+    repository = _repository(engine, tmp_path)
+    owner = _user(engine)
+    kept = repository.create(owner, "Kept", _SOURCE)
+    objects = FilesystemObjectStore(tmp_path / "objects")
+    orphans = [
+        ObjectKey(ObjectScope.COMPOSER_LIBRARY, owner, uuid4()) for _ in range(3)
+    ]
+    for key in orphans:
+        objects.put(key, b"late write")
+    kept_key = ObjectKey(
+        ObjectScope.COMPOSER_LIBRARY, owner, UUID(str(kept.current_version_id))
+    )
+    with pytest.raises(ValueError, match="positive"):
+        repository.reconcile_objects(limit=0)
+    # One listing batch holds every key: the limit stops inside it.
+    assert repository.reconcile_objects(limit=1) == 1
+    # Two-key batches: the first holds an orphan, so the limit ends the listing.
+    mocker.patch("markweave.persistence.composer.library._RECONCILIATION_BATCH", 2)
+    assert repository.reconcile_objects(limit=1) == 1
+    assert repository.reconcile_objects(limit=10) == 1
+    assert not any(objects.exists(key) for key in orphans)
+    assert objects.exists(kept_key)
+    assert repository.reconcile_objects(limit=10) == 0
+
+    late = ObjectKey(ObjectScope.COMPOSER_LIBRARY, owner, uuid4())
+    objects.put(late, b"late write")
+    mocker.patch.object(
+        FilesystemObjectStore, "delete", side_effect=ObjectStoreError("unavailable")
+    )
+    assert repository.reconcile_objects(limit=10) == 0
+    mocker.patch.object(
+        FilesystemObjectStore,
+        "list_keys",
+        side_effect=ObjectStoreError("unavailable"),
+    )
+    assert repository.cleanup(limit=10) == 0
+    mocker.stopall()
+    assert objects.exists(late)
+
+    unlistable = SqlComposerLibraryRepository(
+        engine,
+        mocker.Mock(spec=["put", "get", "delete", "exists", "is_ready"]),
+        publication_lease=timedelta(seconds=30),
+        maximum_scanned_chunks=10,
+    )
+    assert unlistable.reconcile_objects(limit=10) == 0

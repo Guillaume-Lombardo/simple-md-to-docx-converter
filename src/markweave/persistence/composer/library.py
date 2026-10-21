@@ -32,6 +32,7 @@ from markweave.persistence.schema import (
 )
 from markweave.persistence.sql import serialize_sqlite_write
 from markweave.storage import (
+    ListableObjectStore,
     ObjectKey,
     ObjectNotFoundError,
     ObjectScope,
@@ -40,6 +41,7 @@ from markweave.storage import (
 )
 
 _MAXIMUM_TITLE_CHARACTERS = 200
+_RECONCILIATION_BATCH = 500
 
 
 class LibraryNotFoundError(LookupError):
@@ -554,9 +556,69 @@ class SqlComposerLibraryRepository:
         return removed
 
     def cleanup(self, *, limit: int) -> int:
-        """Bounded maintenance: settle expired uploads and sweep deleted objects."""
+        """Bounded maintenance: settle uploads, sweep deletions, then reconcile."""
 
-        return self.recover_pending(limit=limit) + self.sweep_deleted(limit=limit)
+        return (
+            self.recover_pending(limit=limit)
+            + self.sweep_deleted(limit=limit)
+            + self.reconcile_objects(limit=limit)
+        )
+
+    def reconcile_objects(self, *, limit: int) -> int:
+        """Remove stored sources that no version references.
+
+        A version row is committed before its object is written and its
+        identifier is never reused, so an unreferenced object can only come from
+        an upload whose reservation was removed while it was still in flight (a
+        deleted document or a discarded expired lease) and whose writer stopped
+        before removing its own late write. No lease or cleanup record can rule
+        such a write out, so every maintenance pass looks for one.
+        """
+
+        if type(limit) is not int or limit <= 0:
+            raise ValueError("Reconciliation limit must be positive")
+        if not isinstance(self._objects, ListableObjectStore):
+            return 0
+        removed = 0
+        batch: list[ObjectKey] = []
+        try:
+            for key in self._objects.list_keys(ObjectScope.COMPOSER_LIBRARY):
+                batch.append(key)
+                if len(batch) == _RECONCILIATION_BATCH:
+                    removed += self._remove_unreferenced(batch, limit - removed)
+                    batch = []
+                    if removed >= limit:
+                        return removed
+        except ObjectStoreError:
+            # The next maintenance pass lists the scope again.
+            return removed
+        return removed + self._remove_unreferenced(batch, limit - removed)
+
+    def _remove_unreferenced(self, keys: list[ObjectKey], limit: int) -> int:
+        if not keys:
+            return 0
+        with Session(self._engine) as database:
+            referenced = set(
+                database.scalars(
+                    select(ComposerLibraryVersionRow.id).where(
+                        ComposerLibraryVersionRow.id.in_(
+                            [str(key.object_id) for key in keys]
+                        )
+                    )
+                )
+            )
+        removed = 0
+        for key in keys:
+            if removed >= limit:
+                break
+            if str(key.object_id) in referenced:
+                continue
+            try:
+                self._objects.delete(key)
+            except ObjectStoreError:
+                continue
+            removed += 1
+        return removed
 
     def search(
         self, actor_id: UUID, terms: tuple[str, ...], *, limit: int

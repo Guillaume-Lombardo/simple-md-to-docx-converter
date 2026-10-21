@@ -172,6 +172,15 @@ T91.
   Composer browser phase now uploads and searches through the library page, proves sharing and
   revocation, and runs one cited model step through the provider, whose expected successful chat
   counts rise from 14 to 15 and from 19 to 20; that phase is verified only by hosted CI.
+- 2026-10-21: Review corrections on the library branch.
+  - **Late writes.** An upload paused past its lease can write its object after the deletion's
+    sweep has removed every cleanup record, then crash before discarding it. Maintenance now also
+    reconciles the `composer-library` object scope through a new optional `ListableObjectStore`
+    port (filesystem directory walk, S3 `ListObjectsV2` with a prefix) and removes any object that
+    no version row references; a version row always precedes its object and is never reused. The
+    shared SQLite and PostgreSQL/S3 scenario reproduces the pause, sweep, write and crash.
+  - **Cited admission race.** A cited retry that loses the race to an identical request now
+    replays the durable step after the precondition failure instead of returning 412.
 
 ## Synchronization
 

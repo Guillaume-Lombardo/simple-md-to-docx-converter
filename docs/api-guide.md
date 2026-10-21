@@ -309,7 +309,11 @@ download exactly through `GET .../versions/{version_id}/content`. `PUT` and `DEL
 .../library/{document_id}` removes the document; all three require the current `If-Match`, are
 owner-only, and are audited without content. Another user's document, an inactive account, or an
 unknown identity returns `404 COMPOSER_LIBRARY_NOT_FOUND`; a stale `If-Match` or concurrent change
-returns `412 COMPOSER_LIBRARY_CHANGED`.
+returns `412 COMPOSER_LIBRARY_CHANGED`. Deletion records a cleanup obligation for every version's
+stored source in the same transaction, and each maintenance pass (at startup and on the retention
+cadence) sweeps those obligations, then lists the library's object scope and removes any source
+that no version references, such as a late write from an upload interrupted by the deletion. The
+distributed profile therefore needs permission to list the bucket.
 
 `POST /api/v1/composer/library/search` takes `{ "query": "...", "limit": 10 }` with one to eight
 terms of at least two characters. It ranks chunks of current versions that contain every term and

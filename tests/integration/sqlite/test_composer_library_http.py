@@ -613,6 +613,51 @@ def exercise_durable_deletion(harness: LibraryHarness, mocker: MockerFixture) ->
     _later(harness).cleanup(limit=10)
     assert _cleanup_rows(harness) == []
     assert not _object_exists(harness, racing["current_version_id"])
+    _exercise_late_write_after_sweep(harness, mocker)
+
+
+class _WriterCrashed(BaseException):
+    """A process that stops right after its object write, before any cleanup."""
+
+
+def _exercise_late_write_after_sweep(
+    harness: LibraryHarness, mocker: MockerFixture
+) -> None:
+    """A writer paused past its lease writes after the sweep, then crashes."""
+
+    late = _upload(harness, "late.md", _NOTES.encode()).json()
+    written: list[ObjectKey] = []
+
+    def pause_past_lease_then_write(key: ObjectKey, content: bytes) -> None:
+        # While this writer is paused its lease expires, the document is
+        # deleted, and the immediate sweep removes every due cleanup record.
+        _later(harness).delete(
+            harness.owner.id, UUID(late["id"]), if_match=late["etag"]
+        )
+        assert _cleanup_rows(harness) == []
+        harness.objects.put(key, content)
+        written.append(key)
+        raise _WriterCrashed
+
+    mocker.patch.object(
+        harness.library, "_write", side_effect=pause_past_lease_then_write
+    )
+    source = LibrarySource(b"# Late\n", "text/markdown", "test:library", ("# Late",))
+    with pytest.raises(_WriterCrashed):
+        harness.library.replace(
+            harness.owner.id, UUID(late["id"]), source, if_match=late["etag"]
+        )
+    mocker.stopall()
+    orphan = str(written[0].object_id)
+    assert _object_exists(harness, orphan)
+    assert _cleanup_rows(harness) == []
+    assert not _object_exists(harness, late["current_version_id"])
+
+    kept = _upload(harness, "kept.md", _NOTES.encode()).json()
+    assert _later(harness).cleanup(limit=10) == 1
+    assert not _object_exists(harness, orphan)
+    assert _object_exists(harness, kept["current_version_id"])
+    assert harness.library.reconcile_objects(limit=10) == 0
 
 
 def test_deleted_sources_are_eventually_removed(
