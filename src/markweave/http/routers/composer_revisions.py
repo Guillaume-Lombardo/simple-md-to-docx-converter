@@ -9,7 +9,10 @@ from fastapi import APIRouter, Depends, Header, Query, Response
 
 from markweave.auth.models import User
 from markweave.composer.diff import markdown_changes
+from markweave.composer.docx_edits import DOCX_EDIT_MEDIA_TYPE, DOCX_PACKAGE
 from markweave.composer.drafts import ComposerProposal, ProposalState
+from markweave.composer.office_edits import OfficeEditError, text_lines
+from markweave.composer.pptx_edits import PPTX_EDIT_MEDIA_TYPE, PPTX_PACKAGE
 from markweave.composer.revisions import (
     ArtifactContent,
     ComposerConflictError,
@@ -39,6 +42,8 @@ from markweave.http.dependencies import HttpDependencies
 from markweave.http.errors import error_responses
 from markweave.persistence.composer import SqlComposerRepository
 
+from .composer_fill_templates import typed_docx_limits
+
 _EXTENSIONS = {
     "application/json": "json",
     "text/markdown": "md",
@@ -52,6 +57,10 @@ _FIRST_VISIBLE_ASCII = 33
 _LAST_VISIBLE_ASCII = 126
 _MAXIMUM_OFFSET = 2_147_483_647
 _MAXIMUM_DIFF_TEXT_BYTES = 131_072
+_OFFICE_KINDS = {
+    DOCX_EDIT_MEDIA_TYPE: DOCX_PACKAGE,
+    PPTX_EDIT_MEDIA_TYPE: PPTX_PACKAGE,
+}
 
 
 def _store(dependencies: HttpDependencies) -> SqlComposerRepository:
@@ -499,8 +508,35 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:  # noqa: PLR0915
                 changes=(),
                 metadata_changes=metadata_changes,
             )
+        office_kind = _OFFICE_KINDS.get(old_artifact.media_type)
         if markdown_scope:
             before, after = old_text, new_text
+        elif (
+            office_kind is not None
+            and new_artifact.media_type == old_artifact.media_type
+        ):
+            limits = typed_docx_limits(dependencies)
+            try:
+                before, after = (
+                    "\n".join(
+                        text_lines(
+                            store.read_artifact(user.id, draft_id, item, "download"),
+                            limits,
+                            office_kind,
+                        )
+                    ).encode("utf-8")
+                    + b"\n"
+                    for item in (from_revision_id, revision_id)
+                )
+            except OfficeEditError:
+                return ComposerRevisionDiffResponse(
+                    from_revision_id=from_revision_id,
+                    to_revision_id=revision_id,
+                    status="unavailable",
+                    reason="office_text_unavailable",
+                    changes=(),
+                    metadata_changes=metadata_changes,
+                )
         elif (
             old_artifact.media_type != "text/markdown"
             or new_artifact.media_type != "text/markdown"

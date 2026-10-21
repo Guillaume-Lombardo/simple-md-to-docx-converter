@@ -99,24 +99,26 @@ new plan and review. Typed filling supports the qualified content-control subset
 
 ## Edit Word and PowerPoint text
 
-A DOCX revision's body text, including table cell text, can be corrected through the
-[Composer API](api-guide.md) without regenerating the document. Each edit replaces the whole text
-of one run, only if it still holds the text you reviewed, and creates a new immutable revision.
-Formatting, images, styles, relationships, and every other part of the file are kept exactly.
-Text in tracked changes, content controls, and fields cannot be edited this way. Structural
-changes such as adding paragraphs, rows, or images, and browser controls for this operation are
-later capabilities.
+When the current revision is a DOCX or PPTX file, the **Edit document text** panel beside the
+preview lists its editable text. Change any line and choose **Publish text edits**; the same
+operations are available through the [Composer API](api-guide.md) and `markweave composer office`.
+Each edit replaces the whole text of one run, only if it still holds the text you reviewed, and
+creates a new immutable revision without regenerating the document. Formatting, images, styles,
+relationships, and every other part of the file are kept exactly. Text in tracked changes, content
+controls, and fields cannot be edited this way. Structural changes such as adding paragraphs, rows,
+or images are later capabilities.
 
 A PPTX revision's slide text, table cell text, and speaker notes can be corrected the same way.
 Targets are listed slide by slide in presentation order with each slide's notes. Slide numbers,
 other fields, and layout or master text are not editable; slide order, shapes, and images are
 unchanged.
 
-You can also ask the model to propose text changes. You choose the exact text targets to share and
-review the exact outgoing text first; nothing else from the document is sent. The model can only
+You can also ask the model to propose text changes. Tick **Share with the model** for the exact
+text to send, write an instruction, and choose **Preview model request** to review the outgoing
+text before **Send shared text to the model**; nothing else from the document is sent. The model can only
 suggest replacement text for those targets. Any other answer fails safely. Its suggestion waits for
-your decision: accept it, edit the replacement texts, or reject it. Publishing an approved
-suggestion creates a new revision that records the model and your decision. It is refused if the
+your decision in the proposals list, which shows each proposed change: accept it, edit the
+replacement texts, or reject it. **Publish approved text edits** creates a new revision that records the model and your decision. It is refused if the
 document changed after you reviewed the suggestion.
 
 ## Generate a reviewed document

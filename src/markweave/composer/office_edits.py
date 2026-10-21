@@ -447,6 +447,26 @@ def inspect_text(
     )
 
 
+def text_lines(
+    content: bytes, limits: TypedDocxLimits, kind: PackageKind
+) -> tuple[str, ...]:
+    """Return each editable part's paragraph texts, in reading order, for review."""
+
+    admitted = _admit(content, limits, kind)
+    lines: list[str] = []
+    for part in admitted.parts:
+        paragraphs: dict[int, list[str]] = {}
+        for node in _text_nodes(admitted.payloads[part.name], kind.grammar, kind.error):
+            paragraphs.setdefault(node.paragraph, []).append(node.text)
+        prefix = (
+            ""
+            if part.slide is None
+            else f"Slide {part.slide}{' notes' if part.notes else ''}: "
+        )
+        lines.extend(prefix + "".join(texts) for _, texts in sorted(paragraphs.items()))
+    return tuple(lines)
+
+
 def plain_text(value: str) -> bool:
     return all(
         unicodedata.category(character) not in {"Cc", "Cs"}

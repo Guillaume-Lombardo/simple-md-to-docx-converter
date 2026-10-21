@@ -279,9 +279,18 @@ def exercise_edit_workflow(  # noqa: PLR0915 - one complete workflow
     )
     assert stale_etag.status_code == 412
 
-    diff = client.get(f"{path}/{revision['id']}/diff?from_revision_id={base['id']}")
-    assert diff.json()["status"] == "unavailable"
-    assert diff.json()["reason"] == "native_semantic_diff_unsupported"
+    diff = client.get(
+        f"{path}/{revision['id']}/diff?from_revision_id={base['id']}"
+    ).json()
+    assert diff["status"] == "available"
+    assert diff["scope"] == "artifact"
+    assert [(item["before_text"], item["after_text"]) for item in diff["changes"]] == [
+        (
+            "Plain paragraph with bold, italic, and struck runs.\n",
+            "Plain paragraph with strong & clear, italic, and struck runs.\n",
+        ),
+        (f"{cell['text']}\n", "Edited cell\n"),
+    ]
 
     restored = client.post(
         f"{path}/{base['id']}/restore",
@@ -602,7 +611,7 @@ def test_markup_inside_text_nodes_is_refused_without_publication(
     exercise_nested_markup_refusal(harness)
 
 
-def exercise_pptx_workflow(harness: DocxEditHarness) -> None:
+def exercise_pptx_workflow(harness: DocxEditHarness) -> None:  # noqa: PLR0915 - one complete workflow
     """Slide and notes edits publish exact bytes, replay, refuse and restore."""
 
     client = harness.client
@@ -686,6 +695,16 @@ def exercise_pptx_workflow(harness: DocxEditHarness) -> None:
         "ppt/slides/slide1.xml",
         "ppt/notesSlides/notesSlide1.xml",
     }
+    diff = client.get(
+        f"{path}/{revision['id']}/diff?from_revision_id={base['id']}"
+    ).json()
+    assert [(item["before_text"], item["after_text"]) for item in diff["changes"]] == [
+        ("Slide 1: Deck Title Slide\n", "Slide 1: Edited deck & title\n"),
+        (
+            f"Slide 1 notes: {notes['text']}\n",
+            "Slide 1 notes: Edited speaker note\n",
+        ),
+    ]
     reread = client.get(f"{path}/{revision['id']}/pptx-text-targets?limit=500")
     texts = {item["target"]: item["text"] for item in reread.json()["targets"]}
     assert texts[title["target"]] == "Edited deck & title"

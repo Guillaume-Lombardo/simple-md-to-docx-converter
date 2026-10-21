@@ -334,8 +334,11 @@ from that exact revision when that artifact kind exists.
 line changes for two owned Markdown downloads or frozen approved Markdown associated with a
 generated native revision. Its `scope` distinguishes artifact text from approved source text;
 `metadata_changes` separately names output, template, presentation option, or component version
-changes. Native Office structure is not semantically diffed. Safety bounds return an explicit
-`unavailable` reason, and line numbers are one-based with no partial changes.
+changes. Two DOCX downloads, or two PPTX downloads, are compared as `artifact` text with one line
+per paragraph in reading order; PPTX lines name their slide and whether they are notes. Office
+structure, formatting, and media are not diffed, and a package that fails edit admission reports
+`office_text_unavailable`. Safety bounds return an explicit `unavailable` reason, and line numbers
+are one-based with no partial changes.
 `POST .../revisions/{revision_id}/restore` with `If-Match` and `Idempotency-Key` makes a new
 copy-forward revision with matching artifacts and no provider call.
 

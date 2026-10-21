@@ -127,6 +127,22 @@ const proposal = {
   decided_at: null,
   decided_by: null,
 };
+const officeProposalValue = JSON.stringify({
+  kind: "office_edit",
+  format: "docx",
+  engine_version: 1,
+  base_revision_id: revision.id,
+  base_sha256: "a".repeat(64),
+  allowed_targets: ["word/document.xml#t0"],
+  operations: [
+    {
+      op: "replace_text",
+      target: "word/document.xml#t0",
+      expected_text: "Old title",
+      text: "Model title",
+    },
+  ],
+});
 const queuedGeneration = {
   id: "00000000-0000-4000-8000-000000000701",
   draft_id: draft.id,
@@ -161,6 +177,7 @@ function setup(
     recoveredPublication?: boolean;
     recoveredPublicationFetchFails?: boolean;
     secondDraft?: boolean;
+    officeProposal?: boolean;
   } = {},
 ) {
   if (!options.preserveStorage) sessionStorage.clear();
@@ -255,13 +272,25 @@ function setup(
             : currentDraft,
       ),
     messages: vi.fn().mockResolvedValue([]),
-    proposals: vi
-      .fn()
-      .mockResolvedValue(
-        options.proposalState
-          ? [{ ...proposal, state: options.proposalState }]
-          : [],
-      ),
+    proposals: vi.fn().mockResolvedValue(
+      options.proposalState
+        ? [
+            {
+              ...proposal,
+              state: options.proposalState,
+              ...(options.officeProposal
+                ? {
+                    proposed_value: officeProposalValue,
+                    decided_value:
+                      options.proposalState === "pending"
+                        ? null
+                        : officeProposalValue,
+                  }
+                : {}),
+            },
+          ]
+        : [],
+    ),
     questions: vi.fn().mockResolvedValue(
       options.question
         ? [
@@ -414,6 +443,29 @@ function setup(
     }),
     captureSource: vi.fn().mockResolvedValue({ data: revision }),
     restore: vi.fn().mockResolvedValue({ data: revision }),
+    publishOfficeProposal: vi.fn().mockResolvedValue({ data: revision }),
+    ...(options.officeProposal
+      ? {
+          office: {
+            targets: vi.fn().mockResolvedValue({
+              revision_id: revision.id,
+              download_sha256: "a".repeat(64),
+              engine_version: 1,
+              targets: [
+                {
+                  target: "word/document.xml#t0",
+                  paragraph: 0,
+                  in_table: false,
+                  text: "Old title",
+                },
+              ],
+              total: 1,
+              limit: 200,
+              offset: 0,
+            }),
+          },
+        }
+      : {}),
   };
   const mounted = render(
     <AuthProvider controller={auth}>
@@ -1839,4 +1891,49 @@ test("answer resume stays blocked when an original author grant is gone", async 
   } finally {
     authorList.mockRestore();
   }
+});
+
+test("approved Office edit proposals show their exact changes and publish as Office edits", async () => {
+  const api = setup({ officeProposal: true, proposalState: "accepted" });
+  const changes = await screen.findByRole("list", {
+    name: "Proposed text changes",
+  });
+  expect(changes).toHaveTextContent(
+    "word/document.xml#t0: “Old title” → “Model title”",
+  );
+  expect(
+    screen.queryByRole("button", { name: "Publish approved text" }),
+  ).toBeNull();
+  expect(
+    await screen.findByRole("region", { name: "Office text editing" }),
+  ).toBeVisible();
+  expect(await screen.findByLabelText("Paragraph 1: Old title")).toBeVisible();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Publish approved text edits" }),
+  );
+  await waitFor(() =>
+    expect(api.publishOfficeProposal).toHaveBeenCalledWith(
+      expect.objectContaining({ id: draft.id }),
+      proposal.id,
+      expect.any(String),
+    ),
+  );
+  expect(
+    await screen.findByText(
+      "Approved text edits published as an immutable revision.",
+    ),
+  ).toBeVisible();
+});
+
+test("pending Office edit proposals are reviewed before any publication", async () => {
+  setup({ officeProposal: true, proposalState: "pending" });
+  expect(
+    await screen.findByRole("list", {
+      name: "Proposed text changes",
+      hidden: true,
+    }),
+  ).toHaveTextContent("“Old title” → “Model title”");
+  expect(
+    screen.queryByRole("button", { name: "Publish approved text edits" }),
+  ).toBeNull();
 });

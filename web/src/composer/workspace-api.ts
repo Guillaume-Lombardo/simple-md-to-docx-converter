@@ -1,6 +1,7 @@
 import * as v from "valibot";
 import { ApiTransport, type JsonResult } from "../api/transport";
 import { ComposerConnectionsApi } from "./api";
+import { OfficeEditApi } from "./office-edit-api";
 
 const draftSchema = v.object({
   id: v.string(),
@@ -170,9 +171,11 @@ const page = <T extends v.BaseSchema<unknown, unknown, v.BaseIssue<unknown>>>(
 
 export class ComposerWorkspaceApi {
   readonly connections: ComposerConnectionsApi;
+  readonly office: OfficeEditApi;
 
   constructor(private readonly transport = new ApiTransport()) {
     this.connections = new ComposerConnectionsApi(transport);
+    this.office = new OfficeEditApi(transport);
   }
 
   async drafts(
@@ -339,6 +342,26 @@ export class ComposerWorkspaceApi {
   ): Promise<JsonResult<ComposerRevision>> {
     return this.transport.jsonWithMetadata(
       `/api/v1/composer/drafts/${draft.id}/proposals/${proposalId}/publish`,
+      revisionSchema,
+      {
+        body: JSON.stringify({}),
+        csrf: true,
+        etag: draft.etag,
+        idempotencyKey: key,
+        method: "POST",
+        signal,
+      },
+    );
+  }
+
+  publishOfficeProposal(
+    draft: ComposerDraft,
+    proposalId: string,
+    key: string,
+    signal?: AbortSignal,
+  ): Promise<JsonResult<ComposerRevision>> {
+    return this.transport.jsonWithMetadata(
+      `/api/v1/composer/drafts/${draft.id}/proposals/${proposalId}/office-edits`,
       revisionSchema,
       {
         body: JSON.stringify({}),

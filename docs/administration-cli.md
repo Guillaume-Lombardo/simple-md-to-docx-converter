@@ -108,6 +108,15 @@ markweave composer revisions download DRAFT_ID REVISION_ID \
   --kind {download,preview} --output PATH [--force] [--profile NAME]
 markweave composer revisions restore DRAFT_ID REVISION_ID --etag ETAG \
   --idempotency-key KEY [--profile NAME]
+markweave composer office targets DRAFT_ID REVISION_ID --format {docx,pptx} \
+  [--offset N] [--limit N] [--profile NAME]
+markweave composer office edit DRAFT_ID REVISION_ID --format {docx,pptx} \
+  --operations-file PATH --etag ETAG --idempotency-key KEY [--profile NAME]
+markweave composer office propose DRAFT_ID REVISION_ID CONNECTION_ID \
+  --target TARGET [--target TARGET ...] {--instruction-file PATH|--stdin} \
+  --max-output-tokens N --etag ETAG --idempotency-key KEY [--force] [--profile NAME]
+markweave composer office publish DRAFT_ID PROPOSAL_ID --etag ETAG \
+  --idempotency-key KEY [--profile NAME]
 ```
 
 List offsets are non-negative and limits are between 1 and 100; JSON output
@@ -119,6 +128,14 @@ unavailable. Conversion handoff remains owner-scoped at the
 service. Message creation, source capture, and revision restore require a visible
 ASCII idempotency key of at most 128 characters together with the current draft
 ETag. The key is safe operation metadata and may be supplied on the command line.
+
+Office text commands work on the current DOCX or PPTX revision. `office targets` lists its
+stable text targets. `office edit` reads a JSON list of `{ "target", "expected_text", "text" }`
+replacements from a regular, current-user-only file within the service request limit, because it
+contains document text, and publishes them as one new revision. `office propose` follows the
+model-step rules below: it previews the exact instruction and selected target text, shows it for
+confirmation unless `--force` is given, and starts the step with the reviewed preview digest.
+`office publish` publishes an accepted or edited model text proposal.
 
 Model-step start first reads the authorized connection and takes its exact endpoint
 and selected model. It reads user-authored text from a regular, current-user-only

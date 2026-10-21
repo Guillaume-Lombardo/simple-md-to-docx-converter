@@ -47,8 +47,8 @@ to publish exact current saved Markdown, including a validated ZIP draft's retai
 assets. Revision `source` artifacts can be downloaded with `--kind source`.
 Use
 `markweave composer revisions diff DRAFT_ID TO_REVISION_ID --from-revision FROM_REVISION_ID`
-for bounded line changes. Native Office proposals are reviewable but cannot be published as
-document edits until a qualified structured editor is available.
+for bounded line changes. `markweave composer office` lists, edits, and proposes exact DOCX and
+PPTX text changes; see [Administration CLI](administration-cli.md#composer-connections).
 
 The author directory and typed Word filling use separate Composer command families:
 

@@ -7,8 +7,12 @@ import zipfile
 
 import pytest
 
-from markweave.composer.office_edits import PptxEditError, ReplaceText
-from markweave.composer.pptx_edits import apply_pptx_text_edits, inspect_pptx_text
+from markweave.composer.office_edits import PptxEditError, ReplaceText, text_lines
+from markweave.composer.pptx_edits import (
+    PPTX_PACKAGE,
+    apply_pptx_text_edits,
+    inspect_pptx_text,
+)
 from markweave.composer.typed_templates import TypedDocxLimits
 from tests.pptx_fixtures import NS, R, archive, parts, relations, text_shape
 
@@ -217,3 +221,21 @@ def test_wrong_presentation_root_fails_closed() -> None:
     with pytest.raises(PptxEditError) as rejected:
         inspect_pptx_text(archive(members), _limits())
     assert rejected.value.code == "invalid_package"
+
+
+def test_review_lines_join_runs_per_paragraph_with_slide_context() -> None:
+    deck = archive(
+        parts(
+            (
+                "<p:sp><p:txBody><a:p><a:r><a:t>Two </a:t></a:r>"
+                "<a:fld id='{1}' type='slidenum'><a:t>3</a:t></a:fld>"
+                "<a:r><a:t> runs</a:t></a:r></a:p></p:txBody></p:sp>",
+            ),
+            notes=text_shape("Note"),
+        )
+    )
+
+    assert text_lines(deck, _limits(), PPTX_PACKAGE) == (
+        "Slide 1: Two 3 runs",
+        "Slide 1 notes: Note",
+    )
