@@ -11,6 +11,7 @@ from markweave.persistence.sql import create_database_engine
 from tests.integration.postgres.test_postgres_composer_foundations import _store
 from tests.integration.sqlite.test_composer_library_citations_http import (
     exercise_citation_access_is_rechecked,
+    exercise_cited_admission_race,
     exercise_cited_question_resume,
     exercise_cited_step_is_reviewed_and_published,
 )
@@ -54,3 +55,9 @@ def test_postgres_s3_cited_question_resume_requires_its_citations(
     harness: OfficeStepHarness,
 ) -> None:
     exercise_cited_question_resume(harness)
+
+
+def test_postgres_s3_cited_retry_that_loses_the_admission_race_is_replayed(
+    harness: OfficeStepHarness,
+) -> None:
+    exercise_cited_admission_race(harness)

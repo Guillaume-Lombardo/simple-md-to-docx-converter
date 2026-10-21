@@ -177,6 +177,52 @@ def test_cited_step_is_reviewed_and_published(harness: OfficeStepHarness) -> Non
     exercise_cited_step_is_reviewed_and_published(harness)
 
 
+def exercise_cited_admission_race(harness: OfficeStepHarness) -> None:
+    """A cited retry that loses the admission race replays the winner's step."""
+
+    own = _document(harness, harness.owner, _OWN)
+    path, etag = _draft(harness)
+    refs = _cite(own)
+    reviewed = _preview(harness, path, etag, refs).json()
+    assert harness.steps is not None
+    lookup = harness.steps.replay_model_step
+    paused = [True]
+    winners: list[dict[str, object]] = []
+
+    def lookup_then_lose_the_race(*args: Any, **kwargs: Any) -> object:
+        found = lookup(*args, **kwargs)
+        if paused:
+            # Pause the first request right after its lookup found nothing and
+            # let an identical cited request be admitted and complete meanwhile.
+            paused.clear()
+            harness.replies.append("# Report\n\nThe turbine failed.\n")
+            winner = _start(
+                harness, path, etag, refs, reviewed["preview_digest"], "race"
+            )
+            assert winner.status_code == 202, winner.text
+            winners.append(_settled(harness, path, winner.json()["id"]))
+            assert harness.client.get(path).json()["etag"] != etag
+        return found
+
+    prompts = len(harness.prompts)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(harness.steps, "replay_model_step", lookup_then_lose_the_race)
+        loser = _start(harness, path, etag, refs, reviewed["preview_digest"], "race")
+    assert loser.status_code == 202, loser.text
+    assert winners
+    assert winners[0]["status"] == "completed"
+    assert loser.json() == winners[0]
+    assert len(harness.prompts) == prompts + 1
+    reused = _start(harness, path, etag, [], reviewed["preview_digest"], "race")
+    assert reused.status_code == 412, reused.text
+
+
+def test_cited_retry_that_loses_the_admission_race_is_replayed(
+    harness: OfficeStepHarness,
+) -> None:
+    exercise_cited_admission_race(harness)
+
+
 def exercise_citation_access_is_rechecked(harness: OfficeStepHarness) -> None:
     """Foreign, revoked, changed or duplicated citations never reach the provider."""
 

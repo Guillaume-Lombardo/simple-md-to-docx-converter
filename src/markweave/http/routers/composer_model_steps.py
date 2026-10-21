@@ -385,46 +385,57 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:  # noqa: PLR0915
         )
         if replayed is not None:
             return _response(replayed)
-        content = payload.content
-        if author_refs or library_refs:
-            preview = _preview_context(
-                dependencies,
-                user,
+        try:
+            content = payload.content
+            if author_refs or library_refs:
+                preview = _preview_context(
+                    dependencies,
+                    user,
+                    draft_id,
+                    payload.content,
+                    tuple(ref[0] for ref in author_refs),
+                    library_refs,
+                    etag,
+                )
+                content = preview.transmitted
+                if (
+                    preview.author_refs != author_refs
+                    or payload.author_preview_digest != preview.digest
+                ):
+                    raise ComposerConflictError("Author preview changed")
+            elif payload.author_preview_digest is not None:
+                raise ComposerRequestError("Author preview is invalid")
+            if len(content.encode("utf-8")) > request_limit:
+                raise ComposerRequestError("Model prompt exceeds the configured limit")
+            step = runner.start(
+                _actor(dependencies, user),
                 draft_id,
-                payload.content,
-                tuple(ref[0] for ref in author_refs),
-                library_refs,
-                etag,
+                ModelStepInput(
+                    connection_id=payload.connection_id,
+                    if_match=etag,
+                    idempotency_key=key,
+                    approved_endpoint=payload.approved_endpoint,
+                    approved_model=payload.approved_model,
+                    content=content,
+                    max_output_tokens=payload.max_output_tokens,
+                    payload_digest=digest,
+                    intent=payload.intent,
+                    answered_question_id=payload.answered_question_id,
+                    author_refs=author_refs,
+                    author_preview_digest=payload.author_preview_digest,
+                    library_refs=library_refs,
+                ),
             )
-            content = preview.transmitted
-            if (
-                preview.author_refs != author_refs
-                or payload.author_preview_digest != preview.digest
-            ):
-                raise ComposerConflictError("Author preview changed")
-        elif payload.author_preview_digest is not None:
-            raise ComposerRequestError("Author preview is invalid")
-        if len(content.encode("utf-8")) > request_limit:
-            raise ComposerRequestError("Model prompt exceeds the configured limit")
-        step = runner.start(
-            _actor(dependencies, user),
-            draft_id,
-            ModelStepInput(
-                connection_id=payload.connection_id,
-                if_match=etag,
-                idempotency_key=key,
-                approved_endpoint=payload.approved_endpoint,
-                approved_model=payload.approved_model,
-                content=content,
-                max_output_tokens=payload.max_output_tokens,
-                payload_digest=digest,
-                intent=payload.intent,
-                answered_question_id=payload.answered_question_id,
-                author_refs=author_refs,
-                author_preview_digest=payload.author_preview_digest,
-                library_refs=library_refs,
-            ),
-        )
+        except ComposerConflictError:
+            # An identical request may have been admitted, and even completed,
+            # after the lookup above and moved the draft on. Answer from its
+            # durable step; a different request under this key still fails.
+            replayed = _replayed_step(
+                dependencies, user, draft_id, payload, etag, key, digest
+            )
+            if replayed is None:
+                raise
+            return _response(replayed)
         return _response(step)
 
     @router.get(
