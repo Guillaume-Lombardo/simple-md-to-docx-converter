@@ -98,6 +98,12 @@ class ComposerModelStepMaintenanceRepository(Protocol):
     ) -> int: ...
 
 
+class ComposerLibraryMaintenanceRepository(Protocol):
+    """Bounded settlement of library uploads and deleted-version objects."""
+
+    def cleanup(self, *, limit: int) -> int: ...
+
+
 class RetentionService:
     """Delete eligible bytes before fenced metadata acknowledgement."""
 
@@ -111,6 +117,7 @@ class RetentionService:
         composer_content_audit: ComposerContentAuditRepository | None = None,
         composer_connection_audit: ComposerConnectionAuditRepository | None = None,
         composer_model_steps: ComposerModelStepMaintenanceRepository | None = None,
+        composer_library: ComposerLibraryMaintenanceRepository | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._repository = repository
@@ -120,6 +127,7 @@ class RetentionService:
         self._composer_content_audit = composer_content_audit
         self._composer_connection_audit = composer_connection_audit
         self._composer_model_steps = composer_model_steps
+        self._composer_library = composer_library
         self._clock = clock
 
     def cleanup(self, *, limit: int) -> int:
@@ -184,4 +192,6 @@ class RetentionService:
                     limit=limit,
                 )
             )
+        if self._composer_library is not None:
+            composer_cleaned += self._composer_library.cleanup(limit=limit)
         return expired_steps + completed + audits + composer_cleaned

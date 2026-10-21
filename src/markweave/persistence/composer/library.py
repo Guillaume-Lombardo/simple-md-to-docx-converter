@@ -14,16 +14,17 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
-from sqlalchemy import ColumnElement, Engine, exists, func, or_, select
+from sqlalchemy import ColumnElement, Engine, delete, exists, func, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from markweave.composer.library import ScoredChunk, score_chunk
+from markweave.composer.library import ScoredChunk, normalize_search, score_chunk
 from markweave.persistence.composer.audit import record_content_audit
 from markweave.persistence.composer.common import utc, validate_page
 from markweave.persistence.errors import PersistenceError
 from markweave.persistence.schema import (
     ComposerLibraryChunkRow,
+    ComposerLibraryCleanupRow,
     ComposerLibraryDocumentRow,
     ComposerLibraryGrantRow,
     ComposerLibraryVersionRow,
@@ -269,6 +270,7 @@ class SqlComposerLibraryRepository:
                         id=str(document_id),
                         owner_id=str(owner_id),
                         title=clean_title,
+                        search_title=normalize_search(clean_title),
                         revision=1,
                         current_version_id=None,
                         publication_state="pending",
@@ -387,8 +389,8 @@ class SqlComposerLibraryRepository:
                 )
                 if query:
                     statement = statement.where(
-                        ComposerLibraryDocumentRow.title.icontains(
-                            query, autoescape=True
+                        ComposerLibraryDocumentRow.search_title.contains(
+                            normalize_search(query), autoescape=True
                         )
                     )
                 rows = database.scalars(
@@ -469,37 +471,92 @@ class SqlComposerLibraryRepository:
         return self._change_grant(actor_id, document_id, user_id, if_match, grant=False)
 
     def delete(self, actor_id: UUID, document_id: UUID, *, if_match: str) -> None:
-        """Remove an owner's document; later citations report it as unavailable."""
+        """Remove an owner's document; later citations report it as unavailable.
 
+        Every version's object, published or still being written, gets a durable
+        cleanup record in the same transaction that removes the metadata, so a
+        crash or an object-store failure leaves work for the next sweep rather
+        than an orphan. A pending upload's record waits for its lease to expire,
+        because its object may still be written after this commit.
+        """
+
+        now = self._clock()
         try:
             with Session(self._engine) as database, database.begin():
                 serialize_sqlite_write(database, self._engine)
                 row = self._mutable(database, actor_id, document_id, if_match)
-                keys = tuple(
-                    ObjectKey(
-                        ObjectScope.COMPOSER_LIBRARY,
-                        UUID(version.object_owner_id),
-                        UUID(version.id),
-                    )
-                    for version in database.scalars(
-                        select(ComposerLibraryVersionRow).where(
-                            ComposerLibraryVersionRow.document_id == str(document_id)
+                versions = database.scalars(
+                    select(ComposerLibraryVersionRow)
+                    .where(ComposerLibraryVersionRow.document_id == str(document_id))
+                    .with_for_update()
+                ).all()
+                for version in versions:
+                    lease = version.lease_expires_at
+                    database.add(
+                        ComposerLibraryCleanupRow(
+                            version_id=version.id,
+                            object_owner_id=version.object_owner_id,
+                            not_before=(
+                                max(utc(now), utc(lease))
+                                if version.publication_state == "pending"
+                                and lease is not None
+                                else now
+                            ),
+                            created_at=now,
                         )
                     )
-                )
                 self._audit(database, row, actor_id, "delete")
                 database.delete(row)
         except LibraryNotFoundError, LibraryConflictError:
             raise
         except SQLAlchemyError:
             raise PersistenceError from None
-        for key in keys:
-            # Metadata is already gone, so a remaining object is unreferenced
-            # and invisible; a later sweep may remove it without data loss.
+        with suppress(ObjectStoreError, SQLAlchemyError):
+            self.sweep_deleted(limit=max(len(versions), 1))
+
+    def sweep_deleted(self, *, limit: int) -> int:
+        """Remove due objects of deleted versions, then their cleanup records."""
+
+        if type(limit) is not int or limit <= 0:
+            raise ValueError("Cleanup limit must be positive")
+        now = self._clock()
+        with Session(self._engine) as database:
+            due = tuple(
+                (row.version_id, row.object_owner_id)
+                for row in database.scalars(
+                    select(ComposerLibraryCleanupRow)
+                    .where(ComposerLibraryCleanupRow.not_before <= now)
+                    .order_by(
+                        ComposerLibraryCleanupRow.not_before,
+                        ComposerLibraryCleanupRow.version_id,
+                    )
+                    .limit(limit)
+                )
+            )
+        removed = 0
+        for version_id, owner_id in due:
             try:
-                self._objects.delete(key)
+                self._objects.delete(
+                    ObjectKey(
+                        ObjectScope.COMPOSER_LIBRARY, UUID(owner_id), UUID(version_id)
+                    )
+                )
             except ObjectStoreError:
                 continue
+            with Session(self._engine) as database, database.begin():
+                serialize_sqlite_write(database, self._engine)
+                database.execute(
+                    delete(ComposerLibraryCleanupRow).where(
+                        ComposerLibraryCleanupRow.version_id == version_id
+                    )
+                )
+            removed += 1
+        return removed
+
+    def cleanup(self, *, limit: int) -> int:
+        """Bounded maintenance: settle expired uploads and sweep deleted objects."""
+
+        return self.recover_pending(limit=limit) + self.sweep_deleted(limit=limit)
 
     def search(
         self, actor_id: UUID, terms: tuple[str, ...], *, limit: int
@@ -531,7 +588,7 @@ class SqlComposerLibraryRepository:
                         _visible(actor_id),
                         _active(actor_id),
                         *(
-                            ComposerLibraryChunkRow.text.icontains(
+                            ComposerLibraryChunkRow.search_text.contains(
                                 term, autoescape=True
                             )
                             for term in terms
@@ -548,7 +605,7 @@ class SqlComposerLibraryRepository:
             raise PersistenceError from None
         hits: list[tuple[ScoredChunk, LibrarySearchHit]] = []
         for chunk, version, document in rows:
-            scored = score_chunk(chunk.text, terms)
+            scored = score_chunk(chunk.text, chunk.search_text, terms)
             if scored is None:
                 continue
             hits.append(
@@ -626,9 +683,9 @@ class SqlComposerLibraryRepository:
                 if valid:
                     self._finalize(document_id, version_id, token)
                 else:
-                    self._discard(document_id, version_id, token)
+                    self._discard(document_id, version_id, token, owner_id)
             except LibraryConflictError:
-                self._discard(document_id, version_id, token)
+                self._discard(document_id, version_id, token, owner_id)
             processed += 1
         return processed
 
@@ -749,7 +806,10 @@ class SqlComposerLibraryRepository:
         database.flush()
         database.add_all(
             ComposerLibraryChunkRow(
-                version_id=str(version_id), ordinal=ordinal, text=text
+                version_id=str(version_id),
+                ordinal=ordinal,
+                text=text,
+                search_text=normalize_search(text),
             )
             for ordinal, text in enumerate(source.chunks)
         )
@@ -772,7 +832,7 @@ class SqlComposerLibraryRepository:
             # A losing or failed publication never stays visible; if cleanup
             # itself fails, the expired reservation is swept by recovery.
             with suppress(ObjectStoreError, SQLAlchemyError):
-                self._discard(document_id, version_id, token)
+                self._discard(document_id, version_id, token, owner_id)
             raise
 
     def _write(self, key: ObjectKey, content: bytes) -> None:
@@ -838,7 +898,9 @@ class SqlComposerLibraryRepository:
         except SQLAlchemyError:
             raise PersistenceError from None
 
-    def _discard(self, document_id: UUID, version_id: UUID, token: UUID) -> None:
+    def _discard(
+        self, document_id: UUID, version_id: UUID, token: UUID, owner_id: UUID
+    ) -> None:
         with Session(self._engine) as database, database.begin():
             serialize_sqlite_write(database, self._engine)
             version = database.scalar(
@@ -851,6 +913,16 @@ class SqlComposerLibraryRepository:
                 .with_for_update()
             )
             if version is None:
+                if database.get(ComposerLibraryVersionRow, str(version_id)) is None:
+                    # The document was deleted while this upload was in flight:
+                    # nothing references the object, and its cleanup record
+                    # covers a crash before this best-effort removal.
+                    with suppress(ObjectStoreError):
+                        self._objects.delete(
+                            ObjectKey(
+                                ObjectScope.COMPOSER_LIBRARY, owner_id, version_id
+                            )
+                        )
                 return
             # Keep the reservation locked until object removal succeeds. A crash
             # leaves a hidden row for the next recovery sweep, never an orphan.

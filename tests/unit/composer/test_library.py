@@ -10,6 +10,7 @@ from markweave.composer.library import (
     LibraryContentError,
     chunk_paragraphs,
     extract_paragraphs,
+    normalize_search,
     query_terms,
     score_chunk,
 )
@@ -114,10 +115,31 @@ def test_query_terms_are_distinct_case_folded_and_bounded() -> None:
 def test_chunks_score_only_when_every_term_matches() -> None:
     text = f"{'x' * 400} Turbine storm turbine {'y' * 400}"
 
-    scored = score_chunk(text, ("turbine", "storm"))
+    scored = score_chunk(text, normalize_search(text), ("turbine", "storm"))
 
     assert scored is not None
     assert scored.score == 3
     start = text.index("Turbine") - MAXIMUM_SNIPPET_CHARACTERS // 4
     assert scored.snippet == text[start : start + MAXIMUM_SNIPPET_CHARACTERS]
-    assert score_chunk(text, ("turbine", "banana")) is None
+    assert score_chunk(text, normalize_search(text), ("turbine", "banana")) is None
+
+
+@pytest.mark.parametrize("query", ["Straße", "STRASSE", "été", "ÉTÉ", "ﬁle"])
+def test_unicode_terms_match_text_folded_the_same_way(query: str) -> None:
+    text = "Straße ÉTÉ file"
+
+    terms = query_terms(query)
+    scored = score_chunk(text, normalize_search(text), terms)
+
+    assert scored is not None
+    assert all(term in normalize_search(text) for term in terms)
+    assert scored.snippet == text
+
+
+def test_snippet_offsets_follow_length_changing_folds() -> None:
+    text = "ß" * 200 + " needle " + "x" * 400
+
+    scored = score_chunk(text, normalize_search(text), ("needle",))
+
+    assert scored is not None
+    assert "needle" in scored.snippet

@@ -608,7 +608,7 @@ def build_components(  # noqa: PLR0912, PLR0915 - explicit resource ownership co
             else None
         )
         if composer_library is not None:
-            composer_library.recover_pending(limit=job_policies.schedule.cleanup_limit)
+            composer_library.cleanup(limit=job_policies.schedule.cleanup_limit)
         if settings.composer_pending_publication_stale_seconds is not None:
             stale_before = datetime.now(UTC) - timedelta(
                 seconds=settings.composer_pending_publication_stale_seconds
@@ -662,6 +662,7 @@ def build_components(  # noqa: PLR0912, PLR0915 - explicit resource ownership co
             composer_content_audit=SqlComposerAuditRepository(engine),
             composer_connection_audit=composer_connection_repository,
             composer_model_steps=composer_model_step_repository,
+            composer_library=composer_library,
         )
         components = AppComponents(
             authentication=authentication,

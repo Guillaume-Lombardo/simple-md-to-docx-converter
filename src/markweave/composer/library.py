@@ -48,6 +48,12 @@ class ScoredChunk:
     snippet: str
 
 
+def normalize_search(value: str) -> str:
+    """Fold text the same way for storage, SQL prefiltering, and scoring."""
+
+    return unicodedata.normalize("NFKC", value).casefold()
+
+
 def _readable(value: str) -> str:
     return "".join(
         " " if unicodedata.category(character) in {"Cc", "Cs"} else character
@@ -109,7 +115,7 @@ def query_terms(query: str) -> tuple[str, ...]:
     """Return distinct case-folded search terms, bounded in number."""
 
     terms: list[str] = []
-    for match in _TERM.finditer(query.casefold()):
+    for match in _TERM.finditer(normalize_search(query)):
         if match.group() not in terms:
             terms.append(match.group())
     if not terms or len(terms) > MAXIMUM_QUERY_TERMS:
@@ -117,15 +123,29 @@ def query_terms(query: str) -> tuple[str, ...]:
     return tuple(terms)
 
 
-def score_chunk(text: str, terms: tuple[str, ...]) -> ScoredChunk | None:
-    """Rank a chunk containing every term, with a snippet at the first match."""
+def score_chunk(
+    text: str, search_text: str, terms: tuple[str, ...]
+) -> ScoredChunk | None:
+    """Rank a chunk containing every term, with a snippet near the first match.
 
-    folded = text.casefold()
-    positions = [folded.find(term) for term in terms]
+    ``search_text`` is ``normalize_search(text)``. Folding can change lengths
+    (``ß`` becomes ``ss``), so the match offset is mapped back onto the text.
+    """
+
+    positions = [search_text.find(term) for term in terms]
     if any(position < 0 for position in positions):
         return None
-    score = sum(folded.count(term) for term in terms)
-    first = min(positions)
+    score = sum(search_text.count(term) for term in terms)
+    first = _original_offset(text, min(positions))
     start = max(0, first - MAXIMUM_SNIPPET_CHARACTERS // 4)
     snippet = text[start : start + MAXIMUM_SNIPPET_CHARACTERS]
     return ScoredChunk(score, snippet)
+
+
+def _original_offset(text: str, folded_offset: int) -> int:
+    folded = 0
+    for index, character in enumerate(text):
+        if folded >= folded_offset:
+            return index
+        folded += len(normalize_search(character))
+    return len(text)

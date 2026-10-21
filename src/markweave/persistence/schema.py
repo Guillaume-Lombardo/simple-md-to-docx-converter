@@ -1684,6 +1684,8 @@ class ComposerLibraryDocumentRow(Base):
         String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
     title: Mapped[str] = mapped_column(String(), nullable=False)
+    # NFKC case-folded title, compared with equally folded filters in SQL.
+    search_title: Mapped[str] = mapped_column(String(), nullable=False)
     revision: Mapped[int] = mapped_column(Integer, nullable=False)
     current_version_id: Mapped[str | None] = mapped_column(String(36))
     publication_state: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -1786,3 +1788,23 @@ class ComposerLibraryChunkRow(Base):
     )
     ordinal: Mapped[int] = mapped_column(Integer, primary_key=True)
     text: Mapped[str] = mapped_column(String(), nullable=False)
+    # NFKC case-folded text so SQL prefiltering matches Python scoring exactly.
+    search_text: Mapped[str] = mapped_column(String(), nullable=False)
+
+
+class ComposerLibraryCleanupRow(Base):
+    """A durable obligation to remove one deleted version's source object."""
+
+    __tablename__ = "composer_library_cleanups"
+
+    version_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    object_owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    not_before: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+Index("ix_composer_library_cleanups_due", ComposerLibraryCleanupRow.not_before)

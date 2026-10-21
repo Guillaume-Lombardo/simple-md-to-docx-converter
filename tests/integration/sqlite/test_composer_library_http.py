@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Barrier
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -27,17 +27,26 @@ from markweave.auth.service import AuthenticationService
 from markweave.config import Settings
 from markweave.malware import MalwareDetectedError, UploadScanner
 from markweave.persistence.composer.library import (
+    LibraryConflictError,
     LibrarySource,
     SqlComposerLibraryRepository,
 )
 from markweave.persistence.migrations import upgrade_database
 from markweave.persistence.schema import (
     ComposerContentAuditRow,
+    ComposerLibraryCleanupRow,
     ComposerLibraryVersionRow,
     UserRow,
 )
 from markweave.persistence.sql import create_database_engine
-from markweave.storage import FilesystemObjectStore, ObjectStore, ObjectStoreError
+from markweave.storage import (
+    FilesystemObjectStore,
+    ObjectKey,
+    ObjectNotFoundError,
+    ObjectScope,
+    ObjectStore,
+    ObjectStoreError,
+)
 from tests.settings import template_settings
 
 pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
@@ -505,3 +514,130 @@ def exercise_request_validation(harness: LibraryHarness) -> None:
 
 def test_requests_are_validated_before_storage(harness: LibraryHarness) -> None:
     exercise_request_validation(harness)
+
+
+def _cleanup_rows(harness: LibraryHarness) -> list[str]:
+    with Session(harness.engine) as database:
+        return list(
+            database.scalars(
+                select(ComposerLibraryCleanupRow.version_id).where(
+                    ComposerLibraryCleanupRow.object_owner_id == str(harness.owner.id)
+                )
+            )
+        )
+
+
+def _object_exists(harness: LibraryHarness, version_id: str) -> bool:
+    try:
+        harness.objects.get(
+            ObjectKey(ObjectScope.COMPOSER_LIBRARY, harness.owner.id, UUID(version_id))
+        )
+    except ObjectNotFoundError:
+        return False
+    return True
+
+
+def _later(harness: LibraryHarness) -> SqlComposerLibraryRepository:
+    """A restarted repository whose clock is past every publication lease."""
+
+    return SqlComposerLibraryRepository(
+        harness.engine,
+        harness.objects,
+        publication_lease=timedelta(seconds=30),
+        maximum_scanned_chunks=100,
+        clock=lambda: datetime.now(UTC) + timedelta(hours=1),
+    )
+
+
+def exercise_durable_deletion(harness: LibraryHarness, mocker: MockerFixture) -> None:
+    """Deleted sources are always removed: after failures, crashes, and races."""
+
+    created = _upload(harness, "notes.md", _NOTES.encode()).json()
+    path = f"{_LIBRARY}/{created['id']}"
+    replaced = _upload(
+        harness, "notes.md", b"# Two\n", path=f"{path}/versions", etag=created["etag"]
+    ).json()
+    versions = [created["current_version_id"], replaced["current_version_id"]]
+    mocker.patch.object(
+        harness.objects, "delete", side_effect=ObjectStoreError("unavailable")
+    )
+    deleted = harness.client.delete(
+        path, headers={"X-CSRF-Token": "csrf", "If-Match": replaced["etag"]}
+    )
+    assert deleted.status_code == 204
+    mocker.stopall()
+    assert sorted(_cleanup_rows(harness)) == sorted(versions)
+    assert all(_object_exists(harness, version) for version in versions)
+    assert harness.library.cleanup(limit=10) == 2
+    assert _cleanup_rows(harness) == []
+    assert not any(_object_exists(harness, version) for version in versions)
+
+    crashed = _upload(harness, "crash.md", _NOTES.encode()).json()
+    mocker.patch.object(
+        harness.library, "sweep_deleted", side_effect=RuntimeError("crash")
+    )
+    with pytest.raises(RuntimeError):
+        harness.library.delete(
+            harness.owner.id, UUID(crashed["id"]), if_match=crashed["etag"]
+        )
+    mocker.stopall()
+    assert harness.client.get(f"{_LIBRARY}/{crashed['id']}").status_code == 404
+    assert _cleanup_rows(harness) == [crashed["current_version_id"]]
+    assert _object_exists(harness, crashed["current_version_id"])
+    assert _later(harness).cleanup(limit=10) == 1
+    assert not _object_exists(harness, crashed["current_version_id"])
+
+    racing = _upload(harness, "race.md", _NOTES.encode()).json()
+    write = harness.library._write
+
+    def delete_then_write(key: ObjectKey, content: bytes) -> None:
+        harness.library.delete(
+            harness.owner.id, UUID(racing["id"]), if_match=racing["etag"]
+        )
+        write(key, content)
+
+    mocker.patch.object(harness.library, "_write", side_effect=delete_then_write)
+    source = LibrarySource(b"# Late\n", "text/markdown", "test:library", ("# Late",))
+    with pytest.raises(LibraryConflictError):
+        harness.library.replace(
+            harness.owner.id, UUID(racing["id"]), source, if_match=racing["etag"]
+        )
+    mocker.stopall()
+    pending = [
+        version
+        for version in _cleanup_rows(harness)
+        if version != racing["current_version_id"]
+    ]
+    assert len(pending) == 1
+    assert not _object_exists(harness, pending[0])
+    _later(harness).cleanup(limit=10)
+    assert _cleanup_rows(harness) == []
+    assert not _object_exists(harness, racing["current_version_id"])
+
+
+def test_deleted_sources_are_eventually_removed(
+    harness: LibraryHarness, mocker: MockerFixture
+) -> None:
+    exercise_durable_deletion(harness, mocker)
+
+
+def exercise_unicode_search(harness: LibraryHarness) -> None:
+    """SQL prefiltering and ranking fold Unicode identically in both profiles."""
+
+    created = _upload(
+        harness, "unicode.md", "# Straße ÉTÉ\n\nﬁle naïve".encode(), title="Été Straße"
+    )
+    assert created.status_code == 201, created.text
+    for query in ("Straße", "STRASSE", "été", "ÉTÉ", "file", "NAÏVE"):
+        assert [hit["title"] for hit in _search(harness, query)] == ["Été Straße"], (
+            query
+        )
+    for title_filter in ("été", "STRASSE"):
+        listed = harness.client.get(_LIBRARY, params={"query": title_filter})
+        assert [item["title"] for item in listed.json()["documents"]] == [
+            "Été Straße"
+        ], title_filter
+
+
+def test_unicode_search_matches_folded_text(harness: LibraryHarness) -> None:
+    exercise_unicode_search(harness)

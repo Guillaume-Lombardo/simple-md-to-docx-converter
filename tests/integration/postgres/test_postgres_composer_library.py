@@ -12,10 +12,12 @@ from tests.integration.postgres.test_postgres_composer_foundations import _store
 from tests.integration.sqlite.test_composer_library_http import (
     LibraryHarness,
     exercise_concurrent_replacements,
+    exercise_durable_deletion,
     exercise_library_lifecycle,
     exercise_office_and_rejected_sources,
     exercise_publication_failures_and_recovery,
     exercise_request_validation,
+    exercise_unicode_search,
     library_harness,
 )
 
@@ -64,3 +66,15 @@ def test_postgres_s3_requests_are_validated_before_storage(
     harness: LibraryHarness,
 ) -> None:
     exercise_request_validation(harness)
+
+
+def test_postgres_s3_deleted_sources_are_eventually_removed(
+    harness: LibraryHarness, mocker: MockerFixture
+) -> None:
+    exercise_durable_deletion(harness, mocker)
+
+
+def test_postgres_s3_unicode_search_matches_folded_text(
+    harness: LibraryHarness,
+) -> None:
+    exercise_unicode_search(harness)

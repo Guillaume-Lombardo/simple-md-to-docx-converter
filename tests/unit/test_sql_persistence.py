@@ -140,6 +140,7 @@ def test_inprocess_sql_repository_control_flow() -> None:
         "composer_generations",
         "composer_key_identity",
         "composer_library_chunks",
+        "composer_library_cleanups",
         "composer_library_documents",
         "composer_library_grants",
         "composer_library_versions",

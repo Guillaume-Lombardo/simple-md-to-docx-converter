@@ -21,6 +21,7 @@ from markweave.persistence.sql import create_database_engine
 from markweave.retention import (
     ComposerConnectionAuditRepository,
     ComposerContentAuditRepository,
+    ComposerLibraryMaintenanceRepository,
     ComposerModelStepMaintenanceRepository,
     ComposerRetentionRepository,
     DataRetentionPolicy,
@@ -72,6 +73,8 @@ def test_composer_retention_uses_configured_window_and_bounded_batch(
     content_audit.cleanup_t91_audit.return_value = 2
     composer_audit = mocker.Mock(spec=ComposerConnectionAuditRepository)
     composer_audit.cleanup_connection_audit.return_value = 1
+    library = mocker.Mock(spec=ComposerLibraryMaintenanceRepository)
+    library.cleanup.return_value = 4
     service = RetentionService(
         repository,
         mocker.Mock(spec=ObjectStore),
@@ -79,10 +82,12 @@ def test_composer_retention_uses_configured_window_and_bounded_batch(
         composer=composer,
         composer_content_audit=content_audit,
         composer_connection_audit=composer_audit,
+        composer_library=library,
         clock=lambda: now,
     )
 
-    assert service.cleanup(limit=3) == 8
+    assert service.cleanup(limit=3) == 12
+    library.cleanup.assert_called_once_with(limit=3)
     composer.cleanup_expired_drafts.assert_called_once_with(
         cutoff_at=now - timedelta(seconds=7200), limit=3
     )

@@ -35,6 +35,7 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column("title", sa.String(), nullable=False),
+        sa.Column("search_title", sa.String(), nullable=False),
         sa.Column("revision", sa.Integer(), nullable=False),
         sa.Column("current_version_id", sa.String(36)),
         sa.Column("publication_state", sa.String(16), nullable=False),
@@ -125,11 +126,28 @@ def upgrade() -> None:
         ),
         sa.Column("ordinal", sa.Integer(), primary_key=True),
         sa.Column("text", sa.String(), nullable=False),
+        sa.Column("search_text", sa.String(), nullable=False),
         sa.CheckConstraint("ordinal >= 0", name="ck_composer_library_chunks_ordinal"),
+    )
+    op.create_table(
+        "composer_library_cleanups",
+        sa.Column("version_id", sa.String(36), primary_key=True),
+        sa.Column("object_owner_id", sa.String(36), nullable=False),
+        _time("not_before"),
+        _time("created_at"),
+    )
+    op.create_index(
+        "ix_composer_library_cleanups_due",
+        "composer_library_cleanups",
+        ["not_before"],
     )
 
 
 def downgrade() -> None:
+    op.drop_index(
+        "ix_composer_library_cleanups_due", table_name="composer_library_cleanups"
+    )
+    op.drop_table("composer_library_cleanups")
     op.drop_table("composer_library_chunks")
     op.drop_index(
         "ix_composer_library_versions_recovery",
