@@ -67,7 +67,7 @@ def test_distribution_metadata_declares_the_supported_dependency_matrix() -> Non
         "cairosvg>=2.8,<3",
         "defusedxml>=0.7,<1",
         "firecrawl-anydoc==0.2.4",
-        "pillow>=12,<13",
+        "pillow>=13,<14",
         "tinycss2>=1.5,<2",
     ]
     assert extras["kubernetes"] == [

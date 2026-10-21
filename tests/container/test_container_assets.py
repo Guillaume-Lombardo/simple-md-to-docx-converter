@@ -823,6 +823,22 @@ def test_supply_chain_produces_in_private_staging_before_atomic_publication() ->
     )
 
 
+def test_a_rejected_scan_is_retained_unverified_for_every_ci_image() -> None:
+    script = Path("scripts/container/supply-chain.sh").read_text(encoding="utf-8")
+    rejected = script[
+        script.index("summary_status=0") : script.index("manifest_digest=")
+    ]
+    assert '"${summary_arguments[@]}" ||\n  summary_status=$?' in rejected
+    assert 'mv --no-target-directory -- "$staging_directory" "$output_directory"' in (
+        rejected
+    )
+    assert 'exit "$summary_status"' in rejected
+    assert "verify_supply_chain" not in rejected
+    ci = Path("scripts/container/run-ci-supply-chain.sh").read_text(encoding="utf-8")
+    assert ci.rstrip().endswith('exit "$status"')
+    assert ci.count("||") == 2
+
+
 def test_every_frontend_image_build_command_requests_oci_format() -> None:
     release = Path(".github/workflows/container-release.yml").read_text(
         encoding="utf-8"
@@ -1018,7 +1034,10 @@ def test_oci_export_verifier_rejects_invalid_expected_identity(capsys) -> None:
 
 
 def test_supply_chain_summary_gates_fixable_and_records_unfixed_critical(
-    mocker, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    mocker,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     for name in ("image.oci.tar", "sbom.cdx.json", "sbom.spdx.json"):
         (tmp_path / name).write_text("{}", encoding="utf-8")
@@ -1064,6 +1083,10 @@ def test_supply_chain_summary_gates_fixable_and_records_unfixed_critical(
     )
 
     assert summarize_supply_chain.main() == 1
+    assert capsys.readouterr().out.splitlines() == [
+        "error: fixable Critical vulnerabilities found",
+        "  CVE-FIXED in fixable (fixed in: 2)",
+    ]
     inspected.assert_called_once_with(
         ["/usr/bin/podman", "image", "inspect", "2" * 64],
         check=True,

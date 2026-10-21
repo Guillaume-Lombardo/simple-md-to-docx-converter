@@ -12,6 +12,12 @@ readonly reverse_attempt_image=localhost/md-converter-reverse-attempt:ci
 test "$(podman info --format '{{.Host.Security.Rootless}}')" = true
 podman image exists "$final_image"
 podman image exists "$reverse_attempt_image"
-bash scripts/container/supply-chain.sh "$final_image" artifacts/container
+# Scan both images even when the first is rejected, so the retained evidence
+# covers every image, then fail with the first rejection.
+status=0
+bash scripts/container/supply-chain.sh "$final_image" artifacts/container ||
+  status=$?
 bash scripts/container/supply-chain.sh \
-  "$reverse_attempt_image" artifacts/reverse-attempt ci reverse-attempt
+  "$reverse_attempt_image" artifacts/reverse-attempt ci reverse-attempt ||
+  status=$((status == 0 ? $? : status))
+exit "$status"
