@@ -49,6 +49,7 @@ class ModelStepInput:
     answered_question_id: UUID | None = None
     author_refs: tuple[tuple[UUID, int], ...] = ()
     author_preview_digest: str | None = None
+    library_refs: tuple[tuple[UUID, int], ...] = ()
     office: OfficeEditContext | None = None
 
 
@@ -101,6 +102,7 @@ class ComposerStepRunner:
             answered_question_id=input_.answered_question_id,
             author_refs=input_.author_refs,
             author_preview_digest=input_.author_preview_digest,
+            library_refs=input_.library_refs,
         )
         if not created:
             if self._metrics is not None:

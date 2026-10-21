@@ -30,6 +30,10 @@ from markweave.persistence.composer.common import (
     validate_page,
     validate_page_order,
 )
+from markweave.persistence.composer.library import (
+    LibraryNotFoundError,
+    require_excerpt_access,
+)
 from markweave.persistence.composer.questions import (
     ComposerQuestion,
     question_from_row,
@@ -53,6 +57,7 @@ from markweave.persistence.sql import serialize_sqlite_write
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _SAFE_ERROR_CODE = re.compile(r"[a-z][a-z0-9_]{0,63}\Z")
 _MAX_IDEMPOTENCY_KEY_LENGTH = 128
+_MAX_LIBRARY_REFS = 20
 
 
 class ComposerCapacityError(RuntimeError):
@@ -83,6 +88,7 @@ class ComposerModelStep:
     question_id: UUID | None = None
     author_refs: tuple[tuple[UUID, int], ...] = ()
     author_preview_digest: str | None = None
+    library_refs: tuple[tuple[UUID, int], ...] = ()
 
     @property
     def status(self) -> str:
@@ -122,7 +128,38 @@ def _step(row: ComposerModelStepRow) -> ComposerModelStep:
             for item in json.loads(row.author_refs)
         ),
         row.author_preview_digest,
+        step_library_refs(row),
     )
+
+
+def step_library_refs(row: ComposerModelStepRow) -> tuple[tuple[UUID, int], ...]:
+    """Return a step's frozen cited library version and chunk references."""
+
+    return tuple(
+        (UUID(item["version_id"]), int(item["chunk"]))
+        for item in json.loads(row.library_refs)
+    )
+
+
+def library_refs_json(refs: tuple[tuple[UUID, int], ...]) -> str:
+    return json.dumps(
+        [{"chunk": chunk, "version_id": str(version_id)} for version_id, chunk in refs],
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def authorize_library(
+    database: Session, owner_id: UUID, refs: tuple[tuple[UUID, int], ...]
+) -> None:
+    """Fence every cited exact chunk for the step owner in this transaction."""
+
+    if not refs:
+        return
+    try:
+        require_excerpt_access(database, owner_id, refs, for_update=True)
+    except LibraryNotFoundError:
+        raise ComposerConflictError("Library access changed") from None
 
 
 def _owned_step(
@@ -179,6 +216,7 @@ class SqlComposerModelStepRepository:
         answered_question_id: UUID | None = None,
         author_refs: tuple[tuple[UUID, int], ...] = (),
         author_preview_digest: str | None = None,
+        library_refs: tuple[tuple[UUID, int], ...] = (),
     ) -> tuple[ComposerModelStep, bool]:
         """Admit at most the configured global number of unexpired running calls."""
 
@@ -193,12 +231,17 @@ class SqlComposerModelStepRepository:
             or max_active <= 0
             or lease <= timedelta(0)
             or intent not in {"proposal", "question", "office_edit"}
-            or (bool(author_refs) != bool(author_preview_digest))
+            or (bool(author_refs or library_refs) != bool(author_preview_digest))
             or (
                 author_preview_digest is not None
                 and _DIGEST.fullmatch(author_preview_digest) is None
             )
             or len({item[0] for item in author_refs}) != len(author_refs)
+            or len(set(library_refs)) != len(library_refs)
+            or len(library_refs) > _MAX_LIBRARY_REFS
+            or any(
+                type(chunk) is not int or chunk < 0 for _version, chunk in library_refs
+            )
         ):
             raise ValueError("Composer model step admission is invalid")
         expired = False
@@ -234,6 +277,7 @@ class SqlComposerModelStepRepository:
                         answered_question_id=answered_question_id,
                         author_refs=author_refs,
                         author_preview_digest=author_preview_digest,
+                        library_refs=library_refs,
                     ):
                         raise ComposerConflictError(
                             "Model step idempotency key was reused"
@@ -274,6 +318,9 @@ class SqlComposerModelStepRepository:
                             or not set(self._author_refs(source_step)).issubset(
                                 set(author_refs)
                             )
+                            or not set(step_library_refs(source_step)).issubset(
+                                set(library_refs)
+                            )
                         ):
                             raise ComposerConflictError("Author access changed")
                         prior_resume = database.scalar(
@@ -301,6 +348,7 @@ class SqlComposerModelStepRepository:
                         expected_generation=None,
                     )
                     self._authorize_authors(database, owner_id, author_refs)
+                    authorize_library(database, owner_id, library_refs)
                     active = database.scalar(
                         select(func.count(ComposerModelStepRow.id)).where(
                             ComposerModelStepRow.state == "running",
@@ -333,6 +381,7 @@ class SqlComposerModelStepRepository:
                         ),
                         author_refs=self._author_refs_json(author_refs),
                         author_preview_digest=author_preview_digest,
+                        library_refs=library_refs_json(library_refs),
                         proposal_id=None,
                         question_id=None,
                         safe_error_code=None,
@@ -476,6 +525,7 @@ class SqlComposerModelStepRepository:
                     expected_generation=row.connection_generation,
                 )
                 self._authorize_authors(database, owner_id, self._author_refs(row))
+                authorize_library(database, owner_id, step_library_refs(row))
         except (
             ComposerConflictError,
             ComposerNotFoundError,
@@ -728,6 +778,7 @@ class SqlComposerModelStepRepository:
                 self._authorize_authors(
                     database, owner_id, self._author_refs(row), for_update=True
                 )
+                authorize_library(database, owner_id, step_library_refs(row))
                 if row.intent == "question":
                     proposed_value = validated_question(proposed_value)
                     question = ComposerQuestionRow(
@@ -972,6 +1023,7 @@ class SqlComposerModelStepRepository:
         answered_question_id: UUID | None,
         author_refs: tuple[tuple[UUID, int], ...],
         author_preview_digest: str | None,
+        library_refs: tuple[tuple[UUID, int], ...],
     ) -> bool:
         return (
             row.connection_id == str(connection_id)
@@ -985,6 +1037,7 @@ class SqlComposerModelStepRepository:
             and row.author_refs
             == SqlComposerModelStepRepository._author_refs_json(author_refs)
             and row.author_preview_digest == author_preview_digest
+            and row.library_refs == library_refs_json(library_refs)
         )
 
     @staticmethod

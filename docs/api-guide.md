@@ -320,6 +320,16 @@ checked before any text is read: a search returns only authorized chunks, and an
 unauthorized, revoked, or deleted document returns `404` with no text. A search hit or a stored
 citation never grants access by itself. Responses are `private, no-store`.
 
+A model step may cite library excerpts. The model-step preview also accepts `library_refs`, up to 20
+distinct `{ "version_id", "chunk" }` references the caller may read. Its `transmitted_content`
+appends those exact chunks, after any author records, as JSON reference data with a
+`library:{version_id}#{chunk}` citation, title, version, and SHA-256, and `library_excerpts`
+lists them. Starting the step requires the same `library_refs` with the preview digest in
+`author_preview_digest`; the step response returns its `library_refs`. Access to every cited
+chunk is rechecked at admission, immediately before transmission, before the result is
+recorded, and when the proposal is published. If the document was revoked or deleted at any of
+those points, the step fails or the publication returns `412` without transmitting or publishing.
+
 `POST /api/v1/composer/drafts/{id}/revisions/{approved_revision_id}/generations` accepts
 `{ "output": "docx"|"pdf"|"pptx", "template_id": null,
 "template_version_id": null, "presentation_dialect": null, "slide_level": null }`

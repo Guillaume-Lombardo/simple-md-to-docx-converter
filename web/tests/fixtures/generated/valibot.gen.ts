@@ -34,32 +34,11 @@ export const vAuditRecordResponse = v.object({
 });
 
 /**
- * AuthorPromptPreviewRequest
- */
-export const vAuthorPromptPreviewRequest = v.strictObject({
-    approved_endpoint: v.pipe(v.string(), v.minLength(1)),
-    approved_model: v.pipe(v.string(), v.minLength(1)),
-    author_ids: v.array(v.pipe(v.string(), v.uuid())),
-    connection_id: v.pipe(v.string(), v.uuid()),
-    content: v.pipe(v.string(), v.minLength(1)),
-    max_output_tokens: v.pipe(v.number(), v.integer(), v.gtValue(0))
-});
-
-/**
  * AuthorReference
  */
 export const vAuthorReference = v.object({
     id: v.pipe(v.string(), v.uuid()),
     version: v.pipe(v.number(), v.integer(), v.gtValue(0))
-});
-
-/**
- * AuthorPromptPreviewResponse
- */
-export const vAuthorPromptPreviewResponse = v.object({
-    author_refs: v.array(vAuthorReference),
-    preview_digest: v.string(),
-    transmitted_content: v.string()
 });
 
 /**
@@ -301,42 +280,6 @@ export const vComposerMessageListResponse = v.object({
     limit: v.pipe(v.number(), v.integer()),
     messages: v.array(vComposerMessageResponse),
     offset: v.pipe(v.number(), v.integer())
-});
-
-/**
- * ComposerModelStepCreateRequest
- *
- * Exact user-approved text for one bounded model proposal attempt.
- */
-export const vComposerModelStepCreateRequest = v.object({
-    answered_question_id: v.nullish(v.pipe(v.string(), v.uuid())),
-    approved_endpoint: v.pipe(v.string(), v.minLength(1)),
-    approved_model: v.pipe(v.string(), v.minLength(1)),
-    author_preview_digest: v.nullish(v.string()),
-    author_refs: v.optional(v.array(vAuthorReference), []),
-    connection_id: v.pipe(v.string(), v.uuid()),
-    content: v.pipe(v.string(), v.minLength(1)),
-    intent: v.optional(v.picklist(['proposal', 'question']), 'proposal'),
-    max_output_tokens: v.pipe(v.number(), v.integer(), v.gtValue(0))
-});
-
-/**
- * ComposerModelStepResponse
- */
-export const vComposerModelStepResponse = v.object({
-    answered_question_id: v.nullable(v.pipe(v.string(), v.uuid())),
-    base_version: v.pipe(v.number(), v.integer()),
-    connection_id: v.pipe(v.string(), v.uuid()),
-    created_at: v.pipe(v.string(), v.isoTimestamp()),
-    draft_id: v.pipe(v.string(), v.uuid()),
-    error_code: v.nullable(v.string()),
-    id: v.pipe(v.string(), v.uuid()),
-    intent: v.picklist(['proposal', 'question']),
-    model_identity: v.string(),
-    proposal_id: v.nullable(v.pipe(v.string(), v.uuid())),
-    question_id: v.nullable(v.pipe(v.string(), v.uuid())),
-    status: v.string(),
-    updated_at: v.pipe(v.string(), v.isoTimestamp())
 });
 
 /**
@@ -839,6 +782,57 @@ export const vLibraryCitationReference = v.strictObject({
 });
 
 /**
+ * AuthorPromptPreviewRequest
+ */
+export const vAuthorPromptPreviewRequest = v.strictObject({
+    approved_endpoint: v.pipe(v.string(), v.minLength(1)),
+    approved_model: v.pipe(v.string(), v.minLength(1)),
+    author_ids: v.array(v.pipe(v.string(), v.uuid())),
+    connection_id: v.pipe(v.string(), v.uuid()),
+    content: v.pipe(v.string(), v.minLength(1)),
+    library_refs: v.optional(v.pipe(v.array(vLibraryCitationReference), v.maxLength(20)), []),
+    max_output_tokens: v.pipe(v.number(), v.integer(), v.gtValue(0))
+});
+
+/**
+ * ComposerModelStepCreateRequest
+ *
+ * Exact user-approved text for one bounded model proposal attempt.
+ */
+export const vComposerModelStepCreateRequest = v.object({
+    answered_question_id: v.nullish(v.pipe(v.string(), v.uuid())),
+    approved_endpoint: v.pipe(v.string(), v.minLength(1)),
+    approved_model: v.pipe(v.string(), v.minLength(1)),
+    author_preview_digest: v.nullish(v.string()),
+    author_refs: v.optional(v.array(vAuthorReference), []),
+    connection_id: v.pipe(v.string(), v.uuid()),
+    content: v.pipe(v.string(), v.minLength(1)),
+    intent: v.optional(v.picklist(['proposal', 'question']), 'proposal'),
+    library_refs: v.optional(v.pipe(v.array(vLibraryCitationReference), v.maxLength(20)), []),
+    max_output_tokens: v.pipe(v.number(), v.integer(), v.gtValue(0))
+});
+
+/**
+ * ComposerModelStepResponse
+ */
+export const vComposerModelStepResponse = v.object({
+    answered_question_id: v.nullable(v.pipe(v.string(), v.uuid())),
+    base_version: v.pipe(v.number(), v.integer()),
+    connection_id: v.pipe(v.string(), v.uuid()),
+    created_at: v.pipe(v.string(), v.isoTimestamp()),
+    draft_id: v.pipe(v.string(), v.uuid()),
+    error_code: v.nullable(v.string()),
+    id: v.pipe(v.string(), v.uuid()),
+    intent: v.picklist(['proposal', 'question']),
+    library_refs: v.optional(v.array(vLibraryCitationReference), []),
+    model_identity: v.string(),
+    proposal_id: v.nullable(v.pipe(v.string(), v.uuid())),
+    question_id: v.nullable(v.pipe(v.string(), v.uuid())),
+    status: v.string(),
+    updated_at: v.pipe(v.string(), v.isoTimestamp())
+});
+
+/**
  * LibraryDocumentResponse
  */
 export const vLibraryDocumentResponse = v.object({
@@ -880,6 +874,16 @@ export const vLibraryExcerptResponse = v.object({
     version_id: v.pipe(v.string(), v.uuid()),
     version_number: v.pipe(v.number(), v.integer()),
     version_sha256: v.string()
+});
+
+/**
+ * AuthorPromptPreviewResponse
+ */
+export const vAuthorPromptPreviewResponse = v.object({
+    author_refs: v.array(vAuthorReference),
+    library_excerpts: v.optional(v.array(vLibraryExcerptResponse), []),
+    preview_digest: v.string(),
+    transmitted_content: v.string()
 });
 
 /**

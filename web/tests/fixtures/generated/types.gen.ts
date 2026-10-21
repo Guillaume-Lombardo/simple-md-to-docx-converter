@@ -138,6 +138,10 @@ export type AuthorPromptPreviewRequest = {
      */
     content: string;
     /**
+     * Library Refs
+     */
+    library_refs?: Array<LibraryCitationReference>;
+    /**
      * Max Output Tokens
      */
     max_output_tokens: number;
@@ -151,6 +155,10 @@ export type AuthorPromptPreviewResponse = {
      * Author Refs
      */
     author_refs: Array<AuthorReference>;
+    /**
+     * Library Excerpts
+     */
+    library_excerpts?: Array<LibraryExcerptResponse>;
     /**
      * Preview Digest
      */
@@ -941,6 +949,10 @@ export type ComposerModelStepCreateRequest = {
      */
     intent?: 'proposal' | 'question';
     /**
+     * Library Refs
+     */
+    library_refs?: Array<LibraryCitationReference>;
+    /**
      * Max Output Tokens
      */
     max_output_tokens: number;
@@ -982,6 +994,10 @@ export type ComposerModelStepResponse = {
      * Intent
      */
     intent: 'proposal' | 'question';
+    /**
+     * Library Refs
+     */
+    library_refs?: Array<LibraryCitationReference>;
     /**
      * Model Identity
      */

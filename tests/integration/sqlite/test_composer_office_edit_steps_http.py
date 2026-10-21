@@ -6,7 +6,7 @@ PostgreSQL/S3 profile tests.
 
 import json
 import time
-from collections.abc import Generator, Iterator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -39,6 +39,7 @@ from markweave.persistence.composer import (
     SqlComposerRepository,
     SqlConnectionRepository,
 )
+from markweave.persistence.composer.library import SqlComposerLibraryRepository
 from markweave.persistence.migrations import upgrade_database
 from markweave.persistence.schema import (
     ComposerConnectionGrantRow,
@@ -69,8 +70,10 @@ class OfficeStepHarness:
     owner: User
     other: User
     connection_id: UUID
+    library: SqlComposerLibraryRepository
     replies: list[str] = field(default_factory=list)
     prompts: list[str] = field(default_factory=list)
+    before_chat: list[Callable[[], None]] = field(default_factory=list)
     steps: SqlComposerModelStepRepository | None = None
 
 
@@ -145,11 +148,19 @@ def office_step_harness(
     _seed(engine, owner, other, connection_id)
     store = SqlComposerRepository(engine, objects)
     steps = SqlComposerModelStepRepository(engine)
+    library = SqlComposerLibraryRepository(
+        engine,
+        objects,
+        publication_lease=timedelta(seconds=30),
+        maximum_scanned_chunks=100,
+    )
     harness_box: list[OfficeStepHarness] = []
 
     def chat(*_args: object, **kwargs: Any) -> dict[str, object]:
-        kwargs["before_dispatch"]()
         harness = harness_box[0]
+        while harness.before_chat:
+            harness.before_chat.pop(0)()
+        kwargs["before_dispatch"]()
         harness.prompts.append(_args[2][0]["content"])  # ty: ignore[not-subscriptable]
         return {"choices": [{"message": {"content": harness.replies.pop(0)}}]}
 
@@ -196,12 +207,20 @@ def office_step_harness(
             composer_steps=runner,
             composer_connections=connections,
             composer_connection_repository=permissions,
+            composer_library=library,
         ),
     )
     try:
         with TestClient(app, base_url="https://testserver") as client:
             harness = OfficeStepHarness(
-                client, store, authentication, owner, other, connection_id, steps=steps
+                client,
+                store,
+                authentication,
+                owner,
+                other,
+                connection_id,
+                library,
+                steps=steps,
             )
             harness_box.append(harness)
             yield harness

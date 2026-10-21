@@ -230,6 +230,15 @@
             "title": "Content",
             "type": "string"
           },
+          "library_refs": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/LibraryCitationReference"
+            },
+            "maxItems": 20,
+            "title": "Library Refs",
+            "type": "array"
+          },
           "max_output_tokens": {
             "exclusiveMinimum": 0.0,
             "title": "Max Output Tokens",
@@ -254,6 +263,14 @@
               "$ref": "#/components/schemas/AuthorReference"
             },
             "title": "Author Refs",
+            "type": "array"
+          },
+          "library_excerpts": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/LibraryExcerptResponse"
+            },
+            "title": "Library Excerpts",
             "type": "array"
           },
           "preview_digest": {
@@ -1579,6 +1596,15 @@
             "title": "Intent",
             "type": "string"
           },
+          "library_refs": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/LibraryCitationReference"
+            },
+            "maxItems": 20,
+            "title": "Library Refs",
+            "type": "array"
+          },
           "max_output_tokens": {
             "exclusiveMinimum": 0.0,
             "title": "Max Output Tokens",
@@ -1651,6 +1677,14 @@
             ],
             "title": "Intent",
             "type": "string"
+          },
+          "library_refs": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/LibraryCitationReference"
+            },
+            "title": "Library Refs",
+            "type": "array"
           },
           "model_identity": {
             "title": "Model Identity",

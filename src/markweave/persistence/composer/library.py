@@ -173,12 +173,18 @@ def require_excerpt_access(
     database: Session,
     actor_id: UUID,
     refs: Iterable[tuple[UUID, int]],
+    *,
+    for_update: bool = False,
 ) -> tuple[LibraryExcerpt, ...]:
-    """Recheck each cited exact version and chunk for the actor in a transaction."""
+    """Recheck each cited exact version and chunk for the actor in a transaction.
+
+    With ``for_update`` the cited documents stay locked until commit, so a
+    concurrent revocation or deletion cannot interleave with the caller.
+    """
 
     excerpts: list[LibraryExcerpt] = []
     for version_id, ordinal in refs:
-        row = database.execute(
+        statement = (
             select(
                 ComposerLibraryChunkRow,
                 ComposerLibraryVersionRow,
@@ -200,7 +206,10 @@ def require_excerpt_access(
                 _visible(actor_id),
                 _active(actor_id),
             )
-        ).one_or_none()
+        )
+        if for_update:
+            statement = statement.with_for_update(of=ComposerLibraryDocumentRow)
+        row = database.execute(statement).one_or_none()
         if row is None:
             raise LibraryNotFoundError("Library excerpt is unavailable")
         chunk, version, document = row
