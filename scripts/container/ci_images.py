@@ -16,8 +16,10 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -46,6 +48,13 @@ LOADED_REFERENCE = re.compile(r"(?:sha256:)?([0-9a-f]{64})")
 
 DEFAULT_IMAGE_COPY_TMP_DIR = Path("/var/tmp")  # noqa: S108 - Podman's documented default
 DISKSTATS = Path("/proc/diskstats")
+# Each `podman load` extracts its oci-archive and stages the layer blobs in the
+# image-copy directory before committing layers, so this directory receives about
+# twice the archive bytes. Hosted runners cap disk writes at about 165 MB/s, so a
+# memory-backed directory, when it has room, removes those writes (T147).
+MEMORY_TMP_ROOT = Path("/dev/shm")  # noqa: S108 - holds a private mkdtemp subdirectory
+MEMORY_TMP_FACTOR = 2
+MEMORY_TMP_MARGIN_BYTES = 512 * 1024 * 1024
 DISKSTATS_FIELDS = 13  # through the io_ticks (busy milliseconds) column
 SECTOR_BYTES = 512
 MIB = 1024 * 1024
@@ -85,8 +94,13 @@ def parse_roles(text: str) -> tuple[str, ...]:
     return tuple(role for role in IMAGE_ROLES if role in value)
 
 
-def _run(runner: Runner, arguments: Sequence[str]) -> str:
-    completed = runner(list(arguments), check=False, capture_output=True, text=True)
+def _run(
+    runner: Runner, arguments: Sequence[str], env: Mapping[str, str] | None = None
+) -> str:
+    options: dict[str, Any] = {"check": False, "capture_output": True, "text": True}
+    if env is not None:
+        options["env"] = dict(env)
+    completed = runner(list(arguments), **options)
     if completed.returncode != 0:
         raise ImageTransferError(
             f"command failed with status {completed.returncode}: "
@@ -251,7 +265,9 @@ def _device(path: Path) -> str:
     return f"{os.major(device)}:{os.minor(device)}"
 
 
-def _storage_report(runner: Runner, archive_directory: Path) -> tuple[str, ...]:
+def _storage_report(
+    runner: Runner, archive_directory: Path, copy_dir: Path | None
+) -> tuple[str, ...]:
     """Print the Podman store layout and return the devices worth measuring.
 
     These facts only explain load throughput (T147); they never gate a load.
@@ -259,7 +275,9 @@ def _storage_report(runner: Runner, archive_directory: Path) -> tuple[str, ...]:
     info: Any = json.loads(_run(runner, ["podman", "info", "--format", "json"]))
     store = info.get("store", {})
     graph_root = Path(store.get("graphRoot", ""))
-    copy_dir = Path(store.get("imageCopyTmpDir") or DEFAULT_IMAGE_COPY_TMP_DIR)
+    copy_dir = copy_dir or Path(
+        store.get("imageCopyTmpDir") or DEFAULT_IMAGE_COPY_TMP_DIR
+    )
     places = {
         "archives": archive_directory,
         "graph_root": graph_root,
@@ -274,6 +292,29 @@ def _storage_report(runner: Runner, archive_directory: Path) -> tuple[str, ...]:
         flush=True,
     )
     return tuple(sorted(set(devices.values()) - {"unknown"}))
+
+
+def _memory_copy_dir(root: Path, archive_bytes: int) -> Path | None:
+    """Return a private memory-backed image-copy directory when it has room."""
+    required = MEMORY_TMP_FACTOR * archive_bytes + MEMORY_TMP_MARGIN_BYTES
+    try:
+        free = shutil.disk_usage(root).free if root.is_dir() else 0
+    except OSError:
+        free = 0
+    if free < required:
+        print(
+            f"load_copy_dir=default root={root} free_mib={free // MIB} "
+            f"required_mib={required // MIB}",
+            flush=True,
+        )
+        return None
+    directory = Path(tempfile.mkdtemp(prefix="markweave-load-", dir=root))
+    print(
+        f"load_copy_dir={directory} free_mib={free // MIB} "
+        f"required_mib={required // MIB}",
+        flush=True,
+    )
+    return directory
 
 
 def _print_disk_delta(
@@ -303,12 +344,14 @@ def load(  # noqa: PLR0913 - explicit expected-identity and test seams
     runner: Runner = subprocess.run,
     clock: Callable[[], float] = time.monotonic,
     diskstats: Callable[[], DiskStats] = read_diskstats,
+    memory_root: Path | None = None,
 ) -> dict[str, str]:
     """Load only a domain's archives and tag them after exact ID checks.
 
     Every role passes its preconditions before any archive is loaded. The
-    `podman load` commands then run concurrently, because each one is bound by
-    its own archive (T147), and every loaded ID is checked before its tag.
+    `podman load` commands then run concurrently, with their image-copy
+    directory in memory when it has room (T147), and every loaded ID is checked
+    before its tag.
     """
     try:
         roles = IMAGE_DOMAIN_ROLES[domain]
@@ -322,8 +365,13 @@ def load(  # noqa: PLR0913 - explicit expected-identity and test seams
         for role in roles
     ]
 
+    copy_dir = _memory_copy_dir(
+        memory_root or MEMORY_TMP_ROOT,
+        sum(archive.stat().st_size for _, _, archive in pending),
+    )
+    env = None if copy_dir is None else {**os.environ, "TMPDIR": str(copy_dir)}
     try:
-        devices = _storage_report(runner, archive_directory)
+        devices = _storage_report(runner, archive_directory, copy_dir)
         before = diskstats()
     except (ImageTransferError, OSError, ValueError, AttributeError) as error:
         print(f"storage diagnostics unavailable: {error}", flush=True)
@@ -331,14 +379,19 @@ def load(  # noqa: PLR0913 - explicit expected-identity and test seams
 
     def load_archive(archive: Path) -> tuple[str, float]:
         started = clock()
-        output = _run(runner, ["podman", "load", "--input", str(archive)])
+        output = _run(runner, ["podman", "load", "--input", str(archive)], env)
         return output, clock() - started
 
     started = clock()
-    with ThreadPoolExecutor(max_workers=len(pending)) as pool:
-        futures = [pool.submit(load_archive, archive) for _, _, archive in pending]
-    # Leaving the pool waited for every load; report the first failure in role order.
-    results = [future.result() for future in futures]
+    try:
+        with ThreadPoolExecutor(max_workers=len(pending)) as pool:
+            futures = [pool.submit(load_archive, archive) for _, _, archive in pending]
+        # Leaving the pool waited for every load; report the first failure in
+        # role order.
+        results = [future.result() for future in futures]
+    finally:
+        if copy_dir is not None:
+            shutil.rmtree(copy_dir, ignore_errors=True)
     if devices:
         try:
             _print_disk_delta(devices, before, diskstats(), clock() - started)

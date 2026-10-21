@@ -20,6 +20,12 @@ from scripts.container.ci_images import ImageTransferError
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def _no_memory_copy_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep loads off the host's /dev/shm unless a test opts into a memory root."""
+    monkeypatch.setattr(ci_images, "MEMORY_TMP_ROOT", tmp_path / "no-shm")
+
+
 def _config(role: str) -> bytes:
     return json.dumps(
         {"rootfs": {"type": "layers", "diff_ids": []}, "role": role}
@@ -668,3 +674,138 @@ def test_disk_traffic_skips_unmeasured_or_unreadable_devices(
     output = capsys.readouterr().out
     assert "disk device=" not in output
     assert ("diskstats vanished" in output) is (after is None)
+
+
+class EnvRecorder:
+    """Record the environment and copy directory seen by each `podman load`."""
+
+    def __init__(self, runtime: FakeRuntime) -> None:
+        self.runtime = runtime
+        self.environments: list[dict[str, str] | None] = []
+        self.present: list[bool] = []
+
+    def __call__(
+        self, arguments: list[str], **options: Any
+    ) -> subprocess.CompletedProcess[str]:
+        if arguments[:2] == ["podman", "load"]:
+            env = options.get("env")
+            self.environments.append(env)
+            self.present.append(env is not None and Path(env["TMPDIR"]).is_dir())
+        return self.runtime(arguments, **options)
+
+
+def test_load_stages_archives_in_a_private_memory_directory(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    roles = IMAGE_DOMAIN_ROLES["e2e-standalone-1"]
+    directory = _archives(tmp_path, roles)
+    memory = tmp_path / "shm"
+    memory.mkdir()
+    runtime = FakeRuntime()
+    runtime.info_json = json.dumps({"store": {"graphRoot": str(tmp_path)}})
+    recorder = EnvRecorder(runtime)
+
+    loaded = ci_images.load(
+        "e2e-standalone-1",
+        directory,
+        _expected(*roles),
+        runner=recorder,
+        clock=_clock,
+        memory_root=memory,
+    )
+
+    assert loaded == {role: ci_images.ROLE_IMAGES[role] for role in roles}
+    copy_dirs = {Path(env["TMPDIR"]) for env in recorder.environments if env}
+    assert len(recorder.environments) == len(roles)
+    assert len(copy_dirs) == 1
+    copy_dir = copy_dirs.pop()
+    assert copy_dir.parent == memory
+    assert copy_dir.name.startswith("markweave-load-")
+    assert recorder.present == [True] * len(roles)
+    assert not copy_dir.exists()
+    output = capsys.readouterr().out
+    assert f"load_copy_dir={copy_dir} " in output
+    assert f"image_copy_tmp_dir={copy_dir}@" in output
+
+
+@pytest.mark.parametrize("free", [0, None])
+def test_load_keeps_the_default_copy_directory_without_memory_room(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    mocker: Any,
+    free: int | None,
+) -> None:
+    roles = IMAGE_DOMAIN_ROLES["e2e-standalone-2"]
+    directory = _archives(tmp_path, roles)
+    memory = tmp_path / "shm"
+    memory.mkdir()
+    archive_bytes = sum(path.stat().st_size for path in directory.iterdir())
+    required = 2 * archive_bytes + ci_images.MEMORY_TMP_MARGIN_BYTES
+    usage = mocker.patch.object(ci_images.shutil, "disk_usage")
+    if free is None:
+        usage.side_effect = OSError("no statvfs")
+    else:
+        usage.return_value.free = required - 1
+    recorder = EnvRecorder(FakeRuntime())
+
+    ci_images.load(
+        "e2e-standalone-2",
+        directory,
+        _expected(*roles),
+        runner=recorder,
+        clock=_clock,
+        memory_root=memory,
+    )
+
+    assert recorder.environments == [None] * len(roles)
+    assert list(memory.iterdir()) == []
+    output = capsys.readouterr().out
+    assert f"load_copy_dir=default root={memory} " in output
+    assert f"required_mib={required // ci_images.MIB}" in output
+
+
+def test_load_without_a_memory_root_keeps_the_default_copy_directory(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    roles = IMAGE_DOMAIN_ROLES["e2e-standalone-2"]
+    recorder = EnvRecorder(FakeRuntime())
+
+    ci_images.load(
+        "e2e-standalone-2",
+        _archives(tmp_path, roles),
+        _expected(*roles),
+        runner=recorder,
+        clock=_clock,
+    )
+
+    assert recorder.environments == [None] * len(roles)
+    assert f"load_copy_dir=default root={tmp_path / 'no-shm'} " in (
+        capsys.readouterr().out
+    )
+
+
+def test_load_failure_removes_the_memory_copy_directory(tmp_path: Path) -> None:
+    roles = IMAGE_DOMAIN_ROLES["e2e-distributed-2"]
+    directory = _archives(tmp_path, roles)
+    memory = tmp_path / "shm"
+    memory.mkdir()
+    runtime = FakeRuntime()
+    runtime.failing = (
+        "podman",
+        "load",
+        "--input",
+        str(directory / ci_images.archive_name("frontend")),
+    )
+    recorder = EnvRecorder(runtime)
+
+    with pytest.raises(ImageTransferError, match="command failed with status 3"):
+        ci_images.load(
+            "e2e-distributed-2",
+            directory,
+            _expected(*roles),
+            runner=recorder,
+            memory_root=memory,
+        )
+
+    assert recorder.present == [True] * len(roles)
+    assert list(memory.iterdir()) == []

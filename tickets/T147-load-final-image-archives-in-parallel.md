@@ -96,6 +96,23 @@ sequential archive downloads.
   double write of each `oci-archive` (extraction into the copy directory, then layer commit) on
   the same device, and a saturated single disk. The measured correction follows from the next
   hosted run; the accepted under-65-second target stands unless the owner decides otherwise.
+- 2026-10-21: Diagnostics result, run 39633287852 (green). All four E2E shards report Podman 4.9.3
+  with the native `overlay` driver and no mount program, so the graph driver is not the cause. The
+  archives, the graph root and `/var/tmp` sit on one device (8:1 or 259:1). For about 2.3 GB of
+  archives, that device wrote 10.7 to 14.0 GB at about 165 MB/s, the hosted runner's write cap, with
+  `concurrent_load_seconds` of 82.8, 77.1, 84.6 and 66.4. The loads are write-bound. Each
+  `podman load` of an `oci-archive` first extracts the archive into the image-copy directory and
+  stages the layer blobs there, then commits the layers into the store, so the copy directory alone
+  receives about twice the archive bytes.
+- 2026-10-21: Correction. When `/dev/shm` has room for twice the archive bytes plus 512 MiB, the
+  loader creates a private `mkdtemp` directory there and passes it to every `podman load` as
+  `TMPDIR`, which Podman uses as its image-copy directory. That removes about 4.6 GB of disk writes
+  from each shard. Otherwise it prints `load_copy_dir=default` and keeps Podman's default. The
+  directory is removed after the loads, including on failure. Every per-role check is unchanged,
+  downloads stay sequential, and no workflow or runner setting changes. New unit tests cover the
+  memory directory passed to every load and removed afterwards, the fallback when space is short
+  or cannot be read, and removal after a failed load; the first two fail without their mechanism.
+  The hosted before/after runs follow.
 
 ## Synchronization
 
