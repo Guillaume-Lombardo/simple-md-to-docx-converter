@@ -608,7 +608,7 @@ jobs:
         run: >-
           uv run python -m scripts.container.ci_images build
           --roles "$IMAGE_ROLES" --output-directory "$RUNNER_TEMP/final-images"
-          --github-output "$GITHUB_OUTPUT"
+          --github-output "$GITHUB_OUTPUT" --layer-compression zstd
       - name: Publish the backend archive to this run
         if: ${{ contains(fromJSON(needs.detect.outputs.image-roles), 'backend') }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

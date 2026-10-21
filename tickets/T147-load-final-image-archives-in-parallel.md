@@ -155,6 +155,38 @@ sequential archive downloads.
   under `/var/tmp`. It prints the layer media types, the archive sizes, the export time and both
   solo load times. A failure only prints a notice. The E2E load steps do not run it. Changing the
   CI or release archive format remains an owner decision (posted on PR #323).
+- 2026-10-21: Controlled comparison result, container job 119383750365 of run 39645736224 (`f07de05`,
+  green). Backend, loaded alone into a fresh store under `/var/tmp`:
+
+  | Archive | Bytes | Layers | Largest layer | Solo load |
+  |---|---|---|---|---|
+  | gzip (`podman save`) | 1,382,256,640 | 24 | 311 MiB | 48.5 s |
+  | zstd re-export | 1,237,530,112 | 24 | 280 MiB | 31.4 s |
+
+  The zstd re-export took 27.4 s. One same-run comparison is not acceptance, but it supports the
+  decompression hypothesis: zstd cut the solo backend load by 17.1 s, and the archive is 10 percent
+  smaller.
+- 2026-10-21: Third correction: zstd layers for CI archives only. The owner asked for a production
+  correction from this result.
+  - `ci_images build` gains `--layer-compression {gzip,zstd}`, default `gzip`.
+    - `zstd` exports with `podman push --compression-format zstd --force-compression <id>
+      oci-archive:<archive>`.
+    - It then requires every layer to be `tar+zstd`, besides the unchanged configuration-digest
+      check.
+  - Only `ci.yml` passes `zstd`. The CI validator's expected command and the reviewed `ci.yml`
+    canonical digest are updated accordingly.
+  - Release qualification (`container-qualify.yml`) keeps `podman save` and gzip layers, so
+    published images and their manifest digests are unchanged.
+  - The loader is unchanged: memory staging and every role, ID and tag check. Downloads stay
+    sequential.
+  - The temporary experiment is removed.
+  - Tests:
+    - Unit tests cover the zstd export command, gzip staying on `podman save`, a zstd export with
+      other layer types or unreadable layers, an unsupported compression, and the CLI option.
+    - A new `requires_podman` integration test exports a real image with zstd, removes the
+      source, and loads it by exact ID.
+  - The final loader still needs three complete comparable hosted pairs against the
+    under-65-second target.
 
 ## Synchronization
 

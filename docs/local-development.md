@@ -277,9 +277,10 @@ Domains that need the final images (`container`, `supply-chain`, `frontend`, and
 E2E shards `e2e-standalone-<n>` and `e2e-distributed-<n>`) run in the `final-image` matrix. Every
 other active domain runs in the `heavy` matrix. When a final-image domain is selected,
 `CI / build images` builds each required backend, frontend, and reverse-attempt image exactly once
-for the run, after acquiring the pinned base images with retries. It exports each image with
-`podman save --format oci-archive`, verifies that the archive configuration digest is the built
-image ID, uploads one run-scoped archive per image for one day, and publishes the IDs as job
+for the run, after acquiring the pinned base images with retries. It exports each image as an
+OCI archive with zstd layers (`podman push --compression-format zstd`), which load faster than
+the default gzip layers, and verifies that every layer is zstd and that the archive configuration
+digest is the built image ID. Release qualification keeps `podman save` and gzip layers. It then uploads one run-scoped archive per image for one day, and publishes the IDs as job
 outputs. It writes no cache from an untrusted context and publishes nothing to a registry. Each
 consumer downloads only the archives its domain needs. `scripts/container/ci_images.py load`
 tags an image only after the archive configuration digest, the ID that `podman load` reports, and

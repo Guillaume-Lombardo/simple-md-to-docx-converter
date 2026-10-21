@@ -53,10 +53,10 @@ DISKSTATS = Path("/proc/diskstats")
 CPUSTATS = Path("/proc/stat")
 CPU_IDLE_FIELDS = (3, 4)  # idle and iowait in the aggregate `cpu` line
 CPU_IOWAIT_FIELD = 4
-# Temporary T147 measurement, removed before merge: in this domain only, load the
-# largest image alone into fresh stores from its gzip archive and from a zstd
-# re-export, to test whether layer decompression bounds the load.
-COMPRESSION_EXPERIMENT_DOMAIN = "container"
+# Run-scoped CI archives may carry zstd layers: in a same-runner comparison the
+# backend loaded alone in 31.4 s from zstd against 48.5 s from gzip (T147).
+# Release archives keep Podman's default gzip layers for client compatibility.
+LAYER_COMPRESSIONS = ("gzip", "zstd")
 # Each `podman load` extracts its oci-archive and stages the layer blobs in the
 # image-copy directory before committing layers, so this directory receives about
 # twice the archive bytes. A memory-backed directory, when it has room, removes
@@ -157,6 +157,43 @@ def _verified_archive_id(archive: Path, expected_id: str) -> None:
         )
 
 
+def _export_command(layer_compression: str, image_id: str, archive: Path) -> list[str]:
+    if layer_compression == "zstd":
+        return [
+            "podman",
+            "push",
+            "--compression-format",
+            "zstd",
+            "--force-compression",
+            image_id,
+            f"oci-archive:{archive}",
+        ]
+    return [
+        "podman",
+        "save",
+        "--format",
+        "oci-archive",
+        "--output",
+        str(archive),
+        image_id,
+    ]
+
+
+def _verified_layer_media(archive: Path, layer_compression: str) -> None:
+    if layer_compression != "zstd":
+        return
+    try:
+        media = _layer_media(archive)
+    except (OSError, ValueError, KeyError, IndexError, tarfile.TarError) as error:
+        raise ImageTransferError(
+            f"{archive.name}: unreadable layers: {error}"
+        ) from error
+    if media - {"tar+zstd"}:
+        raise ImageTransferError(
+            f"{archive.name}: expected only zstd layers, found {sorted(media)}"
+        )
+
+
 def _build_command(role: str, source_date_epoch: str) -> list[str]:
     image = ROLE_IMAGES[role]
     if role == "backend":
@@ -166,15 +203,22 @@ def _build_command(role: str, source_date_epoch: str) -> list[str]:
     return ["bash", "scripts/container/build-frontend.sh", image, source_date_epoch]
 
 
-def build(
+def build(  # noqa: PLR0913 - explicit outputs, export format and test seams
     roles: Sequence[str],
     output_directory: Path,
     github_output: Path,
     *,
     runner: Runner = subprocess.run,
     clock: Callable[[], float] = time.monotonic,
+    layer_compression: str = "gzip",
 ) -> dict[str, str]:
-    """Build each role once, export it, and publish its verified image ID."""
+    """Build each role once, export it, and publish its verified image ID.
+
+    `gzip` keeps `podman save`; `zstd` recompresses every layer with
+    `podman push --compression-format zstd` for run-scoped CI archives only.
+    """
+    if layer_compression not in LAYER_COMPRESSIONS:
+        raise ImageTransferError(f"unsupported layer compression {layer_compression!r}")
     if output_directory.exists() or output_directory.is_symlink():
         raise ImageTransferError("the archive directory must not already exist")
     output_directory.mkdir(mode=0o700, parents=False)
@@ -198,19 +242,9 @@ def build(
         built = clock()
         image_id = _image_id(runner, ROLE_IMAGES[role])
         archive = output_directory / archive_name(role)
-        _run(
-            runner,
-            [
-                "podman",
-                "save",
-                "--format",
-                "oci-archive",
-                "--output",
-                str(archive),
-                image_id,
-            ],
-        )
+        _run(runner, _export_command(layer_compression, image_id, archive))
         _verified_archive_id(archive, image_id)
+        _verified_layer_media(archive, layer_compression)
         exported = clock()
         identities[role] = f"sha256:{image_id}"
         print(
@@ -364,15 +398,13 @@ def _print_cpu_delta(before: CpuStats, after: CpuStats) -> None:
     )
 
 
-def _layer_media(archive: Path) -> str:
+def _layer_media(archive: Path) -> set[str]:
+    """Return the layer media type suffixes, such as `tar+zstd`, of an archive."""
     with tarfile.open(archive, mode="r:") as entries:
         index = json.load(_member(entries, "index.json"))
         digest = index["manifests"][0]["digest"].removeprefix("sha256:")
         manifest = json.load(_member(entries, f"blobs/sha256/{digest}"))
-    layers = manifest["layers"]
-    media = sorted({layer["mediaType"].rsplit(".", 1)[-1] for layer in layers})
-    largest = max((layer["size"] for layer in layers), default=0)
-    return f"layers={len(layers)} media={','.join(media)} largest_mib={largest // MIB}"
+    return {layer["mediaType"].rsplit(".", 1)[-1] for layer in manifest["layers"]}
 
 
 def _member(entries: tarfile.TarFile, name: str) -> IO[bytes]:
@@ -380,69 +412,6 @@ def _member(entries: tarfile.TarFile, name: str) -> IO[bytes]:
     if member is None:
         raise ValueError(f"{name} is not a regular archive member")
     return member
-
-
-def _compression_experiment(
-    runner: Runner, clock: Callable[[], float], item: tuple[str, str, Path]
-) -> None:
-    """Load one image alone into fresh stores from gzip and zstd archives (T147)."""
-    role, image_id, archive = item
-    try:
-        with tempfile.TemporaryDirectory(
-            prefix="markweave-t147-",
-            dir=DEFAULT_IMAGE_COPY_TMP_DIR,
-            ignore_cleanup_errors=True,
-        ) as scratch:
-            root = Path(scratch)
-            zstd = root / "zstd.oci.tar"
-            started = clock()
-            _run(
-                runner,
-                [
-                    "podman",
-                    "push",
-                    "--compression-format",
-                    "zstd",
-                    image_id,
-                    f"oci-archive:{zstd}",
-                ],
-            )
-            print(
-                f"experiment role={role} zstd_export_seconds={clock() - started:.1f} "
-                f"zstd_archive_bytes={zstd.stat().st_size}",
-                flush=True,
-            )
-            for variant, source in (("gzip", archive), ("zstd", zstd)):
-                store = root / variant
-                started = clock()
-                _run(
-                    runner,
-                    [
-                        "podman",
-                        "--root",
-                        str(store / "root"),
-                        "--runroot",
-                        str(store / "run"),
-                        "load",
-                        "--input",
-                        str(source),
-                    ],
-                )
-                print(
-                    f"experiment role={role} variant={variant} "
-                    f"archive_bytes={source.stat().st_size} {_layer_media(source)} "
-                    f"solo_load_seconds={clock() - started:.1f}",
-                    flush=True,
-                )
-                _run(runner, ["podman", "unshare", "rm", "-rf", str(store)])
-    except (
-        ImageTransferError,
-        OSError,
-        ValueError,
-        KeyError,
-        tarfile.TarError,
-    ) as error:
-        print(f"experiment unavailable: {error}", flush=True)
 
 
 def _print_traffic(
@@ -553,10 +522,6 @@ def load(  # noqa: PLR0913 - explicit expected-identity and test seams
         f"concurrent_load_seconds={clock() - started:.1f}",
         flush=True,
     )
-    if domain == COMPRESSION_EXPERIMENT_DOMAIN:
-        _compression_experiment(
-            runner, clock, max(pending, key=lambda item: item[2].stat().st_size)
-        )
     return loaded
 
 
@@ -567,6 +532,9 @@ def _arguments(arguments: Sequence[str] | None) -> argparse.Namespace:
     build_parser.add_argument("--roles", required=True)
     build_parser.add_argument("--output-directory", type=Path, required=True)
     build_parser.add_argument("--github-output", type=Path, required=True)
+    build_parser.add_argument(
+        "--layer-compression", choices=LAYER_COMPRESSIONS, default="gzip"
+    )
     load_parser = commands.add_parser("load")
     load_parser.add_argument("--domain", required=True)
     load_parser.add_argument("--archive-directory", type=Path, required=True)
@@ -584,6 +552,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
                 parse_roles(options.roles),
                 options.output_directory,
                 options.github_output,
+                layer_compression=options.layer_compression,
             )
         else:
             load(

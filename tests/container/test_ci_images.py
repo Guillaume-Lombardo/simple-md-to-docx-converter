@@ -42,14 +42,22 @@ def _add(archive: tarfile.TarFile, name: str, payload: bytes) -> None:
     archive.addfile(member, io.BytesIO(payload))
 
 
-def _write_archive(path: Path, role: str) -> None:
+def _write_archive(path: Path, role: str, layer_media: tuple[str, ...] = ()) -> None:
     config = _config(role)
     config_hex = hashlib.sha256(config).hexdigest()
+    layers = [
+        {
+            "mediaType": f"application/vnd.oci.image.layer.v1.{media}",
+            "digest": f"sha256:{index:064x}",
+            "size": 1,
+        }
+        for index, media in enumerate(layer_media)
+    ]
     manifest = json.dumps(
         {
             "schemaVersion": 2,
             "config": {"digest": f"sha256:{config_hex}", "size": len(config)},
-            "layers": [],
+            "layers": layers,
         }
     ).encode()
     manifest_hex = hashlib.sha256(manifest).hexdigest()
@@ -76,28 +84,22 @@ class FakeRuntime:
         self.tag_override: str | None = None
         self.failing: tuple[str, ...] | None = None
         self.info_json: str | None = None
-        self.experiment: list[list[str]] = []
+        self.pushed_media: tuple[str, ...] = ("tar+zstd", "tar+zstd")
 
     def __call__(
         self, arguments: list[str], **_options: Any
     ) -> subprocess.CompletedProcess[str]:
         match arguments:
-            case ["podman", "push", "--compression-format", "zstd", image_id, target]:
-                self.experiment.append(arguments)
+            case ["podman", "push", *_, image_id, target]:
+                self.calls.append(arguments)
                 role = next(
                     role
                     for role in ci_images.ROLE_IMAGES
                     if _image_id(role) == image_id
                 )
-                _write_archive(Path(target.removeprefix("oci-archive:")), role)
-                return subprocess.CompletedProcess(arguments, 0, "", "")
-            case ["podman", "--root", _, "--runroot", _, "load", *_] | [
-                "podman",
-                "unshare",
-                "rm",
-                *_,
-            ]:
-                self.experiment.append(arguments)
+                _write_archive(
+                    Path(target.removeprefix("oci-archive:")), role, self.pushed_media
+                )
                 return subprocess.CompletedProcess(arguments, 0, "", "")
         return self._respond(arguments)
 
@@ -487,7 +489,29 @@ def test_command_line_build_and_load_report_failures(
         )
         == 0
     )
-    build.assert_called_once_with(("backend",), tmp_path / "a", tmp_path / "o")
+    build.assert_called_once_with(
+        ("backend",), tmp_path / "a", tmp_path / "o", layer_compression="gzip"
+    )
+    build.reset_mock()
+    assert (
+        ci_images.main(
+            [
+                "build",
+                "--roles",
+                '["backend"]',
+                "--output-directory",
+                str(tmp_path / "a"),
+                "--github-output",
+                str(tmp_path / "o"),
+                "--layer-compression",
+                "zstd",
+            ]
+        )
+        == 0
+    )
+    build.assert_called_once_with(
+        ("backend",), tmp_path / "a", tmp_path / "o", layer_compression="zstd"
+    )
     assert (
         ci_images.main(
             [
@@ -867,72 +891,6 @@ def test_load_reports_cpu_busy_and_iowait_shares(
     assert "cpu busy_percent=75 iowait_percent=5 cpus=" in capsys.readouterr().out
 
 
-def test_container_domain_compares_gzip_and_zstd_solo_loads(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    roles = IMAGE_DOMAIN_ROLES["container"]
-    directory = _archives(tmp_path, roles)
-    runtime = FakeRuntime()
-
-    ci_images.load(
-        "container", directory, _expected(*roles), runner=runtime, clock=_clock
-    )
-
-    pushes = [call for call in runtime.experiment if call[1] == "push"]
-    loads = [call for call in runtime.experiment if "load" in call]
-    removals = [call for call in runtime.experiment if call[1] == "unshare"]
-    assert len(pushes) == 1
-    assert len(loads) == len(removals) == 2
-    assert all(Path(call[3]).parent == Path(call[5]).parent for call in loads)
-    output = capsys.readouterr().out
-    assert "experiment role=" in output
-    for variant in ("gzip", "zstd"):
-        assert f"variant={variant} " in output
-    assert "layers=0 media= largest_mib=0 solo_load_seconds=0.0" in output
-
-
-def test_other_domains_skip_the_compression_experiment(tmp_path: Path) -> None:
-    roles = IMAGE_DOMAIN_ROLES["e2e-standalone-1"]
-    runtime = FakeRuntime()
-
-    ci_images.load(
-        "e2e-standalone-1",
-        _archives(tmp_path, roles),
-        _expected(*roles),
-        runner=runtime,
-        clock=_clock,
-    )
-
-    assert runtime.experiment == []
-
-
-def test_compression_experiment_failure_never_blocks_a_load(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    roles = IMAGE_DOMAIN_ROLES["container"]
-    runtime = FakeRuntime()
-
-    def runner(
-        arguments: list[str], **options: Any
-    ) -> subprocess.CompletedProcess[str]:
-        if arguments[:2] == ["podman", "push"]:
-            return subprocess.CompletedProcess(arguments, 125, "", "no zstd")
-        return runtime(arguments, **options)
-
-    loaded = ci_images.load(
-        "container",
-        _archives(tmp_path, roles),
-        _expected(*roles),
-        runner=runner,
-        clock=_clock,
-    )
-
-    assert loaded == {role: ci_images.ROLE_IMAGES[role] for role in roles}
-    assert "experiment unavailable: command failed with status 125" in (
-        capsys.readouterr().out
-    )
-
-
 def test_layer_media_rejects_a_non_regular_member(tmp_path: Path) -> None:
     archive = tmp_path / "directory.oci.tar"
     with tarfile.open(archive, "w:") as entries:
@@ -942,3 +900,79 @@ def test_layer_media_rejects_a_non_regular_member(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="not a regular archive member"):
         ci_images._layer_media(archive)
+
+
+def test_build_exports_ci_archives_with_verified_zstd_layers(tmp_path: Path) -> None:
+    runtime = FakeRuntime()
+
+    ci_images.build(
+        ("backend", "frontend"),
+        tmp_path / "archives",
+        tmp_path / "github-output",
+        runner=runtime,
+        clock=_clock,
+        layer_compression="zstd",
+    )
+
+    pushes = [call for call in runtime.calls if call[:2] == ["podman", "push"]]
+    assert [call[:5] for call in pushes] == [
+        ["podman", "push", "--compression-format", "zstd", "--force-compression"]
+    ] * 2
+    for role, call in zip(("backend", "frontend"), pushes, strict=True):
+        archive = tmp_path / "archives" / ci_images.archive_name(role)
+        assert call[5:] == [_image_id(role), f"oci-archive:{archive}"]
+        assert ci_images._layer_media(archive) == {"tar+zstd"}
+    assert not any(call[:2] == ["podman", "save"] for call in runtime.calls)
+
+
+def test_build_keeps_podman_save_for_gzip_archives(tmp_path: Path) -> None:
+    runtime = FakeRuntime()
+
+    _build(tmp_path, runtime, ("frontend",))
+
+    assert any(call[:2] == ["podman", "save"] for call in runtime.calls)
+    assert not any(call[:2] == ["podman", "push"] for call in runtime.calls)
+
+
+@pytest.mark.parametrize("media", [("tar+zstd", "tar+gzip"), ("tar",)])
+def test_build_rejects_a_zstd_export_with_other_layers(
+    tmp_path: Path, media: tuple[str, ...]
+) -> None:
+    runtime = FakeRuntime()
+    runtime.pushed_media = media
+
+    with pytest.raises(ImageTransferError, match="expected only zstd layers"):
+        ci_images.build(
+            ("frontend",),
+            tmp_path / "archives",
+            tmp_path / "github-output",
+            runner=runtime,
+            clock=_clock,
+            layer_compression="zstd",
+        )
+
+
+def test_build_rejects_an_unreadable_zstd_export(tmp_path: Path, mocker: Any) -> None:
+    mocker.patch.object(ci_images, "_layer_media", side_effect=KeyError("layers"))
+
+    with pytest.raises(ImageTransferError, match="unreadable layers"):
+        ci_images.build(
+            ("frontend",),
+            tmp_path / "archives",
+            tmp_path / "github-output",
+            runner=FakeRuntime(),
+            clock=_clock,
+            layer_compression="zstd",
+        )
+
+
+def test_build_rejects_an_unsupported_layer_compression(tmp_path: Path) -> None:
+    with pytest.raises(ImageTransferError, match="unsupported layer compression"):
+        ci_images.build(
+            ("frontend",),
+            tmp_path / "archives",
+            tmp_path / "github-output",
+            runner=FakeRuntime(),
+            layer_compression="xz",
+        )
+    assert not (tmp_path / "archives").exists()

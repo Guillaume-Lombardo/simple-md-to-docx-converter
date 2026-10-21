@@ -81,3 +81,36 @@ def test_archive_loads_and_is_tagged_only_after_exact_id_checks(
             )
     finally:
         _podman("rmi", "--force", target, source, other, check=False)
+
+
+def test_zstd_ci_archive_loads_by_exact_id_after_the_source_is_removed(
+    tmp_path: Path,
+) -> None:
+    source = f"localhost/markweave-ci-images-zstd-source:{tmp_path.name}"
+    target = f"localhost/markweave-ci-images-zstd-target:{tmp_path.name}"
+    try:
+        image_id = _image(tmp_path, source, "zstd export")
+        archives = tmp_path / "archives"
+        archives.mkdir()
+        archive = archives / ci_images.archive_name("frontend")
+        _podman(*ci_images._export_command("zstd", image_id, archive)[1:])
+
+        ci_images._verified_archive_id(archive, image_id)
+        ci_images._verified_layer_media(archive, "zstd")
+        assert ci_images._layer_media(archive) == {"tar+zstd"}
+        # Remove the source so the load must import the zstd layers.
+        _podman("rmi", "--force", source)
+        loaded = ci_images.load(
+            "frontend",
+            archives,
+            {"frontend": f"sha256:{image_id}"},
+            names={"frontend": target},
+        )
+
+        assert loaded == {"frontend": target}
+        assert (
+            _podman("image", "inspect", target, "--format", "{{.Id}}").stdout.strip()
+            == image_id
+        )
+    finally:
+        _podman("rmi", "--force", target, source, check=False)
