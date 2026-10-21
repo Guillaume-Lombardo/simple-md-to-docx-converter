@@ -97,11 +97,11 @@ COPY src ./src
 ENV UV_PROJECT_ENVIRONMENT=/opt/md-converter/venv \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
-RUN uv sync --locked --no-dev --no-editable --extra all \
+RUN uv sync --locked --no-dev --no-editable --extra all --no-cache \
     && /opt/md-converter/venv/bin/python -c \
         'import markweave, sys; assert markweave.__version__ == sys.argv[1]' \
         "${APPLICATION_VERSION}" \
-    && rm -rf /root/.cache/uv /opt/md-converter/app/src \
+    && rm -rf /opt/md-converter/app/src \
     && rm -f /opt/md-converter/app/pyproject.toml /opt/md-converter/app/uv.lock \
         /opt/md-converter/app/README.md /usr/local/bin/uv /usr/local/bin/uvx
 
