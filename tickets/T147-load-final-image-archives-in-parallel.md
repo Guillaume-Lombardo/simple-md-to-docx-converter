@@ -1,13 +1,13 @@
 ---
 ticket: T147
 linear_id: G1L-705
-linear_url: https://linear.app/g1lom/issue/G1L-705/t147-download-and-load-final-image-archives-in-parallel
+linear_url: https://linear.app/g1lom/issue/G1L-705/t147-load-final-image-archives-in-parallel
 status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
 
-# T147 - Download and load final-image archives in parallel
+# T147 - Load final-image archives in parallel
 
 ## Objective
 
@@ -24,9 +24,9 @@ sequential archive downloads.
 - `scripts/container/ci_images.py load` loads the roles of a domain concurrently. It keeps every
   check per role: archive configuration digest, the ID reported by `podman load`, the tagged ID,
   and refusal to replace an existing image. Any failure stops the load.
-- The `final-image` job downloads its domain's archives in a single step, or concurrently, without
-  widening what each domain receives.
-- The CI validator and its tests are updated, along with the canonical digest of `ci.yml`.
+- Out of scope (owner decision 2026-10-21): parallel archive downloads. They take about 20 s per
+  shard (12 + 5 + 4 s), so the gain of about 8 s does not justify rewriting the validator-bound
+  download steps.
 - The release qualification jobs from T134 may reuse the same loader.
 
 ## Acceptance criteria
@@ -60,8 +60,9 @@ sequential archive downloads.
   run 39109797384 were 12 + 5 + 4 s for most E2E shards and 39 s for the backend in `container`;
   only e2e-distributed-1 was slow (56 + 25 + 14 s). The pinned `actions/download-artifact` downloads
   up to five artifacts concurrently when given a `pattern`, so a single step per domain is possible.
-  It would replace three validator-bound steps for a typical gain of about 8 s. I propose to drop
-  the download bullet from this ticket's scope unless hosted runs show the slow case recurring.
+  It would replace three validator-bound steps for a typical gain of about 8 s.
+- 2026-10-21: The owner removed parallel downloads from the scope; the title and scope are updated
+  in Linear and here.
 - 2026-10-21: Local verification. `ruff`, `ty`, the CI validator and the container, selection and
   validation tests (596) pass. The new tests (a barrier that only clears when every load runs at
   once; a load failure in each role tagging nothing; a missing archive or an occupied name in each
