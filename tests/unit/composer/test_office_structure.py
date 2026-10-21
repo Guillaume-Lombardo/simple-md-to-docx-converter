@@ -228,6 +228,52 @@ def test_style_values_are_escaped_and_prefixes_follow_the_document() -> None:
     assert _styles(edited) == [(f"{_MAIN}#p0", "a&b")]
 
 
+def test_default_namespace_paragraphs_get_qualified_style_attributes() -> None:
+    other = "urn:example:other"
+    paragraphs = (
+        "<p><r><t>Bare</t></r></p>",
+        f'<p><pPr><pStyle xmlns:s="{_W}" s:val="Normal"/></pPr><r><t>A</t></r></p>',
+        "<p><pPr/><r><t>Empty</t></r></p>",
+        "<p/>",
+        f'<p xmlns:w="{other}"><pPr xmlns:q="{_W}"><jc q:val="left"/></pPr>'
+        "<r><t>Scoped</t></r></p>",
+        f'<p><pPr xmlns:w="{other}"/><r><t>Rebound</t></r></p>',
+    )
+    members = _members(_docx())
+    members[_MAIN] = (
+        f'<document xmlns="{_W}"><body>{"".join(paragraphs)}</body></document>'
+    ).encode()
+    source = archive(members)
+    expected = ("Normal" if index == 1 else None for index in range(6))
+    operations = tuple(
+        SetParagraphStyle(f"{_MAIN}#p{index}", style, "Heading1")
+        for index, style in enumerate(expected)
+    )
+
+    edited = apply_structure_edits(source, operations, _limits(), DOCX_PACKAGE)
+
+    declare = f'xmlns:w="{_W}"'
+    style = f'<w:pStyle {declare} w:val="Heading1"/>'
+    assert (
+        _members(edited)[_MAIN]
+        == (
+            f'<document xmlns="{_W}"><body>'
+            f'<p><w:pPr {declare}><w:pStyle w:val="Heading1"/></w:pPr>'
+            "<r><t>Bare</t></r></p>"
+            f"<p><pPr>{style}</pPr><r><t>A</t></r></p>"
+            f"<p><pPr>{style}</pPr><r><t>Empty</t></r></p>"
+            f'<p><w:pPr {declare}><w:pStyle w:val="Heading1"/></w:pPr></p>'
+            f'<p xmlns:w="{other}"><pPr xmlns:q="{_W}"><q:pStyle q:val="Heading1"/>'
+            '<jc q:val="left"/></pPr><r><t>Scoped</t></r></p>'
+            f'<p><pPr xmlns:w="{other}">{style}</pPr><r><t>Rebound</t></r></p>'
+            "</body></document>"
+        ).encode()
+    )
+    assert _styles(edited) == [(f"{_MAIN}#p{index}", "Heading1") for index in range(6)]
+    before, after = _members(source), _members(edited)
+    assert {name for name in before if before[name] != after[name]} == {_MAIN}
+
+
 @pytest.mark.parametrize(
     ("operation", "code"),
     [

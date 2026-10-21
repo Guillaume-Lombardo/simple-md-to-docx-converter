@@ -171,6 +171,36 @@ class OfficeStructure:
     images: tuple[ImageTarget, ...]
 
 
+class _Bindings:
+    """The namespace prefixes in scope while a part is parsed."""
+
+    def __init__(self) -> None:
+        self._uris: dict[str, list[str]] = {}
+
+    def declare(self, prefix: str | None, uri: str | None) -> None:
+        self._uris.setdefault(prefix or "", []).append(uri or "")
+
+    def undeclare(self, prefix: str | None) -> None:
+        self._uris[prefix or ""].pop()
+
+    def wordprocessing_prefix(self) -> bytes | None:
+        """Return a non-empty in-scope prefix (with colon) bound to WordprocessingML.
+
+        Attributes need such a prefix because a default namespace never
+        applies to them; ``None`` means the markup inserted there must declare
+        its own.
+        """
+
+        bound = sorted(
+            prefix
+            for prefix, uris in self._uris.items()
+            if prefix and uris and uris[-1] == _W_NS
+        )
+        if not bound:
+            return None
+        return ("w" if "w" in bound else bound[0]).encode("utf-8") + b":"
+
+
 @dataclass(slots=True)
 class _Paragraph:
     ordinal: int
@@ -180,8 +210,9 @@ class _Paragraph:
     in_table: bool
     eligible: bool
     depth: int
+    scope: bytes | None
     style: str | None = None
-    properties: tuple[int, int, bool] | None = None
+    properties: tuple[int, int, bool, bytes | None] | None = None
     style_span: tuple[int, int] | None = None
     end: int = 0
 
@@ -233,6 +264,7 @@ def _paragraphs(payload: bytes, error: type[OfficeEditError]) -> tuple[_Paragrap
     stack: list[str] = []
     found: list[_Paragraph] = []
     open_paragraphs: list[_Paragraph] = []
+    bindings = _Bindings()
 
     def reject(*_arguments: object) -> None:
         raise error("invalid_package")
@@ -250,6 +282,7 @@ def _paragraphs(payload: bytes, error: type[OfficeEditError]) -> tuple[_Paragrap
                 eligible=not _EXCLUDED_PARAGRAPH_ANCESTORS.intersection(stack)
                 and not open_paragraphs,
                 depth=len(stack),
+                scope=bindings.wordprocessing_prefix(),
             )
             found.append(paragraph)
             open_paragraphs.append(paragraph)
@@ -257,7 +290,12 @@ def _paragraphs(payload: bytes, error: type[OfficeEditError]) -> tuple[_Paragrap
             current = open_paragraphs[-1]
             if name == f"{_W_NS} pPr" and len(stack) == current.depth + 1:
                 close = _start_tag_end(payload, begin, error)
-                current.properties = (begin, close, payload[close - 1] == ord("/"))
+                current.properties = (
+                    begin,
+                    close,
+                    payload[close - 1] == ord("/"),
+                    bindings.wordprocessing_prefix(),
+                )
             elif (
                 name == f"{_W_NS} pStyle"
                 and current.properties is not None
@@ -290,6 +328,8 @@ def _paragraphs(payload: bytes, error: type[OfficeEditError]) -> tuple[_Paragrap
 
     parser.StartDoctypeDeclHandler = reject
     parser.EntityDeclHandler = reject
+    parser.StartNamespaceDeclHandler = bindings.declare
+    parser.EndNamespaceDeclHandler = bindings.undeclare
     parser.StartElementHandler = start
     parser.EndElementHandler = end
     try:
@@ -518,30 +558,68 @@ def _target_ordinal(target: object, part: str, separator: str) -> int | None:
     return int(digits)
 
 
+def _names(prefix: bytes | None) -> tuple[bytes, bytes]:
+    """Return the prefix for new markup and any declaration it needs.
+
+    Without a non-empty prefix bound to WordprocessingML (a default-namespace
+    part), the new element declares one so that its ``val`` attribute is
+    qualified; that declaration only covers the inserted markup.
+    """
+
+    if prefix is not None:
+        return prefix, b""
+    return b"w:", b' xmlns:w="' + _W_NS.encode("utf-8") + b'"'
+
+
+def _style_declaration(scope: bytes | None, style: str) -> bytes:
+    prefix, declaration = _names(scope)
+    value = quoteattr(style).encode("utf-8")
+    return (
+        b"<"
+        + prefix
+        + b"pStyle"
+        + declaration
+        + b" "
+        + prefix
+        + b"val="
+        + value
+        + b"/>"
+    )
+
+
 def _style_splice(
     payload: bytes, paragraph: _Paragraph, style: str
 ) -> tuple[int, int, bytes]:
     """Return the span to replace and the bytes that set ``style`` exactly."""
 
-    prefix = _prefix(payload, paragraph.start)
-    value = quoteattr(style).encode("utf-8")
-    declaration = b"<" + prefix + b"pStyle " + prefix + b"val=" + value + b"/>"
-    if paragraph.style_span is not None:
-        return (*paragraph.style_span, declaration)
     if paragraph.properties is not None:
-        begin, close, self_closing = paragraph.properties
+        begin, close, self_closing, scope = paragraph.properties
+        declaration = _style_declaration(scope, style)
+        if paragraph.style_span is not None:
+            return (*paragraph.style_span, declaration)
         if self_closing:
             opening = payload[begin:close].rstrip(b"/") + b">"
-            closing = b"</" + prefix + b"pPr>"
+            closing = b"</" + _prefix(payload, begin) + b"pPr>"
             return begin, close + 1, opening + declaration + closing
         return close + 1, close + 1, declaration
-    properties = b"<" + prefix + b"pPr>" + declaration + b"</" + prefix + b"pPr>"
+    prefix, namespace = _names(paragraph.scope)
+    properties = (
+        b"<"
+        + prefix
+        + b"pPr"
+        + namespace
+        + b">"
+        + _style_declaration(prefix, style)
+        + b"</"
+        + prefix
+        + b"pPr>"
+    )
     if paragraph.self_closing:
         opening = payload[paragraph.start : paragraph.start_close].rstrip(b"/") + b">"
         return (
             paragraph.start,
             paragraph.start_close + 1,
-            opening + properties + b"</" + prefix + b"p>",
+            opening + properties + b"</" + _prefix(payload, paragraph.start) + b"p>",
         )
     return paragraph.start_close + 1, paragraph.start_close + 1, properties
 
