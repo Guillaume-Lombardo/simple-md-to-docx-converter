@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import https from "node:https";
 import test from "node:test";
@@ -54,6 +55,68 @@ async function request(page, method, path, upload, payload, extraHeaders = {}) {
       };
     },
     { method, path, upload, payload, extraHeaders },
+  );
+}
+
+async function libraryUpload(page, content) {
+  return page.evaluate(async (content) => {
+    const csrf = document.cookie
+      .split(";")
+      .map((part) => part.trim())
+      .find((part) => part.startsWith("__Host-md_converter_csrf="))
+      ?.split("=", 2)[1];
+    const body = new FormData();
+    body.set(
+      "file",
+      new File([content], "scanner-unavailable.md", { type: "text/markdown" }),
+    );
+    const response = await fetch("/api/v1/composer/library", {
+      method: "POST",
+      headers: { "X-CSRF-Token": decodeURIComponent(csrf ?? "") },
+      body,
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+    return { status: response.status, json: await response.json() };
+  }, content);
+}
+
+/** The typed phase left one exact library document; it must stay intact. */
+async function assertLibraryIntact(page, profile) {
+  const state = JSON.parse(
+    await readFile(`/browser-session/composer-library-${profile}.json`, "utf8"),
+  );
+  const documentPath = `/api/v1/composer/library/${state.documentId}`;
+  const document = await request(page, "GET", documentPath);
+  assert.equal(document.status, 200);
+  assert.equal(document.json.current_version_id, state.versionId);
+  const content = await page.request.get(
+    `${documentPath}/versions/${state.versionId}/content`,
+  );
+  assert.equal(content.status(), 200);
+  const bytes = await content.body();
+  assert.equal(bytes.toString("utf8"), state.content);
+  assert.equal(createHash("sha256").update(bytes).digest("hex"), state.sha256);
+  const excerpts = await request(
+    page,
+    "POST",
+    "/api/v1/composer/library/excerpts",
+    undefined,
+    { references: [{ version_id: state.versionId, chunk: 0 }] },
+  );
+  assert.equal(excerpts.status, 200);
+  assert.match(excerpts.json.excerpts[0].text, /keeps exact bytes/);
+  const search = await request(
+    page,
+    "POST",
+    "/api/v1/composer/library/search",
+    undefined,
+    { query: state.query },
+  );
+  assert.equal(search.status, 200);
+  assert.deepEqual(
+    search.json.results.map((hit) => hit.document_id),
+    [state.documentId],
   );
 }
 
@@ -326,6 +389,10 @@ test("Composer retains exact owner artifacts through scanner outage and restore"
       assert.equal(rejected.status, 503);
       assert.equal(rejected.json.error.code, "UPLOAD_SCANNER_UNAVAILABLE");
       assert.equal((await request(page, "GET", draftPath)).status, 200);
+      const library = await libraryUpload(page, source);
+      assert.equal(library.status, 503);
+      assert.equal(library.json.error.code, "UPLOAD_SCANNER_UNAVAILABLE");
+      await assertLibraryIntact(page, profile);
     } else {
       const connection = await request(
         page,
@@ -347,6 +414,7 @@ test("Composer retains exact owner artifacts through scanner outage and restore"
         assert.equal(recovered.json.status, "ready");
       }
       if (phase === "restored-backup") {
+        await assertLibraryIntact(page, profile);
         const backupPath = `/api/v1/composer/connections/${backupConnectionId}`;
         const backup = await request(page, "GET", backupPath);
         assert.equal(backup.status, 200);
@@ -592,8 +660,10 @@ test("Composer retains exact owner artifacts through scanner outage and restore"
         );
       }
     }
-    if (phase === "restart")
+    if (phase === "restart") {
       await verifyHeldGenerationCancellation(page, profile);
+      await assertLibraryIntact(page, profile);
+    }
     await context.close();
   } finally {
     await browser.close();

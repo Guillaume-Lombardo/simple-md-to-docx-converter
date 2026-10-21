@@ -70,6 +70,16 @@ async function api(page, method, path, options = {}) {
         );
         form.set("title", options.upload.title);
         body = form;
+      } else if (options.library) {
+        const form = new FormData();
+        form.set(
+          "file",
+          new File([options.library.content], options.library.filename, {
+            type: "text/markdown",
+          }),
+        );
+        if (options.library.title) form.set("title", options.library.title);
+        body = form;
       } else if (options.typed) {
         const form = new FormData();
         form.set("name", options.typed.name);
@@ -616,6 +626,154 @@ async function modelProposedOfficeEdit(alice, connection, suffix) {
   assert.equal(reread.targets[0].text, "Model E2E title");
 }
 
+/** Leave one library document for the outage, restore and restart phases. */
+async function libraryRecoveryState(admin, suffix) {
+  const content = `# Recovery\n\nLibrary recovery ${suffix} keeps exact bytes.\n`;
+  const document = expectStatus(
+    await api(admin, "POST", "/api/v1/composer/library", {
+      library: {
+        content,
+        filename: "recovery.md",
+        title: `Recovery ${suffix}`,
+      },
+    }),
+    201,
+  );
+  await writeFile(
+    `/browser-session/composer-library-${profile}.json`,
+    `${JSON.stringify({
+      documentId: document.id,
+      versionId: document.current_version_id,
+      sha256: sha256(Buffer.from(content)),
+      content,
+      query: `recovery ${suffix}`,
+    })}\n`,
+    { mode: 0o600 },
+  );
+}
+
+async function citedLibrary(alice, bob, bobUser, connection, suffix) {
+  const notes = `Library ${suffix}: the northern turbine failed after the storm.`;
+  await alice.goto(`${baseURL}/composer/library`, { waitUntil: "networkidle" });
+  await alice
+    .getByLabel("Source (.md, .txt, .docx, .pptx)")
+    .setInputFiles({
+      name: "findings.md",
+      mimeType: "text/markdown",
+      buffer: Buffer.from(`# Findings\n\n${notes}\n`),
+    });
+  await alice.getByLabel("Title (optional)").fill(`Field notes ${suffix}`);
+  await alice.getByRole("button", { name: "Upload document" }).click();
+  await alice.getByText("Library document uploaded.").waitFor();
+  await alice.getByLabel("Search terms").fill(`northern turbine ${suffix}`);
+  await alice.getByRole("button", { name: "Search library" }).click();
+  await alice.getByRole("button", { name: "Show excerpt" }).click();
+  await alice.locator("figure blockquote", { hasText: notes }).waitFor();
+  const [download] = await Promise.all([
+    alice.waitForEvent("download"),
+    alice.getByRole("button", { name: "Download version 1" }).click(),
+  ]);
+  assert.equal(download.suggestedFilename().endsWith(".md"), true);
+  assert.equal(
+    (await readFile(await download.path(), "utf8")).trim(),
+    `# Findings\n\n${notes}`,
+  );
+  const infected = await api(alice, "POST", "/api/v1/composer/library", {
+    library: { content: malwareMarker, filename: "infected.md" },
+  });
+  assert.equal(infected.status, 422, infected.text);
+  assert.equal(infected.json.error.code, "UPLOAD_MALWARE_DETECTED");
+
+  const listed = expectStatus(
+    await api(
+      alice,
+      "GET",
+      `/api/v1/composer/library?query=${encodeURIComponent(suffix)}`,
+    ),
+    200,
+  ).documents;
+  assert.equal(listed.length, 1);
+  let document = listed[0];
+  const documentPath = `/api/v1/composer/library/${document.id}`;
+  const citation = { version_id: document.current_version_id, chunk: 0 };
+  const search = { json: { query: `turbine ${suffix}` } };
+  assert.equal((await api(bob, "GET", documentPath)).status, 404);
+  assert.deepEqual(
+    expectStatus(
+      await api(bob, "POST", "/api/v1/composer/library/search", search),
+      200,
+    ).results,
+    [],
+  );
+  const excerpts = { json: { references: [citation] } };
+  assert.equal(
+    (await api(bob, "POST", "/api/v1/composer/library/excerpts", excerpts))
+      .status,
+    404,
+  );
+  document = expectStatus(
+    await api(alice, "PUT", `${documentPath}/grants/${bobUser.id}`, {
+      headers: { "If-Match": document.etag },
+    }),
+    200,
+  );
+  assert.match(
+    expectStatus(
+      await api(bob, "POST", "/api/v1/composer/library/excerpts", excerpts),
+      200,
+    ).excerpts[0].text,
+    /northern turbine/,
+  );
+  document = expectStatus(
+    await api(alice, "DELETE", `${documentPath}/grants/${bobUser.id}`, {
+      headers: { "If-Match": document.etag },
+    }),
+    200,
+  );
+  assert.equal((await api(bob, "GET", documentPath)).status, 404);
+
+  const { path } = await createDraftWithSource(alice, `cited-${suffix}`);
+  const request = {
+    connection_id: connection.id,
+    approved_endpoint: providerEndpoint,
+    approved_model: providerModel,
+    content: "Summarize the cited findings.",
+    max_output_tokens: 64,
+  };
+  const ready = expectStatus(await api(alice, "GET", path), 200);
+  const preview = expectStatus(
+    await api(alice, "POST", `${path}/model-steps/preview`, {
+      headers: { "If-Match": ready.etag },
+      json: { ...request, author_ids: [], library_refs: [citation] },
+    }),
+    200,
+  );
+  assert.match(preview.transmitted_content, /Cited library excerpts/);
+  assert.match(preview.transmitted_content, /northern turbine/);
+  assert.deepEqual(
+    preview.library_excerpts.map((item) => [item.version_id, item.chunk]),
+    [[citation.version_id, 0]],
+  );
+  const started = expectStatus(
+    await api(alice, "POST", `${path}/model-steps`, {
+      headers: {
+        "If-Match": ready.etag,
+        "Idempotency-Key": `cited-step-${suffix}`,
+      },
+      json: {
+        ...request,
+        library_refs: [citation],
+        author_preview_digest: preview.preview_digest,
+      },
+    }),
+    202,
+  );
+  assert.deepEqual(started.library_refs, [citation]);
+  const step = await settledStep(alice, path, started.id);
+  assert.equal(step.status, "completed", step.error_code ?? "");
+  assert.ok(step.proposal_id);
+}
+
 function runInstalled(command, args, input = "") {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -1046,114 +1204,6 @@ async function officeCliJourney(alice, bob, connection, suffix) {
     sha256(await cliBytes(aliceCli, path, created.id, published.id, "download")),
     publishedRevision.artifacts.find((item) => item.kind === "download")?.sha256,
   );
-}
-
-async function citedLibrary(alice, bob, bobUser, connection, suffix) {
-  const notes = `Library ${suffix}: the northern turbine failed after the storm.`;
-  await alice.goto(`${baseURL}/composer/library`, { waitUntil: "networkidle" });
-  await alice
-    .getByLabel("Source (.md, .txt, .docx, .pptx)")
-    .setInputFiles({
-      name: "findings.md",
-      mimeType: "text/markdown",
-      buffer: Buffer.from(`# Findings\n\n${notes}\n`),
-    });
-  await alice.getByLabel("Title (optional)").fill(`Field notes ${suffix}`);
-  await alice.getByRole("button", { name: "Upload document" }).click();
-  await alice.getByText("Library document uploaded.").waitFor();
-  await alice.getByLabel("Search terms").fill(`northern turbine ${suffix}`);
-  await alice.getByRole("button", { name: "Search library" }).click();
-  await alice.getByRole("button", { name: "Show excerpt" }).click();
-  await alice.locator("figure blockquote", { hasText: notes }).waitFor();
-
-  const listed = expectStatus(
-    await api(
-      alice,
-      "GET",
-      `/api/v1/composer/library?query=${encodeURIComponent(suffix)}`,
-    ),
-    200,
-  ).documents;
-  assert.equal(listed.length, 1);
-  let document = listed[0];
-  const documentPath = `/api/v1/composer/library/${document.id}`;
-  const citation = { version_id: document.current_version_id, chunk: 0 };
-  const search = { json: { query: `turbine ${suffix}` } };
-  assert.equal((await api(bob, "GET", documentPath)).status, 404);
-  assert.deepEqual(
-    expectStatus(
-      await api(bob, "POST", "/api/v1/composer/library/search", search),
-      200,
-    ).results,
-    [],
-  );
-  const excerpts = { json: { references: [citation] } };
-  assert.equal(
-    (await api(bob, "POST", "/api/v1/composer/library/excerpts", excerpts))
-      .status,
-    404,
-  );
-  document = expectStatus(
-    await api(alice, "PUT", `${documentPath}/grants/${bobUser.id}`, {
-      headers: { "If-Match": document.etag },
-    }),
-    200,
-  );
-  assert.match(
-    expectStatus(
-      await api(bob, "POST", "/api/v1/composer/library/excerpts", excerpts),
-      200,
-    ).excerpts[0].text,
-    /northern turbine/,
-  );
-  document = expectStatus(
-    await api(alice, "DELETE", `${documentPath}/grants/${bobUser.id}`, {
-      headers: { "If-Match": document.etag },
-    }),
-    200,
-  );
-  assert.equal((await api(bob, "GET", documentPath)).status, 404);
-
-  const { path } = await createDraftWithSource(alice, `cited-${suffix}`);
-  const request = {
-    connection_id: connection.id,
-    approved_endpoint: providerEndpoint,
-    approved_model: providerModel,
-    content: "Summarize the cited findings.",
-    max_output_tokens: 64,
-  };
-  const ready = expectStatus(await api(alice, "GET", path), 200);
-  const preview = expectStatus(
-    await api(alice, "POST", `${path}/model-steps/preview`, {
-      headers: { "If-Match": ready.etag },
-      json: { ...request, author_ids: [], library_refs: [citation] },
-    }),
-    200,
-  );
-  assert.match(preview.transmitted_content, /Cited library excerpts/);
-  assert.match(preview.transmitted_content, /northern turbine/);
-  assert.deepEqual(
-    preview.library_excerpts.map((item) => [item.version_id, item.chunk]),
-    [[citation.version_id, 0]],
-  );
-  const started = expectStatus(
-    await api(alice, "POST", `${path}/model-steps`, {
-      headers: {
-        "If-Match": ready.etag,
-        "Idempotency-Key": `cited-step-${suffix}`,
-      },
-      json: {
-        ...request,
-        library_refs: [citation],
-        author_preview_digest: preview.preview_digest,
-      },
-    }),
-    202,
-  );
-  assert.deepEqual(started.library_refs, [citation]);
-  const step = await settledStep(alice, path, started.id);
-  assert.equal(step.status, "completed", step.error_code ?? "");
-  assert.ok(step.proposal_id);
 }
 
 test(`typed Composer shares, human decisions, and exact regeneration in ${profile}`, async () => {
@@ -1783,6 +1833,7 @@ test(`typed Composer shares, human decisions, and exact regeneration in ${profil
     await officePanelJourney(alice, connection, suffix);
     await officeCliJourney(alice, bob, connection, suffix);
     await citedLibrary(alice, bob, bobUser, connection, suffix);
+    await libraryRecoveryState(admin, suffix);
   } finally {
     await Promise.all(contexts.map((context) => context.close()));
     await browser.close();
