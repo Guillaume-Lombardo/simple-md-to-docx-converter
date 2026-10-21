@@ -179,11 +179,13 @@ def exercise_citation_access_is_rechecked(harness: OfficeStepHarness) -> None:
     path, etag = _draft(harness)
 
     assert _preview(harness, path, etag, _cite(foreign)).status_code == 412
-    missing = [{"version_id": str(own.current_version_id), "chunk": 7}]
+    missing: list[dict[str, object]] = [
+        {"version_id": str(own.current_version_id), "chunk": 7}
+    ]
     assert _preview(harness, path, etag, missing).status_code == 412
     assert _preview(harness, path, etag, _cite(own, own)).status_code == 422
     assert _preview(harness, path, '"0"', _cite(own)).status_code == 412
-    too_many = [
+    too_many: list[dict[str, object]] = [
         {"version_id": str(own.current_version_id), "chunk": chunk}
         for chunk in range(21)
     ]

@@ -77,6 +77,21 @@ Revocation prevents new disclosure, while an already published revision retains 
 under its own owner and retention rules. A style-reference template never grants access to an
 author entry.
 
+## Cite the reference library
+
+**Reference library** keeps private Markdown, text, Word, and PowerPoint sources that a model step
+may quote. Uploads are scanned before they are read, and their text is split into numbered
+excerpts. A replacement creates a new version; earlier versions stay available, so an earlier
+citation still names its exact text. The owner may share a document with a named account and
+revoke that access. Search and excerpts only ever show documents you may currently read.
+
+In a draft's model request, search the library under **Library excerpts to cite** and tick up to
+20 excerpts. **Preview exact prompt** shows the request text followed by the cited excerpts, marked
+as reference data rather than instructions. Only the previewed text is sent. Composer rechecks
+access to every cited excerpt when the step starts, just before sending, when the result arrives,
+and when you publish the suggestion. If the document was revoked or deleted at any of those
+points, nothing is sent or published. The step records which excerpts it cited.
+
 ## Fill a typed Word template
 
 **Fill templates** manages private DOCX templates with an explicit field schema. These are distinct

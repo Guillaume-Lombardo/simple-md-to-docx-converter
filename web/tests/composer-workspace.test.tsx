@@ -178,6 +178,7 @@ function setup(
     recoveredPublicationFetchFails?: boolean;
     secondDraft?: boolean;
     officeProposal?: boolean;
+    library?: { search: ReturnType<typeof vi.fn> };
   } = {},
 ) {
   if (!options.preserveStorage) sessionStorage.clear();
@@ -444,6 +445,7 @@ function setup(
     captureSource: vi.fn().mockResolvedValue({ data: revision }),
     restore: vi.fn().mockResolvedValue({ data: revision }),
     publishOfficeProposal: vi.fn().mockResolvedValue({ data: revision }),
+    ...(options.library ? { library: options.library } : {}),
     ...(options.officeProposal
       ? {
           office: {
@@ -1695,7 +1697,7 @@ test("revoked author prompt preview cannot be sent to a model", async () => {
     );
     expect(
       await screen.findByText(
-        "An author entry changed or access was revoked. Refresh the preview and selection.",
+        "An author entry or cited excerpt changed or access was revoked. Refresh the preview and selection.",
       ),
     ).toBeVisible();
     expect(
@@ -1936,4 +1938,80 @@ test("pending Office edit proposals are reviewed before any publication", async 
   expect(
     screen.queryByRole("button", { name: "Publish approved text edits" }),
   ).toBeNull();
+});
+
+test("cited library excerpts are previewed and sent with the reviewed digest", async () => {
+  const hit = {
+    document_id: "document-1",
+    title: "Field notes",
+    version_id: "00000000-0000-4000-8000-000000000a01",
+    version_number: 1,
+    chunk: 0,
+    score: 2,
+    snippet: "Turbine failed.",
+  };
+  const search = vi
+    .fn()
+    .mockRejectedValueOnce(new ApiError(503, "UNAVAILABLE", "Library down."))
+    .mockResolvedValueOnce([])
+    .mockResolvedValue([hit, { ...hit, chunk: 1, snippet: "Gearbox." }]);
+  const api = setup({ library: { search } });
+  fireEvent.change(
+    await screen.findByRole("textbox", {
+      name: "Exact approved text for transmission",
+    }),
+    { target: { value: "Summarize." } },
+  );
+  fireEvent.change(
+    screen.getByRole("spinbutton", { name: /Maximum output tokens/ }),
+    { target: { value: "100" } },
+  );
+  const query = screen.getByRole("textbox", { name: "Search the library" });
+  fireEvent.change(query, { target: { value: "turbine" } });
+  fireEvent.click(screen.getByRole("button", { name: "Search excerpts" }));
+  expect(await screen.findByText("Library down.")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Search excerpts" }));
+  expect(await screen.findByText("No matching excerpts.")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Search excerpts" }));
+  fireEvent.click(
+    await screen.findByRole("checkbox", {
+      name: /Cite Field notes.*excerpt 1/,
+    }),
+  );
+  fireEvent.click(screen.getByRole("checkbox", { name: /excerpt 2/ }));
+  fireEvent.click(screen.getByRole("checkbox", { name: /excerpt 2/ }));
+  expect(search).toHaveBeenCalledWith("turbine");
+  expect(
+    screen.getByRole("button", { name: "Send reviewed text" }),
+  ).toBeDisabled();
+  const previewStep = vi.fn().mockResolvedValue({
+    transmitted_content: "Summarize.\n\nCited library excerpts",
+    author_refs: [],
+    preview_digest: "cited-digest",
+    library_excerpts: [],
+  });
+  Object.assign(api, { previewStep });
+  fireEvent.click(screen.getByRole("button", { name: "Preview exact prompt" }));
+  await waitFor(() =>
+    expect(previewStep).toHaveBeenCalledWith(
+      expect.objectContaining({ id: draft.id }),
+      expect.objectContaining({
+        library_refs: [{ version_id: hit.version_id, chunk: 0 }],
+      }),
+    ),
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Send reviewed text" }),
+  );
+  await waitFor(() =>
+    expect(api.startStep).toHaveBeenCalledWith(
+      expect.objectContaining({ id: draft.id }),
+      expect.objectContaining({
+        library_refs: [{ version_id: hit.version_id, chunk: 0 }],
+        author_preview_digest: "cited-digest",
+      }),
+      expect.any(String),
+    ),
+  );
+  expect(api.startStep.mock.calls[0]![1]).not.toHaveProperty("author_refs");
 });

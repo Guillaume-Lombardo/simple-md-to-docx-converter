@@ -1,6 +1,12 @@
 import * as v from "valibot";
 import { ApiTransport, type JsonResult } from "../api/transport";
 import { ComposerConnectionsApi } from "./api";
+import {
+  LibraryApi,
+  type LibraryCitation,
+  libraryCitationSchema,
+  libraryExcerptSchema,
+} from "./library-api";
 import { OfficeEditApi } from "./office-edit-api";
 
 const draftSchema = v.object({
@@ -49,11 +55,13 @@ const stepSchema = v.object({
   error_code: v.nullable(v.string()),
   created_at: v.string(),
   updated_at: v.string(),
+  library_refs: v.optional(v.array(libraryCitationSchema), []),
 });
 const promptPreviewSchema = v.object({
   transmitted_content: v.string(),
   author_refs: v.array(v.unknown()),
   preview_digest: v.string(),
+  library_excerpts: v.optional(v.array(libraryExcerptSchema), []),
 });
 const questionSchema = v.object({
   id: v.string(),
@@ -172,10 +180,12 @@ const page = <T extends v.BaseSchema<unknown, unknown, v.BaseIssue<unknown>>>(
 export class ComposerWorkspaceApi {
   readonly connections: ComposerConnectionsApi;
   readonly office: OfficeEditApi;
+  readonly library: LibraryApi;
 
   constructor(private readonly transport = new ApiTransport()) {
     this.connections = new ComposerConnectionsApi(transport);
     this.office = new OfficeEditApi(transport);
+    this.library = new LibraryApi(transport);
   }
 
   async drafts(
@@ -386,6 +396,7 @@ export class ComposerWorkspaceApi {
       answered_question_id?: string;
       author_refs?: unknown[];
       author_preview_digest?: string;
+      library_refs?: LibraryCitation[];
     },
     key: string,
     signal?: AbortSignal,
@@ -413,6 +424,7 @@ export class ComposerWorkspaceApi {
       content: string;
       author_ids: string[];
       max_output_tokens: number;
+      library_refs?: LibraryCitation[];
     },
     signal?: AbortSignal,
   ): Promise<ComposerPromptPreview> {

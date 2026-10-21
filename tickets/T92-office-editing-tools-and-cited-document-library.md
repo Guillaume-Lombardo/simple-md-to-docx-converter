@@ -153,6 +153,25 @@ T91.
   PostgreSQL/S3 HTTP workflows for lifecycle and revocation, Office sources, rejected sources,
   concurrent replacements, failed writes and recovery, and request validation. Citations in model
   steps, the library UI and CLI, and their final-image E2E phase remain open.
+- 2026-10-21: Sixth increment on `feat/T92-composer-library`: citations, CLI, and browser support.
+  Model-step previews accept up to 20 `library_refs` and append the exact authorized excerpts,
+  after any author records, as JSON reference data with a `library:{version_id}#{chunk}`
+  identity; the start request repeats the references with the preview digest, and the step
+  records them (`library_refs` in the step response). Access to every cited chunk is rechecked,
+  with the cited documents locked, at admission, before egress, before the result is recorded, and
+  at proposal publication, so a revocation or deletion fails closed without transmission or
+  publication. `markweave composer library ...` manages and searches the library and
+  `model-steps start --cite VERSION_ID:CHUNK` cites excerpts after verifying the preview. The
+  browser gains a **Reference library** page (upload, search, excerpt, versions, download,
+  share, revoke, replace, delete) and excerpt selection in the model request. Evidence: SQLite
+  and PostgreSQL/S3 HTTP workflows for a cited step through publication with revocation before
+  publication, plus foreign, missing, duplicated, excessive, stale, unreviewed, revoked-before-start,
+  and revoked-during-call citations; combined author-and-citation prompt order; admission
+  validation; 23 CLI unit tests and an installed-CLI test against the real application over
+  loopback HTTP; 8 new vitest cases (full web check passes at 90.01% branches). The final-image
+  Composer browser phase now uploads and searches through the library page, proves sharing and
+  revocation, and runs one cited model step through the provider, whose expected successful chat
+  counts rise from 14 to 15 and from 19 to 20; that phase is verified only by hosted CI.
 
 ## Synchronization
 
