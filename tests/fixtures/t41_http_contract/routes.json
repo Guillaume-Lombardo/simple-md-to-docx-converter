@@ -354,6 +354,26 @@
     "response_class": "JSONResponse"
   },
   {
+    "path": "/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/pptx-text-targets",
+    "methods": [
+      "GET"
+    ],
+    "name": "list_pptx_text_targets",
+    "include_in_schema": true,
+    "status_code": null,
+    "response_class": "JSONResponse"
+  },
+  {
+    "path": "/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/pptx-edits",
+    "methods": [
+      "POST"
+    ],
+    "name": "edit_pptx_text",
+    "include_in_schema": true,
+    "status_code": 201,
+    "response_class": "JSONResponse"
+  },
+  {
     "path": "/api/v1/composer/drafts",
     "methods": [
       "POST"

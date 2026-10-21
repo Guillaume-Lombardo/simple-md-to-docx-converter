@@ -256,6 +256,17 @@ ineligible target, duplicate target, invalid text, or exceeded limit fails with 
 `COMPOSER_DOCX_EDIT_*` code that lists only the affected target identities, and no revision is
 published. No model call occurs. Restore copies an earlier revision forward as usual.
 
+`GET .../revisions/{revision_id}/pptx-text-targets?limit=200&offset=0` and `POST
+.../revisions/{revision_id}/pptx-edits` apply the same contract to a revision whose download is a
+PPTX file. Slides are listed in presentation order and each slide's speaker notes follow it; a
+target such as `ppt/slides/slide3.xml#t2` or `ppt/notesSlides/notesSlide3.xml#t0` reports its
+1-based `slide`, whether it is in `notes`, its paragraph within that part, and whether it is in a
+table. Field text such as slide numbers, alternate content, and runs that contain markup are never
+offered. The request body is identical to the DOCX one; publication records `provenance`
+`human:pptx_edit` and operation `pptx_edit:{revision_id}`, only the edited slide and notes parts
+change, and failures use `COMPOSER_PPTX_EDIT_*` codes. A revision of the other format, or a
+Markdown or PDF revision, is refused with `422`.
+
 `POST /api/v1/composer/drafts/{id}/revisions/{approved_revision_id}/generations` accepts
 `{ "output": "docx"|"pdf"|"pptx", "template_id": null,
 "template_version_id": null, "presentation_dialect": null, "slide_level": null }`

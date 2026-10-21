@@ -1,4 +1,4 @@
-"""Public contracts for bounded DOCX text edits on exact Composer revisions."""
+"""Public contracts for bounded DOCX and PPTX text edits on exact Composer revisions."""
 
 from __future__ import annotations
 
@@ -35,6 +35,31 @@ class ComposerDocxReplaceTextOperation(BaseModel):
 
 
 class ComposerDocxEditRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+    operations: tuple[ComposerDocxReplaceTextOperation, ...] = Field(min_length=1)
+
+
+class ComposerPptxTextTargetResponse(BaseModel):
+    target: str
+    slide: int
+    notes: bool
+    paragraph: int
+    in_table: bool
+    text: str
+
+
+class ComposerPptxTextTargetListResponse(BaseModel):
+    revision_id: UUID
+    download_sha256: str
+    engine_version: int
+    targets: tuple[ComposerPptxTextTargetResponse, ...]
+    total: int
+    limit: int
+    offset: int
+
+
+class ComposerPptxEditRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     operations: tuple[ComposerDocxReplaceTextOperation, ...] = Field(min_length=1)

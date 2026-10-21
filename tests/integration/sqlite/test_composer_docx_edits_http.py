@@ -36,6 +36,8 @@ pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
 _DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 _SOURCE = Path(__file__).resolve().parents[3] / "spikes/anydoc/corpus/docx/text.docx"
 _MAIN = "word/document.xml"
+_PPTX = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+_DECK = Path(__file__).resolve().parents[3] / "spikes/anydoc/corpus/pptx/pres.pptx"
 
 
 @dataclass
@@ -135,7 +137,9 @@ def harness(tmp_path: Path, mocker: MockerFixture) -> Iterator[DocxEditHarness]:
 
 
 def _docx_draft(
-    harness: DocxEditHarness, source: bytes | None = None
+    harness: DocxEditHarness,
+    source: bytes | None = None,
+    media_type: str = _DOCX,
 ) -> tuple[ComposerDraft, dict[str, object], str]:
     draft = harness.store.create_draft_with_source(
         harness.owner.id,
@@ -143,7 +147,7 @@ def _docx_draft(
         "scanner-approved",
         title="Report",
         content="",
-        media_type=_DOCX,
+        media_type=media_type,
     )
     captured = harness.client.post(
         f"/api/v1/composer/drafts/{draft.id}/revisions/from-source",
@@ -596,3 +600,134 @@ def test_markup_inside_text_nodes_is_refused_without_publication(
     harness: DocxEditHarness,
 ) -> None:
     exercise_nested_markup_refusal(harness)
+
+
+def exercise_pptx_workflow(harness: DocxEditHarness) -> None:
+    """Slide and notes edits publish exact bytes, replay, refuse and restore."""
+
+    client = harness.client
+    deck = _DECK.read_bytes()
+    draft, base, etag = _docx_draft(harness, deck, _PPTX)
+    path = f"/api/v1/composer/drafts/{draft.id}/revisions"
+
+    listed = client.get(f"{path}/{base['id']}/pptx-text-targets?limit=500")
+    assert listed.status_code == 200
+    assert listed.headers["Cache-Control"] == "private, no-store"
+    page = listed.json()
+    assert page["download_sha256"] == draft.source.sha256
+    assert page["total"] == len(page["targets"]) == 13
+    title, notes = (
+        page["targets"][0],
+        next(item for item in page["targets"] if item["notes"]),
+    )
+    assert title == {
+        "target": "ppt/slides/slide1.xml#t0",
+        "slide": 1,
+        "notes": False,
+        "paragraph": 0,
+        "in_table": False,
+        "text": "Deck Title Slide",
+    }
+    assert notes["target"] == "ppt/notesSlides/notesSlide1.xml#t0"
+    assert any(item["in_table"] for item in page["targets"])
+    assert client.get(f"{path}/{base['id']}/docx-text-targets").status_code == 422
+
+    request = {
+        "operations": [
+            {
+                "op": "replace_text",
+                "target": title["target"],
+                "expected_text": title["text"],
+                "text": "Edited deck & title",
+            },
+            {
+                "op": "replace_text",
+                "target": notes["target"],
+                "expected_text": notes["text"],
+                "text": "Edited speaker note",
+            },
+        ]
+    }
+    headers = {"X-CSRF-Token": "csrf", "If-Match": etag, "Idempotency-Key": "p-1"}
+    wrong_route = client.post(
+        f"{path}/{base['id']}/docx-edits", json=request, headers=headers
+    )
+    assert wrong_route.status_code == 422
+    stale = client.post(
+        f"{path}/{base['id']}/pptx-edits",
+        json={
+            "operations": [{**request["operations"][0], "expected_text": "Stale title"}]
+        },
+        headers={**headers, "Idempotency-Key": "p-stale"},
+    )
+    assert stale.status_code == 422
+    assert stale.json()["error"] == {
+        "code": "COMPOSER_PPTX_EDIT_TARGET_CHANGED",
+        "message": "The PPTX edit cannot be applied.",
+        "paths": [title["target"]],
+    }
+    assert harness.store.get_draft(harness.owner.id, draft.id).etag == etag
+
+    edited = client.post(
+        f"{path}/{base['id']}/pptx-edits", json=request, headers=headers
+    )
+    assert edited.status_code == 201
+    revision = edited.json()
+    assert revision["operation"] == f"pptx_edit:{base['id']}"
+    assert revision["provenance"] == "human:pptx_edit"
+    assert revision["model_identity"] is None
+    download = client.get(f"{path}/{revision['id']}/artifacts/download")
+    preview = client.get(f"{path}/{revision['id']}/artifacts/preview")
+    assert download.headers["Content-Type"] == _PPTX
+    assert download.content == preview.content
+    before, after = _members(deck), _members(download.content)
+    assert before.keys() == after.keys()
+    assert {name for name in before if before[name] != after[name]} == {
+        "ppt/slides/slide1.xml",
+        "ppt/notesSlides/notesSlide1.xml",
+    }
+    reread = client.get(f"{path}/{revision['id']}/pptx-text-targets?limit=500")
+    texts = {item["target"]: item["text"] for item in reread.json()["targets"]}
+    assert texts[title["target"]] == "Edited deck & title"
+    assert texts[notes["target"]] == "Edited speaker note"
+    assert (
+        client.post(
+            f"{path}/{base['id']}/pptx-edits", json=request, headers=headers
+        ).json()
+        == revision
+    )
+    assert (
+        client.post(
+            f"{path}/{base['id']}/docx-edits", json=request, headers=headers
+        ).status_code
+        == 412
+    )
+
+    restored = client.post(
+        f"{path}/{base['id']}/restore",
+        headers={
+            **headers,
+            "If-Match": edited.headers["ETag"],
+            "Idempotency-Key": "p-restore",
+        },
+    )
+    assert restored.status_code == 201
+    assert (
+        client.get(f"{path}/{restored.json()['id']}/artifacts/download").content == deck
+    )
+    harness.authentication.authenticate.return_value = harness.other  # ty: ignore[unresolved-attribute]
+    assert client.get(f"{path}/{base['id']}/pptx-text-targets").status_code == 404
+    assert (
+        client.post(
+            f"{path}/{base['id']}/pptx-edits",
+            json=request,
+            headers={**headers, "Idempotency-Key": "p-foreign"},
+        ).status_code
+        == 404
+    )
+
+
+def test_pptx_slide_and_notes_edits_publish_exact_revisions(
+    harness: DocxEditHarness,
+) -> None:
+    exercise_pptx_workflow(harness)

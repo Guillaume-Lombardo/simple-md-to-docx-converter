@@ -1459,7 +1459,7 @@ podman unshare chown "$runtime_uid:0" \
   "$composer_provider_directory/server.key" \
   "$composer_provider_directory/client.key" "$composer_key_file"
 cp -a "$repository/tests/e2e" "$browser_runtime_directory"
-for corpus_file in docx/text.docx pdf/text.pdf; do
+for corpus_file in docx/text.docx pdf/text.pdf pptx/pres.pptx; do
   install -D -m 0444 -- "$repository/spikes/anydoc/corpus/$corpus_file" \
     "$composer_corpus_directory/$corpus_file"
   test "$(sha256sum "$repository/spikes/anydoc/corpus/$corpus_file" | cut -d ' ' -f 1)" = \

@@ -325,6 +325,38 @@ export const vComposerModelStepResponse = v.object({
 });
 
 /**
+ * ComposerPptxEditRequest
+ */
+export const vComposerPptxEditRequest = v.strictObject({
+    operations: v.pipe(v.array(vComposerDocxReplaceTextOperation), v.minLength(1))
+});
+
+/**
+ * ComposerPptxTextTargetResponse
+ */
+export const vComposerPptxTextTargetResponse = v.object({
+    in_table: v.boolean(),
+    notes: v.boolean(),
+    paragraph: v.pipe(v.number(), v.integer()),
+    slide: v.pipe(v.number(), v.integer()),
+    target: v.string(),
+    text: v.string()
+});
+
+/**
+ * ComposerPptxTextTargetListResponse
+ */
+export const vComposerPptxTextTargetListResponse = v.object({
+    download_sha256: v.string(),
+    engine_version: v.pipe(v.number(), v.integer()),
+    limit: v.pipe(v.number(), v.integer()),
+    offset: v.pipe(v.number(), v.integer()),
+    revision_id: v.pipe(v.string(), v.uuid()),
+    targets: v.array(vComposerPptxTextTargetResponse),
+    total: v.pipe(v.number(), v.integer())
+});
+
+/**
  * ComposerProposalDecision
  */
 export const vComposerProposalDecision = v.picklist([
@@ -2240,6 +2272,39 @@ export const vListTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxTe
  * Successful Response
  */
 export const vListTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxTextTargetsGetResponse = vComposerDocxTextTargetListResponse;
+
+export const vEditPptxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxEditsPostBody = vComposerPptxEditRequest;
+
+export const vEditPptxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxEditsPostHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'Idempotency-Key': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vEditPptxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxEditsPostPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid()),
+    revision_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vEditPptxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxEditsPostResponse = vComposerRevisionResponse;
+
+export const vListPptxTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxTextTargetsGetPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid()),
+    revision_id: v.pipe(v.string(), v.uuid())
+});
+
+export const vListPptxTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxTextTargetsGetQuery = v.object({
+    limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(500)), 200),
+    offset: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(2147483647)), 0)
+});
+
+/**
+ * Successful Response
+ */
+export const vListPptxTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxTextTargetsGetResponse = vComposerPptxTextTargetListResponse;
 
 export const vRegenerateApiV1ComposerDraftsDraftIdRevisionsRevisionIdRegenerationsPostHeaders = v.object({
     'If-Match': v.nullish(v.string()),

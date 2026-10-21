@@ -10,7 +10,7 @@ from collections.abc import Callable
 import pytest
 from pytest_mock import MockerFixture
 
-from markweave.composer import docx_edits
+from markweave.composer import office_edits
 from markweave.composer.docx_edits import (
     DOCX_EDIT_ENGINE_VERSION,
     DocxEditError,
@@ -427,9 +427,11 @@ def test_unsafe_or_malformed_packages_fail_closed(
 
 def test_document_type_declarations_are_rejected(mocker: MockerFixture) -> None:
     mocker.patch.object(
-        docx_edits.package_validation,
+        office_edits.package_validation,
         "_parse_xml",
-        side_effect=lambda payload, _limits: docx_edits.ElementTree.fromstring(payload),
+        side_effect=lambda payload, _limits: office_edits.ElementTree.fromstring(
+            payload
+        ),
     )
     document = b'<!DOCTYPE w:document [<!ENTITY e "x">]>' + _document("<w:p/>")
 
@@ -481,7 +483,7 @@ def test_growth_beyond_archive_limit_is_rejected_before_publication(
     mocker: MockerFixture,
 ) -> None:
     source = _package(_SAMPLE)
-    mocker.patch.object(docx_edits, "_write_package", return_value=b"x" * 100_001)
+    mocker.patch.object(office_edits, "_write_package", return_value=b"x" * 100_001)
 
     with pytest.raises(DocxEditError) as rejected:
         apply_docx_text_edits(
@@ -495,10 +497,10 @@ def test_post_write_verification_detects_unexpected_changes(
     mocker: MockerFixture, change: str
 ) -> None:
     source = _package(_SAMPLE)
-    original = docx_edits._write_package
+    original = office_edits._write_package
 
-    def tampered(content: bytes, document_xml: bytes) -> bytes:
-        output = original(content, document_xml)
+    def tampered(content: bytes, replacements: dict[str, bytes]) -> bytes:
+        output = original(content, replacements)
         members = _members(output)
         if change == "member":
             members["word/styles.xml"] = (
@@ -518,7 +520,7 @@ def test_post_write_verification_detects_unexpected_changes(
                 archive.writestr(name, payload)
         return buffer.getvalue()
 
-    mocker.patch.object(docx_edits, "_write_package", side_effect=tampered)
+    mocker.patch.object(office_edits, "_write_package", side_effect=tampered)
 
     with pytest.raises(DocxEditError) as rejected:
         apply_docx_text_edits(
@@ -529,7 +531,7 @@ def test_post_write_verification_detects_unexpected_changes(
 
 def test_unterminated_start_tag_is_invalid() -> None:
     with pytest.raises(DocxEditError) as rejected:
-        docx_edits._start_tag_end(b"<w:t a='>'", 0)
+        office_edits._start_tag_end(b"<w:t a='>'", 0, DocxEditError)
     assert rejected.value.code == "invalid_package"
 
 
@@ -542,12 +544,14 @@ def test_error_message_is_content_free() -> None:
 def test_expat_rejects_markup_the_tree_parser_did_not_see(
     mocker: MockerFixture,
 ) -> None:
-    def parse(payload: bytes, _limits: object) -> docx_edits.ElementTree.Element:
+    def parse(payload: bytes, _limits: object) -> office_edits.ElementTree.Element:
         if payload == b"<w:document":
             payload = _document("<w:p/>")
-        return docx_edits.ElementTree.fromstring(payload)
+        return office_edits.ElementTree.fromstring(payload)
 
-    mocker.patch.object(docx_edits.package_validation, "_parse_xml", side_effect=parse)
+    mocker.patch.object(
+        office_edits.package_validation, "_parse_xml", side_effect=parse
+    )
 
     with pytest.raises(DocxEditError) as rejected:
         inspect_docx_text(_package(document=b"<w:document"), _limits())
