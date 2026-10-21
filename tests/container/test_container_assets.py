@@ -989,9 +989,9 @@ def _run_supply_chain(tmp_path: Path, summary_status: int) -> tuple[Any, Path, P
 def test_a_rejected_scan_keeps_unverified_evidence_and_still_fails(
     tmp_path: Path,
 ) -> None:
-    result, output, temporary = _run_supply_chain(tmp_path, summary_status=1)
+    result, output, temporary = _run_supply_chain(tmp_path, summary_status=17)
 
-    assert result.returncode == 1
+    assert result.returncode == 17
     assert "error: fixable Critical vulnerabilities found" in result.stdout
     assert "release_bundle_manifest_sha256=" not in result.stdout
     assert f"Retained the rejected, unverified scan evidence in {output}." in (
