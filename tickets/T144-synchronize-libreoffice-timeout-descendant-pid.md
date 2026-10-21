@@ -2,7 +2,7 @@
 ticket: T144
 linear_id: G1L-697
 linear_url: https://linear.app/g1lom/issue/G1L-697/t144-synchronize-descendant-pid-publication-in-the-libreoffice-timeout
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -34,6 +34,35 @@ The independent review of T143 (PR #308) raised this as a minor follow-up.
 ## Progress
 
 - 2026-10-13: Created from the minor finding of the T143 independent review.
+- 2026-10-21: Started on branch `fix/T144-libreoffice-timeout-pid` from `origin/main` `95bc188`.
+- 2026-10-21: Fix (test-only; no product code changed).
+  - **Readiness gate in the timeout case.** The `timeout` parametrization now passes a probe that
+    holds the converter's first poll after the engine starts until the descendant pid is published
+    (bounded at 10 s), then returns `False`. `LibreOfficePdfConverter._wait` calls the probe before
+    every deadline check, so the 0.3 s timeout can no longer fire before publication, and the run
+    still ends through the real deadline with `PDF_TIMEOUT`. The probe call that precedes the engine
+    start (before the converter workspace holds `source.docx`) returns at once.
+  - **Shared exit helper in `test_template_activation.py`.** Its local Z-only predicate treated a
+    task being reaped (`X`) as running, did not handle an ESRCH read, and re-read `/proc` after the
+    wait. It now uses `tests.process_exit.wait_for_process_exit` with the same 2 s bound.
+- 2026-10-21: Evidence on a 4-vCPU container, fake engine, with the T143-style harness
+  (16 concurrent pytest instances of the `timeout` case, 8 CPU hogs, 15 rounds):
+  - `main` `95bc188`: 2 of 240 iterations failed, both on the missing pid file, none on a survivor.
+  - this branch: 0 of 240 failed.
+  - Deterministic check: delaying the pid publication by 0.6 s, beyond the 0.3 s timeout, passes
+    with the gate and fails with `FileNotFoundError` when the gate is replaced by a plain probe.
+  - A descendant that calls `os.setsid()` to leave the process group fails all three LibreOffice
+    parametrizations ("A descendant survived process-group cleanup.") and the template activation
+    test ("Timed-out engine descendant survived process-group cleanup").
+- 2026-10-21: Canonical checks. `ruff format --check`, `ruff check` and `ty check` pass. The default
+  local command ran 6,222 passed, 9 failed and 78 errors in 11 min 17 s. None involve the changed
+  files: the 78 errors are PostgreSQL, S3 and local-service tests that need a Docker daemon, which
+  this container lacks; 8 of the failures reproduce identically on unmodified `main` (subreaper,
+  `/proc` memory, doctor and broker factory tests restricted by the container sandbox); the ninth,
+  `test_pandoc_docx.py::test_real_process_boundary_normalizes_failures[...invalid_docx]`, is an
+  intermittent `PANDOC_TIMEOUT` under load (1 of 5 reruns) that this change does not touch.
+  Hosted `document-engines` evidence (three consecutive passes) remains to be collected on the
+  pull request.
 
 ## Synchronization
 
