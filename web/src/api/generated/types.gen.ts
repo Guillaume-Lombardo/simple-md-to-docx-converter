@@ -857,6 +857,32 @@ export type ComposerHandoffRequest = {
 };
 
 /**
+ * ComposerImageTargetResponse
+ */
+export type ComposerImageTargetResponse = {
+    /**
+     * Media Type
+     */
+    media_type: string;
+    /**
+     * Sha256
+     */
+    sha256: string;
+    /**
+     * Size
+     */
+    size: number;
+    /**
+     * Target
+     */
+    target: string;
+    /**
+     * Used By
+     */
+    used_by: Array<string>;
+};
+
+/**
  * ComposerMessageCreateRequest
  */
 export type ComposerMessageCreateRequest = {
@@ -1021,6 +1047,28 @@ export type ComposerModelStepResponse = {
 };
 
 /**
+ * ComposerMoveSlideOperation
+ */
+export type ComposerMoveSlideOperation = {
+    /**
+     * Expected Position
+     */
+    expected_position: number;
+    /**
+     * Op
+     */
+    op: 'move_slide';
+    /**
+     * Position
+     */
+    position: number;
+    /**
+     * Slide Id
+     */
+    slide_id: number;
+};
+
+/**
  * ComposerOfficeEditStepCreateRequest
  */
 export type ComposerOfficeEditStepCreateRequest = {
@@ -1118,6 +1166,100 @@ export type ComposerOfficeEditStepPreviewResponse = {
  * ComposerOfficeEditTargetText
  */
 export type ComposerOfficeEditTargetText = {
+    /**
+     * Target
+     */
+    target: string;
+    /**
+     * Text
+     */
+    text: string;
+};
+
+/**
+ * ComposerOfficeStructureEditRequest
+ */
+export type ComposerOfficeStructureEditRequest = {
+    /**
+     * Operations
+     */
+    operations: Array<({
+        op: 'set_paragraph_style';
+    } & ComposerSetParagraphStyleOperation) | ({
+        op: 'move_slide';
+    } & ComposerMoveSlideOperation) | ({
+        op: 'replace_image';
+    } & ComposerReplaceImageOperation)>;
+};
+
+/**
+ * ComposerOfficeStructureResponse
+ */
+export type ComposerOfficeStructureResponse = {
+    /**
+     * Download Sha256
+     */
+    download_sha256: string;
+    /**
+     * Engine Version
+     */
+    engine_version: number;
+    /**
+     * Format
+     */
+    format: 'docx' | 'pptx';
+    /**
+     * Images
+     */
+    images: Array<ComposerImageTargetResponse>;
+    /**
+     * Paragraph Styles
+     */
+    paragraph_styles: Array<ComposerParagraphStyleResponse>;
+    /**
+     * Paragraphs
+     */
+    paragraphs: Array<ComposerParagraphTargetResponse>;
+    /**
+     * Revision Id
+     */
+    revision_id: string;
+    /**
+     * Slides
+     */
+    slides: Array<ComposerSlideTargetResponse>;
+};
+
+/**
+ * ComposerParagraphStyleResponse
+ */
+export type ComposerParagraphStyleResponse = {
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Style Id
+     */
+    style_id: string;
+};
+
+/**
+ * ComposerParagraphTargetResponse
+ */
+export type ComposerParagraphTargetResponse = {
+    /**
+     * In Table
+     */
+    in_table: boolean;
+    /**
+     * Paragraph
+     */
+    paragraph: number;
+    /**
+     * Style
+     */
+    style: string | null;
     /**
      * Target
      */
@@ -1365,6 +1507,32 @@ export type ComposerQuestionResponse = {
 };
 
 /**
+ * ComposerReplaceImageOperation
+ */
+export type ComposerReplaceImageOperation = {
+    /**
+     * Content Base64
+     */
+    content_base64: string;
+    /**
+     * Expected Sha256
+     */
+    expected_sha256: string;
+    /**
+     * Filename
+     */
+    filename: string;
+    /**
+     * Op
+     */
+    op: 'replace_image';
+    /**
+     * Target
+     */
+    target: string;
+};
+
+/**
  * ComposerRevisionDiffChange
  */
 export type ComposerRevisionDiffChange = {
@@ -1548,6 +1716,46 @@ export type ComposerRevisionSummaryResponse = {
      * Restored From Revision Id
      */
     restored_from_revision_id: string | null;
+};
+
+/**
+ * ComposerSetParagraphStyleOperation
+ */
+export type ComposerSetParagraphStyleOperation = {
+    /**
+     * Expected Style
+     */
+    expected_style: string | null;
+    /**
+     * Op
+     */
+    op: 'set_paragraph_style';
+    /**
+     * Style
+     */
+    style: string;
+    /**
+     * Target
+     */
+    target: string;
+};
+
+/**
+ * ComposerSlideTargetResponse
+ */
+export type ComposerSlideTargetResponse = {
+    /**
+     * Position
+     */
+    position: number;
+    /**
+     * Slide Id
+     */
+    slide_id: number;
+    /**
+     * Title
+     */
+    title: string;
 };
 
 /**
@@ -6769,6 +6977,128 @@ export type EditDocxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxEditsPo
 
 export type EditDocxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxEditsPostResponse = EditDocxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxEditsPostResponses[keyof EditDocxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxEditsPostResponses];
 
+export type GetDocxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxStructureGetData = {
+    body?: never;
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Revision Id
+         */
+        revision_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/docx-structure';
+};
+
+export type GetDocxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxStructureGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type GetDocxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxStructureGetError = GetDocxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxStructureGetErrors[keyof GetDocxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxStructureGetErrors];
+
+export type GetDocxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxStructureGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ComposerOfficeStructureResponse;
+};
+
+export type GetDocxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxStructureGetResponse = GetDocxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxStructureGetResponses[keyof GetDocxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxStructureGetResponses];
+
+export type EditDocxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxStructureEditsPostData = {
+    body: ComposerOfficeStructureEditRequest;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * Idempotency-Key
+         */
+        'Idempotency-Key'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Revision Id
+         */
+        revision_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/docx-structure-edits';
+};
+
+export type EditDocxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxStructureEditsPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type EditDocxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxStructureEditsPostError = EditDocxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxStructureEditsPostErrors[keyof EditDocxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxStructureEditsPostErrors];
+
+export type EditDocxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxStructureEditsPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: ComposerRevisionResponse;
+};
+
+export type EditDocxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxStructureEditsPostResponse = EditDocxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxStructureEditsPostResponses[keyof EditDocxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxStructureEditsPostResponses];
+
 export type ListTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxTextTargetsGetData = {
     body?: never;
     path: {
@@ -7043,6 +7373,128 @@ export type EditPptxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxEditsPo
 };
 
 export type EditPptxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxEditsPostResponse = EditPptxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxEditsPostResponses[keyof EditPptxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxEditsPostResponses];
+
+export type GetPptxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxStructureGetData = {
+    body?: never;
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Revision Id
+         */
+        revision_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/pptx-structure';
+};
+
+export type GetPptxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxStructureGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type GetPptxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxStructureGetError = GetPptxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxStructureGetErrors[keyof GetPptxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxStructureGetErrors];
+
+export type GetPptxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxStructureGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ComposerOfficeStructureResponse;
+};
+
+export type GetPptxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxStructureGetResponse = GetPptxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxStructureGetResponses[keyof GetPptxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxStructureGetResponses];
+
+export type EditPptxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxStructureEditsPostData = {
+    body: ComposerOfficeStructureEditRequest;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * Idempotency-Key
+         */
+        'Idempotency-Key'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+        /**
+         * Revision Id
+         */
+        revision_id: string;
+    };
+    query?: never;
+    url: '/api/v1/composer/drafts/{draft_id}/revisions/{revision_id}/pptx-structure-edits';
+};
+
+export type EditPptxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxStructureEditsPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type EditPptxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxStructureEditsPostError = EditPptxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxStructureEditsPostErrors[keyof EditPptxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxStructureEditsPostErrors];
+
+export type EditPptxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxStructureEditsPostResponses = {
+    /**
+     * Successful Response
+     */
+    201: ComposerRevisionResponse;
+};
+
+export type EditPptxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxStructureEditsPostResponse = EditPptxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxStructureEditsPostResponses[keyof EditPptxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxStructureEditsPostResponses];
 
 export type ListPptxTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxTextTargetsGetData = {
     body?: never;

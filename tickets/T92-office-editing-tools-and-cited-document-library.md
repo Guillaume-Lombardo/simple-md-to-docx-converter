@@ -186,6 +186,21 @@ T91.
     keyed by in-flight uploads would bound it if the library grows large.
   - **Cited admission race.** A cited retry that loses the race to an identical request now
     replays the durable step after the precondition failure instead of returning 412.
+- 2026-10-21: Seventh increment on `feat/T92-office-structure-edits`, stacked on the library
+  branch: the first structural edit families, qualified on the real corpus files.
+  `markweave.composer.office_structure` admits the same private copy and splices exact bytes for
+  `set_paragraph_style` (DOCX body paragraphs outside tracked changes, content controls,
+  alternate content, and text boxes; existing paragraph styles only), `move_slide` (PPTX
+  `p:sldIdLst` order), and `replace_image` (PNG/JPEG parts referenced by the document or slides,
+  replaced with a scanned upload re-encoded without metadata into the target's format). Each
+  result is re-admitted and every other part, text node, style, and slide entry is verified.
+  `GET/POST .../revisions/{id}/{docx|pptx}-structure[-edits]` reuse the text-edit publication
+  contract. Evidence: 32 unit tests (95% branch coverage of the engine), SQLite and
+  PostgreSQL/S3 HTTP workflows for styles, images, slide order, replay, stale ETag, changed
+  targets, infected/malformed/oversized/foreign images, unsupported operations, and the owner
+  fence, and a final-image API journey in both profiles, verified only by hosted CI. Tables and
+  sections (DOCX), tables, styles, and objects (PPTX), the browser/CLI surface for structural
+  edits, and model tools for them remain open.
 
 ## Synchronization
 

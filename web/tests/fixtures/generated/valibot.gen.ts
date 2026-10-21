@@ -256,6 +256,17 @@ export const vComposerHandoffRequest = v.object({
 });
 
 /**
+ * ComposerImageTargetResponse
+ */
+export const vComposerImageTargetResponse = v.object({
+    media_type: v.string(),
+    sha256: v.string(),
+    size: v.pipe(v.number(), v.integer()),
+    target: v.string(),
+    used_by: v.array(v.string())
+});
+
+/**
  * ComposerMessageCreateRequest
  */
 export const vComposerMessageCreateRequest = v.object({
@@ -280,6 +291,16 @@ export const vComposerMessageListResponse = v.object({
     limit: v.pipe(v.number(), v.integer()),
     messages: v.array(vComposerMessageResponse),
     offset: v.pipe(v.number(), v.integer())
+});
+
+/**
+ * ComposerMoveSlideOperation
+ */
+export const vComposerMoveSlideOperation = v.strictObject({
+    expected_position: v.pipe(v.number(), v.integer(), v.minValue(1)),
+    op: v.literal('move_slide'),
+    position: v.pipe(v.number(), v.integer(), v.minValue(1)),
+    slide_id: v.pipe(v.number(), v.integer(), v.minValue(0))
 });
 
 /**
@@ -325,6 +346,25 @@ export const vComposerOfficeEditStepPreviewResponse = v.object({
     preview_digest: v.string(),
     targets: v.array(vComposerOfficeEditTargetText),
     transmitted_content: v.string()
+});
+
+/**
+ * ComposerParagraphStyleResponse
+ */
+export const vComposerParagraphStyleResponse = v.object({
+    name: v.string(),
+    style_id: v.string()
+});
+
+/**
+ * ComposerParagraphTargetResponse
+ */
+export const vComposerParagraphTargetResponse = v.object({
+    in_table: v.boolean(),
+    paragraph: v.pipe(v.number(), v.integer()),
+    style: v.nullable(v.string()),
+    target: v.string(),
+    text: v.string()
 });
 
 /**
@@ -409,6 +449,17 @@ export const vComposerQuestionAnswerRequest = v.object({
 });
 
 /**
+ * ComposerReplaceImageOperation
+ */
+export const vComposerReplaceImageOperation = v.strictObject({
+    content_base64: v.pipe(v.string(), v.minLength(4)),
+    expected_sha256: v.pipe(v.string(), v.length(64)),
+    filename: v.pipe(v.string(), v.minLength(5), v.maxLength(255)),
+    op: v.literal('replace_image'),
+    target: v.pipe(v.string(), v.minLength(1), v.maxLength(64))
+});
+
+/**
  * ComposerRevisionDiffChange
  */
 export const vComposerRevisionDiffChange = v.object({
@@ -475,6 +526,46 @@ export const vComposerRevisionListResponse = v.object({
     limit: v.pipe(v.number(), v.integer()),
     offset: v.pipe(v.number(), v.integer()),
     revisions: v.array(vComposerRevisionSummaryResponse)
+});
+
+/**
+ * ComposerSetParagraphStyleOperation
+ */
+export const vComposerSetParagraphStyleOperation = v.strictObject({
+    expected_style: v.nullable(v.pipe(v.string(), v.maxLength(253))),
+    op: v.literal('set_paragraph_style'),
+    style: v.pipe(v.string(), v.minLength(1), v.maxLength(253)),
+    target: v.pipe(v.string(), v.minLength(1), v.maxLength(64))
+});
+
+/**
+ * ComposerOfficeStructureEditRequest
+ */
+export const vComposerOfficeStructureEditRequest = v.strictObject({
+    operations: v.pipe(v.array(v.unknown()), v.minLength(1), v.maxLength(100))
+});
+
+/**
+ * ComposerSlideTargetResponse
+ */
+export const vComposerSlideTargetResponse = v.object({
+    position: v.pipe(v.number(), v.integer()),
+    slide_id: v.pipe(v.number(), v.integer()),
+    title: v.string()
+});
+
+/**
+ * ComposerOfficeStructureResponse
+ */
+export const vComposerOfficeStructureResponse = v.object({
+    download_sha256: v.string(),
+    engine_version: v.pipe(v.number(), v.integer()),
+    format: v.picklist(['docx', 'pptx']),
+    images: v.array(vComposerImageTargetResponse),
+    paragraph_styles: v.array(vComposerParagraphStyleResponse),
+    paragraphs: v.array(vComposerParagraphTargetResponse),
+    revision_id: v.pipe(v.string(), v.uuid()),
+    slides: v.array(vComposerSlideTargetResponse)
 });
 
 /**
@@ -2449,6 +2540,34 @@ export const vEditDocxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxEdits
  */
 export const vEditDocxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxEditsPostResponse = vComposerRevisionResponse;
 
+export const vGetDocxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxStructureGetPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid()),
+    revision_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vGetDocxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxStructureGetResponse = vComposerOfficeStructureResponse;
+
+export const vEditDocxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxStructureEditsPostBody = vComposerOfficeStructureEditRequest;
+
+export const vEditDocxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxStructureEditsPostHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'Idempotency-Key': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vEditDocxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxStructureEditsPostPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid()),
+    revision_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vEditDocxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxStructureEditsPostResponse = vComposerRevisionResponse;
+
 export const vListTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdDocxTextTargetsGetPath = v.object({
     draft_id: v.pipe(v.string(), v.uuid()),
     revision_id: v.pipe(v.string(), v.uuid())
@@ -2515,6 +2634,34 @@ export const vEditPptxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxEdits
  * Successful Response
  */
 export const vEditPptxTextApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxEditsPostResponse = vComposerRevisionResponse;
+
+export const vGetPptxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxStructureGetPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid()),
+    revision_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vGetPptxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxStructureGetResponse = vComposerOfficeStructureResponse;
+
+export const vEditPptxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxStructureEditsPostBody = vComposerOfficeStructureEditRequest;
+
+export const vEditPptxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxStructureEditsPostHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'Idempotency-Key': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vEditPptxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxStructureEditsPostPath = v.object({
+    draft_id: v.pipe(v.string(), v.uuid()),
+    revision_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vEditPptxStructureApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxStructureEditsPostResponse = vComposerRevisionResponse;
 
 export const vListPptxTextTargetsApiV1ComposerDraftsDraftIdRevisionsRevisionIdPptxTextTargetsGetPath = v.object({
     draft_id: v.pipe(v.string(), v.uuid()),
