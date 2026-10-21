@@ -69,6 +69,7 @@ class FakeRuntime:
         self.loaded_override: str | None = None
         self.tag_override: str | None = None
         self.failing: tuple[str, ...] | None = None
+        self.info_json: str | None = None
 
     def __call__(
         self, arguments: list[str], **_options: Any
@@ -83,8 +84,9 @@ class FakeRuntime:
         match arguments:
             case ["git", "show", *_]:
                 stdout = "1789000000\n"
-            case ["podman", "info", *_]:
-                stdout = f"{self.rootless}\n"
+            case ["podman", "info", "--format", format_]:
+                json_info = format_ == "json" and self.info_json
+                stdout = json_info or f"{self.rootless}\n"
             case ["bash", script, image, *_] if script.startswith(
                 "scripts/container/build"
             ):
@@ -549,3 +551,120 @@ def test_load_checks_every_role_before_loading_any_archive(
 
     for calls in (runtime.calls, occupied.calls):
         assert not any(call[:2] == ["podman", "load"] for call in calls)
+
+
+def test_read_diskstats_keeps_read_written_and_busy_counters(tmp_path: Path) -> None:
+    stats = tmp_path / "diskstats"
+    stats.write_text(
+        "   8       0 sda 10 0 400 5 20 0 800 9 0 30 14\n"
+        "   8       1 sda1 1 0 2 3 4 0 6 7 0 9 10 11 12 13 14 15 16 17\n"
+        "   7       0 loop0 1 2\n",
+        encoding="ascii",
+    )
+
+    assert ci_images.read_diskstats(stats) == {
+        "8:0": (400, 800, 30),
+        "8:1": (2, 6, 9),
+    }
+
+
+def test_load_reports_the_store_layout_and_disk_traffic(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    roles = IMAGE_DOMAIN_ROLES["e2e-standalone-1"]
+    directory = _archives(tmp_path, roles)
+    graph_root = tmp_path / "storage"
+    graph_root.mkdir()
+    device = ci_images._device(directory)
+    runtime = FakeRuntime()
+    runtime.info_json = json.dumps(
+        {
+            "version": {"Version": "5.4.2"},
+            "store": {
+                "graphDriverName": "overlay",
+                "graphOptions": {"overlay.mount_program": "fuse-overlayfs"},
+                "graphRoot": str(graph_root),
+                "imageCopyTmpDir": str(tmp_path),
+            },
+        }
+    )
+    samples = iter([{device: (0, 0, 0)}, {device: (4 * 2048, 6 * 2048, 500)}])
+    times = iter([0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 2.0, 2.0])
+
+    ci_images.load(
+        "e2e-standalone-1",
+        directory,
+        _expected(*roles),
+        runner=runtime,
+        clock=lambda: next(times),
+        diskstats=lambda: next(samples),
+    )
+
+    output = capsys.readouterr().out
+    assert "storage podman=5.4.2 driver=overlay " in output
+    assert '"overlay.mount_program": "fuse-overlayfs"' in output
+    assert f"archives={directory}@{device}" in output
+    assert f"graph_root={graph_root}@{device}" in output
+    assert f"disk device={device} read_mib=4 written_mib=6 busy_percent=25" in output
+
+
+def test_storage_diagnostics_never_block_a_load(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    roles = IMAGE_DOMAIN_ROLES["e2e-standalone-2"]
+    directory = _archives(tmp_path, roles)
+    runtime = FakeRuntime()
+    runtime.info_json = json.dumps({"store": {"graphRoot": str(tmp_path)}})
+
+    def unreadable() -> dict[str, tuple[int, int, int]]:
+        raise OSError("no diskstats")
+
+    loaded = ci_images.load(
+        "e2e-standalone-2",
+        directory,
+        _expected(*roles),
+        runner=runtime,
+        clock=_clock,
+        diskstats=unreadable,
+    )
+
+    assert loaded == {role: ci_images.ROLE_IMAGES[role] for role in roles}
+    output = capsys.readouterr().out
+    assert "storage podman=unknown driver=unknown" in output
+    assert "storage diagnostics unavailable: no diskstats" in output
+
+
+def test_storage_report_marks_a_missing_path_unknown(tmp_path: Path) -> None:
+    assert ci_images._device(tmp_path / "missing") == "unknown"
+
+
+@pytest.mark.parametrize("after", [{}, None])
+def test_disk_traffic_skips_unmeasured_or_unreadable_devices(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    after: dict[str, tuple[int, int, int]] | None,
+) -> None:
+    roles = IMAGE_DOMAIN_ROLES["e2e-standalone-2"]
+    directory = _archives(tmp_path, roles)
+    runtime = FakeRuntime()
+    runtime.info_json = json.dumps({"store": {"graphRoot": str(tmp_path)}})
+    samples: list[dict[str, tuple[int, int, int]] | None] = [{}, after]
+
+    def diskstats() -> dict[str, tuple[int, int, int]]:
+        sample = samples.pop(0)
+        if sample is None:
+            raise OSError("diskstats vanished")
+        return sample
+
+    ci_images.load(
+        "e2e-standalone-2",
+        directory,
+        _expected(*roles),
+        runner=runtime,
+        clock=_clock,
+        diskstats=diskstats,
+    )
+
+    output = capsys.readouterr().out
+    assert "disk device=" not in output
+    assert ("diskstats vanished" in output) is (after is None)

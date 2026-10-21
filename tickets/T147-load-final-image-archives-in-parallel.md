@@ -70,6 +70,32 @@ sequential archive downloads.
   `backend` precondition case, held before too, since backend was checked first. Not run locally:
   `tests/integration/container/test_ci_images_podman.py` (`requires_podman`; this container has no
   Podman) and the hosted durations.
+- 2026-10-21: Hosted evidence does not meet the target. Same-minute pair on `main` `09b37c2`, all
+  E2E jobs green, "Load verified final images" step durations:
+
+  | Shard | Sequential, #322 run 39604675291 | Concurrent, #323 run 39604676996 | `concurrent_load_seconds` |
+  |---|---|---|---|
+  | e2e-standalone-1 | 93 s | 86 s | 85.4 |
+  | e2e-standalone-2 | 95 s | 84 s | 83.1 |
+  | e2e-distributed-1 | 72 s | 79 s | 77.3 |
+  | e2e-distributed-2 | 80 s | 84 s | 82.6 |
+  | mean | 85.0 s | 83.3 s | |
+
+  An earlier cancelled run (39601973706) gave the same picture: 79–89 s concurrent against 86–93 s
+  sequential in #322 run 39601966396. Per-role times under concurrency are consistent: backend
+  76.9–86.8 s, frontend 46.4–49.7 s, reverse-attempt 24.8–27.1 s, adding up to about 160 s of work
+  in about 85 s of wall time. The loads overlap, but each slows down, so aggregate throughput stays
+  flat at about 2.3 GB of archive in about 85 s: a shared bottleneck in the Podman store or the
+  disk, not per-archive latency. The barrier test proves overlap, not real-store throughput.
+- 2026-10-21: Added bounded, non-gating loader diagnostics to find that bottleneck. Before loading,
+  the loader prints the Podman version, graph driver and options, and the block device behind the
+  archive directory, the graph root and the image-copy temporary directory (`imageCopyTmpDir`,
+  default `/var/tmp`). After the concurrent loads it prints, per device, the MiB read and written
+  and the busy percentage from `/proc/diskstats`. A diagnostics failure only prints a notice. The
+  hypotheses this separates are a slow graph driver (for example `fuse-overlayfs` or `vfs`), the
+  double write of each `oci-archive` (extraction into the copy directory, then layer commit) on
+  the same device, and a saturated single disk. The measured correction follows from the next
+  hosted run; the accepted under-65-second target stands unless the owner decides otherwise.
 
 ## Synchronization
 

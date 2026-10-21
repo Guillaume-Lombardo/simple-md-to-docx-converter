@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -43,7 +44,14 @@ EXPECTED_IMAGE_ID = re.compile(r"sha256:([0-9a-f]{64})")
 LOADED_IMAGE_LINE = re.compile(r"^Loaded image(?:\(s\))?:\s*(.+)$")
 LOADED_REFERENCE = re.compile(r"(?:sha256:)?([0-9a-f]{64})")
 
+DEFAULT_IMAGE_COPY_TMP_DIR = Path("/var/tmp")  # noqa: S108 - Podman's documented default
+DISKSTATS = Path("/proc/diskstats")
+DISKSTATS_FIELDS = 13  # through the io_ticks (busy milliseconds) column
+SECTOR_BYTES = 512
+MIB = 1024 * 1024
+
 type Runner = Callable[..., subprocess.CompletedProcess[str]]
+type DiskStats = Mapping[str, tuple[int, int, int]]
 
 
 class ImageTransferError(RuntimeError):
@@ -221,6 +229,71 @@ def _pending_load(
     return role, image_id, archive
 
 
+def read_diskstats(path: Path = DISKSTATS) -> dict[str, tuple[int, int, int]]:
+    """Return sectors read, sectors written and busy milliseconds per device."""
+    stats: dict[str, tuple[int, int, int]] = {}
+    for line in path.read_text(encoding="ascii").splitlines():
+        fields = line.split()
+        if len(fields) >= DISKSTATS_FIELDS:
+            stats[f"{fields[0]}:{fields[1]}"] = (
+                int(fields[5]),
+                int(fields[9]),
+                int(fields[12]),
+            )
+    return stats
+
+
+def _device(path: Path) -> str:
+    try:
+        device = path.stat().st_dev
+    except OSError:
+        return "unknown"
+    return f"{os.major(device)}:{os.minor(device)}"
+
+
+def _storage_report(runner: Runner, archive_directory: Path) -> tuple[str, ...]:
+    """Print the Podman store layout and return the devices worth measuring.
+
+    These facts only explain load throughput (T147); they never gate a load.
+    """
+    info: Any = json.loads(_run(runner, ["podman", "info", "--format", "json"]))
+    store = info.get("store", {})
+    graph_root = Path(store.get("graphRoot", ""))
+    copy_dir = Path(store.get("imageCopyTmpDir") or DEFAULT_IMAGE_COPY_TMP_DIR)
+    places = {
+        "archives": archive_directory,
+        "graph_root": graph_root,
+        "image_copy_tmp_dir": copy_dir,
+    }
+    devices = {name: _device(path) for name, path in places.items()}
+    print(
+        f"storage podman={info.get('version', {}).get('Version', 'unknown')} "
+        f"driver={store.get('graphDriverName', 'unknown')} "
+        f"options={json.dumps(store.get('graphOptions', {}), sort_keys=True)} "
+        + " ".join(f"{name}={places[name]}@{devices[name]}" for name in places),
+        flush=True,
+    )
+    return tuple(sorted(set(devices.values()) - {"unknown"}))
+
+
+def _print_disk_delta(
+    devices: Sequence[str], before: DiskStats, after: DiskStats, seconds: float
+) -> None:
+    for device in devices:
+        if device not in before or device not in after:
+            continue
+        read, written, busy = (
+            later - earlier
+            for earlier, later in zip(before[device], after[device], strict=True)
+        )
+        print(
+            f"disk device={device} read_mib={read * SECTOR_BYTES / MIB:.0f} "
+            f"written_mib={written * SECTOR_BYTES / MIB:.0f} "
+            f"busy_percent={100 * busy / max(seconds * 1000, 1):.0f}",
+            flush=True,
+        )
+
+
 def load(  # noqa: PLR0913 - explicit expected-identity and test seams
     domain: str,
     archive_directory: Path,
@@ -229,6 +302,7 @@ def load(  # noqa: PLR0913 - explicit expected-identity and test seams
     names: Mapping[str, str] = ROLE_IMAGES,
     runner: Runner = subprocess.run,
     clock: Callable[[], float] = time.monotonic,
+    diskstats: Callable[[], DiskStats] = read_diskstats,
 ) -> dict[str, str]:
     """Load only a domain's archives and tag them after exact ID checks.
 
@@ -248,6 +322,13 @@ def load(  # noqa: PLR0913 - explicit expected-identity and test seams
         for role in roles
     ]
 
+    try:
+        devices = _storage_report(runner, archive_directory)
+        before = diskstats()
+    except (ImageTransferError, OSError, ValueError, AttributeError) as error:
+        print(f"storage diagnostics unavailable: {error}", flush=True)
+        devices, before = (), {}
+
     def load_archive(archive: Path) -> tuple[str, float]:
         started = clock()
         output = _run(runner, ["podman", "load", "--input", str(archive)])
@@ -258,6 +339,11 @@ def load(  # noqa: PLR0913 - explicit expected-identity and test seams
         futures = [pool.submit(load_archive, archive) for _, _, archive in pending]
     # Leaving the pool waited for every load; report the first failure in role order.
     results = [future.result() for future in futures]
+    if devices:
+        try:
+            _print_disk_delta(devices, before, diskstats(), clock() - started)
+        except (OSError, ValueError) as error:
+            print(f"storage diagnostics unavailable: {error}", flush=True)
     loaded: dict[str, str] = {}
     for (role, image_id, archive), (output, seconds) in zip(
         pending, results, strict=True
