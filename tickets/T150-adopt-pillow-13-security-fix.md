@@ -72,3 +72,11 @@ None. Unblocks the supply-chain gate on every open pull request, including the T
     on Pillow 13.
   - The Pandoc-backed image, media and SVG tests pass (8). The pinned Mermaid, LibreOffice 26.2
     and Podman image suites are not runnable here and need hosted CI.
+- 2026-10-21: Executable regressions for the rejection workflow, requested in review. The CI wrapper
+  runs with a fake per-image scan for the four backend/reverse status pairs and must call both
+  scans and return the first nonzero status. The real `supply-chain.sh` runs against fake tool
+  downloads, Syft, Grype and image runtime: a rejected summary leaves the SBOMs, vulnerability
+  report, summary and image archive in the output directory with no release-bundle manifest, no
+  staging or tool directory, and a bundle that does not verify; an accepted summary prints a
+  manifest digest that the real `verify_supply_chain` accepts. Removing the retention move or
+  restoring the stop-at-first-failure wrapper makes the corresponding tests fail.
