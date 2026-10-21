@@ -36,7 +36,7 @@ readonly e2e_shard="${MARKWEAVE_E2E_SHARD:-all}"
 # the CI validator. A phase establishes the runtime it needs, and a shard
 # re-seeds, through `e2e_seed_*` functions, the state that a phase of another
 # shard would otherwise have produced. Unset or `all` runs every shard in order
-# on one deployment, as releases do.
+# on one deployment; CI and releases run each shard as a separate job.
 readonly -a e2e_shard_1_phases=(reverse-api service browser-session)
 readonly -a e2e_shard_2_phases=(reverse-lifecycle browser-workspaces browser-runtime)
 case "$e2e_shard" in
