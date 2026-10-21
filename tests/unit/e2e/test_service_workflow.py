@@ -887,6 +887,11 @@ def test_verify_expiration_polls_until_expired_in_place_and_denies_the_result(
             (0, 0),
             "before its retention deadline",
         ),
+        (
+            [{"updated_at": "2026-10-21T10:01:31+00:00"}],
+            (300, 300),
+            "after its grace bound",
+        ),
     ],
 )
 def test_verify_expiration_rejects_late_early_or_substituted_expiry(
@@ -957,4 +962,28 @@ def test_runner_verifies_service_expiry_after_the_recovery_journeys() -> None:
     )
     assert "time.sleep(61)" not in Path("tests/e2e/service_workflow.py").read_text(
         encoding="utf-8"
+    )
+
+
+@pytest.mark.unit
+def test_verify_expiration_accepts_a_late_read_of_a_timely_transition(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    path, state = _expiration_state(tmp_path)
+    client = mocker.patch("tests.e2e.service_workflow.ServiceClient").return_value
+    client.request.side_effect = [
+        _job_result(state, updated_at="2026-10-21T10:01:30+00:00"),
+        workflow.HttpResult(409, {}, b'{"error":{"code":"JOB_EXPIRED"}}', ()),
+    ]
+
+    workflow.verify_expiration(
+        argparse.Namespace(
+            base_url="http://service",
+            profile="distributed",
+            state_file=path,
+            admin_username="e2e-admin",
+            admin_password=identifier(),
+        ),
+        now=_clock(300, 300),
+        sleep=mocker.Mock(),
     )

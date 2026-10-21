@@ -80,6 +80,14 @@ Measured on scheduled main run 39109797384 (2026-10-18):
   and the CI validator passes. Not run locally: the final-image E2E (this container has no Podman).
   The hosted durations remain to be measured.
 
+- 2026-10-21: Review of PR #322 (P2): a verifier that first read an already expired job did not
+  check when the transition happened, so a job expired 60 s late passed. Both verifiers now also
+  bound the expiry transition (`updated_at`) to `expires_at + 30 s`, whatever the time of the first
+  read. A reclaimed conversion cleanup after the recovery SIGKILLs rewrites `updated_at` no later
+  than the 6 s worker lease plus the restart; the reverse verifier runs in a phase without restarts.
+  New unit cases cover an already expired late transition (rejected) and a late read of a timely
+  transition (accepted); the rejection cases fail without the fix.
+
 ## Synchronization
 
 Keep status, scope, acceptance criteria, dependencies, and progress aligned with G1L-704.

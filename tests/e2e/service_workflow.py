@@ -1557,8 +1557,13 @@ def verify_expiration(
         raise WorkflowFailure("expiration: durable job did not expire in place")
     if _aware_timestamp(job.get("expires_at"), "expiration") != expires_at:
         raise WorkflowFailure("expiration: retention deadline changed")
-    if _aware_timestamp(job.get("updated_at"), "expiration") < expires_at:
+    # The expiry transition sets updated_at; bound it even when the first read
+    # already finds the job expired, so a late verifier still proves timeliness.
+    transition = _aware_timestamp(job.get("updated_at"), "expiration")
+    if transition < expires_at:
         raise WorkflowFailure("expiration: job expired before its retention deadline")
+    if (transition - expires_at).total_seconds() > EXPIRATION_GRACE_SECONDS:
+        raise WorkflowFailure("expiration: job expired after its grace bound")
     expect(
         observer.request("GET", f"{state['location']}/result"),
         409,

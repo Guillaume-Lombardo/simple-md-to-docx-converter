@@ -493,8 +493,13 @@ def _verify_expiry(
         raise WorkflowFailure("reverse result did not expire in place")
     if _expiry_timestamp(shown.get("expires_at")) != expires_at:
         raise WorkflowFailure("reverse retention deadline changed")
-    if _expiry_timestamp(shown.get("updated_at")) < expires_at:
+    # The expiry transition sets updated_at; bound it even when the first read
+    # already finds the result expired, so a late verifier still proves timeliness.
+    transition = _expiry_timestamp(shown.get("updated_at"))
+    if transition < expires_at:
         raise WorkflowFailure("reverse result expired before its retention deadline")
+    if (transition - expires_at).total_seconds() > _EXPIRY_GRACE_SECONDS:
+        raise WorkflowFailure("reverse result expired after its grace bound")
     destination = f"{_DENIED_RESULT}-expiry"
     download = (
         "jobs",

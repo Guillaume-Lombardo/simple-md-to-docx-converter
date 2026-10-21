@@ -211,6 +211,11 @@ def test_verify_expiry_polls_then_requires_denial_and_cleans_up(
             (0, 0),
             "before its retention deadline",
         ),
+        (
+            [_shown(updated_at="2026-10-21T10:01:31+00:00")],
+            (300, 300),
+            "after its grace bound",
+        ),
     ],
 )
 def test_verify_expiry_rejects_late_early_or_substituted_expiry(
@@ -264,3 +269,21 @@ def test_main_dispatches_expiry_phases_with_their_state_file(
     assert workflow.main() == 0
 
     dispatched.assert_called_once_with("final-app", "standalone", state)
+
+
+def test_verify_expiry_accepts_a_late_read_of_a_timely_transition(
+    mocker, tmp_path
+) -> None:
+    _, cleanup = _expiry_doubles(
+        mocker, [_shown(updated_at="2026-10-21T10:01:30+00:00")]
+    )
+
+    workflow._verify_expiry(
+        "final-app",
+        "distributed",
+        _expiry_state(tmp_path),
+        now=_clock(300, 300),
+        sleep=mocker.Mock(),
+    )
+
+    cleanup.assert_called_once_with("final-app")
