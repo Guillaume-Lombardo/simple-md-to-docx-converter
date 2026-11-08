@@ -302,8 +302,21 @@ def test_podman_trusted_upstream_overlay_shares_one_loopback_listener() -> None:
     assert "ROUTER_HOST: 0.0.0.0" in overlay
     assert "ROUTER_HOST: 127.0.0.1" not in overlay
     assert 'ROUTER_PORT: "3100"' in overlay
-    assert "fetch('http://127.0.0.1:3100/login'" in overlay
+    assert "require('node:http').get('http://127.0.0.1:3100/login'" in overlay
+    assert "fetch(" not in overlay
     assert "process.env.PUBLIC_HOSTS.split(',')[0]" in overlay
+
+
+def test_router_healthcheck_sends_the_public_host_header() -> None:
+    # fetch() drops a custom Host header: the router then answers 421 whenever
+    # PUBLIC_HOSTS omits 127.0.0.1:<port> (any non-default public host).
+    probe = _compose()["services"]["router"]["healthcheck"]["test"][-1]
+
+    assert probe.startswith("require('node:http').get('http://127.0.0.1:8080/login',")
+    assert "headers: {Host: process.env.PUBLIC_HOSTS.split(',')[0]}" in probe
+    assert "response.statusCode === 200" in probe
+    assert ".on('error', () => process.exit(1))" in probe
+    assert "fetch(" not in probe
 
 
 def test_base_compose_includes_the_two_image_rootless_browser_tier() -> None:

@@ -31,7 +31,10 @@ services:
         - CMD
         - node
         - -e
+        # node:http, not fetch: fetch ignores a custom Host header, so the router
+        # would answer 421 whenever PUBLIC_HOSTS omits 127.0.0.1:<port>.
         - >-
-          fetch('http://127.0.0.1:3100/login',
-          {headers: {Host: process.env.PUBLIC_HOSTS.split(',')[0]}})
-          .then(response => process.exit(response.status === 200 ? 0 : 1))
+          require('node:http').get('http://127.0.0.1:3100/login',
+          {headers: {Host: process.env.PUBLIC_HOSTS.split(',')[0]}},
+          response => process.exit(response.statusCode === 200 ? 0 : 1))
+          .on('error', () => process.exit(1))
