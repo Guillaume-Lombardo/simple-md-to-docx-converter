@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling==1.32.4"]
+requires = ["hatchling==1.33.0"]
 build-backend = "hatchling.build"
 
 [project]
@@ -85,12 +85,12 @@ Source = "https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter"
 Support = "https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/discussions"
 
 [dependency-groups]
-build = ["hatchling==1.32.4"]
+build = ["hatchling==1.33.0"]
 dev = [
     "grpcio-tools==1.76.0",
     "httpx>=0.28,<1",
     "markweave[all,kubernetes,reverse-attempt]",
-    "mutmut==3.8.0",
+    "mutmut==3.8.1",
     "pypdfium2>=5.13,<6",
     "pytest>=9.0,<10",
     "pytest-cov>=7.0,<8",
@@ -106,7 +106,7 @@ attempt = 1
 
 [tool.uv]
 build-constraint-dependencies = [
-    "hatchling==1.32.4",
+    "hatchling==1.33.0",
     "packaging==26.3",
     "pathspec==1.1.1",
     "pluggy==1.7.0",
